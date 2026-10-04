@@ -25,7 +25,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,jpg,webp,woff2}'],
-        globIgnores: ['shots/**', 'brand/**'],
+        globIgnores: ['photos/**', 'art/**', 'shots/**', 'brand/**'],
         navigateFallback: null,
       },
     }),
