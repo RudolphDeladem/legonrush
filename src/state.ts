@@ -44,12 +44,19 @@ export function loadProfile(): Profile | null {
   }
 }
 
+let afterSave: ((p: Profile) => void) | null = null;
+/** called after every save, so a signed-in rider's progress reaches their account */
+export function onProfileSave(fn: (p: Profile) => void) {
+  afterSave = fn;
+}
+
 export function saveProfile(p: Profile) {
   try {
     localStorage.setItem(KEY, JSON.stringify(p));
   } catch {
     /* storage unavailable: progress lives for this session only */
   }
+  afterSave?.(p);
 }
 
 export function clearProfile() {

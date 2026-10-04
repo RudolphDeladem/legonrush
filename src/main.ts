@@ -11,9 +11,10 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { WEEK_GOAL_KM, WEEK_REWARD, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { WEEK_GOAL_KM, WEEK_REWARD, onProfileSave, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
+import * as cloud from './cloud';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -153,11 +154,12 @@ function welcome() {
         <p class="kicker" style="margin:6px 0 18px">Ride. Race. Connect.</p>
         <button class="btn btn-primary" id="start">Get started</button>
         <button class="btn btn-ghost" id="guest">Continue as guest</button>
-        <button class="btn btn-link" disabled>Sign in · coming soon</button>
+        <button class="btn btn-link" id="signIn">I have an account · Sign in</button>
       </div>
     </div>`);
   onBack(null);
   on('#start', 'click', () => createRider(newProfile()));
+  on('#signIn', 'click', () => authScreen('in', () => welcome()));
   on('#guest', 'click', () => {
     profile = newProfile();
     profile.name = 'Guest';
@@ -407,6 +409,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     const run = game.lastRun;
     const event = opts.event && eventStatus(opts.event).live ? opts.event : undefined;
     const rewards = applyRide(profile!, result, finishReward(route), event ? 2 : 1);
+    cloud.record({ hall: profile!.hall, km: r.distance / 1000, race: route.kind === 'race' && r.finished ? { route: route.id, time: r.time } : undefined });
     if (route.kind === 'race' && r.finished && profile!.bestTimes[result.routeId] === r.time) saveGhost(route.id, { time: r.time, ...run });
     // finishing a live event wins its bike
     let prize: string | undefined;
@@ -688,6 +691,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
         ${prizeBike ? `<div class="levelup">🚲 You won the ${esc(prizeBike.name)}! Equip it in the Garage.</div>` : ''}
         ${route.kind === 'race' && r.finished && !hadGhost && !x.rivals.length ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
         ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="challenge">${ch ? `Send ${esc(ch.name)} your answer` : 'Challenge a friend to beat this'}</button><p class="muted small" id="shareNote" hidden></p>` : ''}
+        ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="board">${cloud.account ? 'See the leaderboard' : 'Leaderboard · sign in to post your time'}</button>` : ''}
         ${p.guest ? `<div class="card stack"><p><b>Save your progress</b></p><p class="muted small">Create your rider to pick your hall and keep your stats.</p><button class="btn btn-ghost" id="create">Create rider</button></div>` : ''}
         <button class="btn btn-primary" id="again">Ride again</button>
         ${explore ? '<button class="btn btn-ghost" id="explore">Go somewhere else</button>' : ''}
@@ -710,6 +714,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
   on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
   on('#home', 'click', () => home());
   on('#create', 'click', () => createRider({ ...p, name: '' }, false));
+  on('#board', 'click', () => boardScreen(route.id, () => home('race')));
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((x) => x.id === el.dataset.race)!)));
   onBack(() => home());
 }
@@ -837,7 +842,7 @@ function home(next: Tab = 'home') {
           <div class="field"><label for="cLink">Paste the link a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="legonrush.netlify.app/play/?c=..."></div>
           <button class="btn btn-ghost" id="cOpen">Open challenge</button>
         </div>
-        <div class="card locked"><div class="row"><h3 style="font-weight:800">HALL RACE</h3><span class="grow"></span><span class="badge">Needs sign-in</span></div><p class="muted small" style="margin-top:4px">Live races for ${esc(hall.name)} against other halls arrive with accounts.</p></div>
+        <button class="card selectable" id="boards" style="text-align:left"><div class="row"><h3 style="font-weight:800">🏆 LEADERBOARDS</h3><span class="grow"></span><span class="badge gold">Live</span></div><p class="muted small" style="margin-top:4px">The fastest riders on every route, and this week's hall standings.${cloud.account ? '' : ' Sign in to post your times.'}</p></button>
       </div>`,
     events: `
       <div class="hub">
@@ -851,7 +856,8 @@ function home(next: Tab = 'home') {
           <div class="xpbar"><div style="width:${Math.min(100, (week.km / WEEK_GOAL_KM) * 100)}%"></div></div>
           <div class="row small"><span>${Math.min(week.km, WEEK_GOAL_KM).toFixed(1)} / ${WEEK_GOAL_KM} km</span><span class="grow"></span><span class="muted">${week.claimed ? 'Claimed ✓ New goal on Monday' : 'Resets on Monday'}</span></div>
           ${week.km >= WEEK_GOAL_KM && !week.claimed ? `<button class="btn btn-primary" id="weekClaim">Claim ${WEEK_REWARD} coins</button>` : ''}
-          <p class="muted small">Standings between halls arrive with accounts.</p>
+          <button class="btn btn-ghost" id="hallBoard">See how ${esc(hall.short)} ranks this week</button>
+          ${cloud.account ? '' : '<p class="muted small">Sign in so your kilometres count for your hall.</p>'}
         </div>
       </div>`,
     you: `
@@ -876,8 +882,11 @@ function home(next: Tab = 'home') {
         <button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit rider'}</button>
         <button class="btn btn-ghost" id="settings">Settings</button>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
+        ${cloud.account
+          ? `<div class="card stack" style="gap:8px"><div class="row"><b>Account</b><span class="grow"></span><span class="badge gold">Synced</span></div><p class="muted small">Signed in as ${esc(cloud.account.email)}. Your progress is saved to your account and follows you to any device.</p><button class="btn btn-ghost" id="signOut">Sign out</button></div>`
+          : `<div class="card stack" style="gap:8px"><b>Save your progress online</b><p class="muted small">Sign in to keep your progress on any device, post your race times and ride for your hall.</p><button class="btn btn-primary" id="signIn">Sign in or create an account</button></div>
         <button class="btn btn-link" id="reset">Reset progress</button>
-        <p class="muted small">Progress is saved on this device. Accounts and syncing between devices are coming.</p>
+        <p class="muted small">Progress is saved on this device until you sign in.</p>`}
       </div>`,
   };
 
@@ -889,6 +898,18 @@ function home(next: Tab = 'home') {
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
   on('#settings', 'click', () => settingsScreen());
   on('#quick', 'click', () => quickMatch());
+  on('#boards', 'click', () => boardScreen(CAMPUS_LOOP.id, () => home('race')));
+  on('#hallBoard', 'click', () => boardScreen('halls', () => home('events')));
+  on('#signIn', 'click', () => authScreen('in', () => home('you')));
+  on('#signOut', 'click', async (_, el) => {
+    (el as HTMLButtonElement).disabled = true;
+    await cloud.signOut();
+    // the progress lives in the account now, so this device starts fresh
+    clearProfile();
+    clearGhosts();
+    profile = null;
+    welcome();
+  });
   on('#garage', 'click', () => garageScreen());
   on('[data-event]', 'click', (_, el) => playEvent(EVENTS.find((e) => e.id === el.dataset.event)!));
   on('[data-send]', 'click', (_, el) => {
@@ -936,6 +957,140 @@ function home(next: Tab = 'home') {
     profile = null;
     welcome();
   });
+}
+
+// ---------- accounts ----------
+
+/** After signing in: bring down the account's progress, or make a rider for a new account. */
+async function afterSignIn() {
+  const remote = await cloud.pull().catch(() => null);
+  if (remote) {
+    profile = profile ? cloud.merge(profile, remote) : { ...newProfile(), ...remote };
+    saveProfile(profile);
+    applyLook();
+    return home('you');
+  }
+  if (profile && !profile.guest) {
+    saveProfile(profile); // first save to the new account
+    return home('you');
+  }
+  createRider(profile ? { ...profile, name: profile.name === 'Guest' ? '' : profile.name } : newProfile());
+}
+
+/** On launch, a signed-in rider picks up progress made on their other devices. */
+async function syncDown() {
+  const remote = await cloud.pull().catch(() => null);
+  if (!remote) {
+    if (profile && !profile.guest) saveProfile(profile);
+    return;
+  }
+  profile = profile ? cloud.merge(profile, remote) : { ...newProfile(), ...remote };
+  saveProfile(profile);
+  // refresh the menu if one is showing; never interrupt a ride
+  if (app.querySelector('.shell')) home(tab);
+}
+
+type AuthMode = 'in' | 'up' | 'reset' | 'newpass';
+
+function authScreen(mode: AuthMode, back: () => void) {
+  const titles: Record<AuthMode, string> = { in: 'Sign in', up: 'Create account', reset: 'Reset password', newpass: 'New password' };
+  const go: Record<AuthMode, string> = { in: 'Sign in', up: 'Create account', reset: 'Send reset link', newpass: 'Save password' };
+  render(`
+    <div class="screen solid fade-in">
+      <div class="wrap stack auth">
+        <button class="btn btn-link back" id="back">← Back</button>
+        <p class="kicker">Account</p>
+        <h1 class="title">${titles[mode]}</h1>
+        <p class="muted">${mode === 'newpass' ? 'Choose a new password for your account.' : 'Keep your progress on any device, post your race times and ride for your hall.'}</p>
+        ${mode !== 'newpass' ? `<div class="field"><label for="email">Email</label><input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="you@st.ug.edu.gh"></div>` : ''}
+        ${mode !== 'reset' ? `<div class="field"><label for="pass">Password</label><input id="pass" type="password" minlength="6" autocomplete="${mode === 'in' ? 'current-password' : 'new-password'}" placeholder="At least 6 characters"></div>` : ''}
+        <p class="small auth-note" id="note" role="status" hidden></p>
+        <button class="btn btn-primary" id="go">${go[mode]}</button>
+        ${mode === 'in' ? '<button class="btn btn-ghost" id="toUp">New here? Create an account</button><button class="btn btn-link" id="toReset">Forgot your password?</button>' : ''}
+        ${mode === 'up' || mode === 'reset' ? '<button class="btn btn-link" id="toIn">I already have an account</button>' : ''}
+      </div>
+    </div>`);
+  const note = app.querySelector<HTMLElement>('#note')!;
+  const say = (text: string, good = false) => {
+    note.hidden = false;
+    note.textContent = text;
+    note.classList.toggle('good', good);
+  };
+  const val = (id: string) => (app.querySelector<HTMLInputElement>('#' + id)?.value ?? '').trim();
+  on('#go', 'click', async (_, el) => {
+    const btn = el as HTMLButtonElement;
+    note.hidden = true;
+    const email = val('email');
+    const pass = app.querySelector<HTMLInputElement>('#pass')?.value ?? '';
+    if (mode !== 'newpass' && !/^\S+@\S+\.\S+$/.test(email)) return say('Enter your email address.');
+    if (mode !== 'reset' && pass.length < 6) return say('Use a password of at least 6 characters.');
+    btn.disabled = true;
+    btn.textContent = 'One moment…';
+    const r = mode === 'in' ? await cloud.signIn(email, pass)
+      : mode === 'up' ? await cloud.signUp(email, pass)
+      : mode === 'reset' ? await cloud.resetPassword(email)
+      : await cloud.setPassword(pass);
+    btn.disabled = false;
+    btn.textContent = go[mode];
+    if (r.ok === 'confirm') return say(`Almost there. We sent a link to ${email}. Open it on this phone to finish creating your account.`, true);
+    if (r.ok === false) return say(r.error);
+    if (mode === 'reset') return say(`Check ${email} for a link to set a new password.`, true);
+    sfx.finish();
+    if (mode === 'newpass') return profile ? home('you') : afterSignIn();
+    afterSignIn();
+  });
+  app.querySelectorAll('input').forEach((i) => i.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') app.querySelector<HTMLButtonElement>('#go')!.click();
+  }));
+  on('#toUp', 'click', () => authScreen('up', back));
+  on('#toIn', 'click', () => authScreen('in', back));
+  on('#toReset', 'click', () => authScreen('reset', back));
+  on('#back', 'click', back);
+  onBack(back);
+}
+
+// ---------- leaderboards ----------
+
+function boardScreen(view: string, back: () => void) {
+  const routes: [string, string][] = [[CAMPUS_LOOP.id, CAMPUS_LOOP.name], ...RACES.map((r): [string, string] => [r.id, r.name])];
+  const myHall = profile?.hall ?? 'none';
+  render(`
+    <div class="screen solid fade-in">
+      <div class="wrap stack">
+        <button class="btn btn-link back" id="back">← Back</button>
+        <p class="kicker">Leaderboards</p>
+        <h1 class="title">${view === 'halls' ? 'Hall Week' : esc(routes.find(([id]) => id === view)?.[1] ?? 'Leaderboard')}</h1>
+        <div class="board-tabs">${[['halls', '🏫 Halls'] as [string, string], ...routes].map(([id, name]) => `<button class="${id === view ? 'on' : ''}" data-view="${id}">${esc(name)}</button>`).join('')}</div>
+        <div id="board" class="card board"><p class="muted small">Loading…</p></div>
+        ${cloud.account ? '' : '<p class="muted small">Your times and kilometres appear here once you sign in.</p><button class="btn btn-ghost" id="signIn">Sign in or create an account</button>'}
+      </div>
+    </div>`);
+  const box = app.querySelector<HTMLElement>('#board')!;
+  const fail = () => {
+    box.innerHTML = '<p class="muted small">Couldn\'t load the leaderboard. Check your connection.</p><button class="btn btn-ghost" id="retry">Try again</button>';
+    on('#retry', 'click', () => boardScreen(view, back));
+  };
+  if (view === 'halls') {
+    cloud.hallStandings().then((rows) => {
+      const all = HALLS.filter((h) => h.id !== 'none').map((h) => {
+        const r = rows.find((x) => x.hall === h.id);
+        return { h, km: r?.km ?? 0, riders: r?.riders ?? 0 };
+      }).sort((a, b) => b.km - a.km || a.h.name.localeCompare(b.h.name));
+      box.innerHTML = `<p class="muted small">Kilometres ridden for each hall since Monday.</p>${all.map((x, i) => `<div class="board-row${x.h.id === myHall ? ' me' : ''}"><span class="rank">${i + 1}</span><span class="hall-swatch" style="background:${x.h.color}"></span><span class="grow">${esc(x.h.name)}<small>${x.riders} rider${x.riders === 1 ? '' : 's'}</small></span><b>${x.km.toFixed(1)} km</b></div>`).join('')}`;
+    }, fail);
+  } else {
+    cloud.leaderboard(view).then((rows) => {
+      const mine = profile?.bestTimes[view];
+      box.innerHTML = rows.length
+        ? rows.map((r, i) => `<div class="board-row${r.me ? ' me' : ''}"><span class="rank">${i + 1}</span><span class="hall-swatch" style="background:${hallById(r.hall).color}"></span><span class="grow">${esc(r.name)}<small>${r.username ? `@${esc(r.username)} · ` : ''}${esc(hallById(r.hall).short)}</small></span><b>${clock(r.best)}</b></div>`).join('')
+          + (mine && !rows.some((r) => r.me) ? `<p class="muted small" style="margin-top:8px">Your best: ${clock(mine)}${cloud.account ? '' : ' (sign in to post it)'}</p>` : '')
+        : `<p class="muted small">No times yet. Finish this race to be the first.</p>`;
+    }, fail);
+  }
+  on('[data-view]', 'click', (_, el) => boardScreen(el.dataset.view!, back));
+  on('#signIn', 'click', () => authScreen('in', () => boardScreen(view, back)));
+  on('#back', 'click', back);
+  onBack(back);
 }
 
 // ---------- settings ----------
@@ -1318,4 +1473,15 @@ function whereIsIt() {
   ask();
 }
 
+// a signed-in rider's progress follows them between devices
+const resetting = cloud.cameFromReset();
+onProfileSave((p) => {
+  if (!p.guest) cloud.push(p);
+});
 splash();
+cloud.restore(() => {
+  if (cloud.account) void syncDown();
+}).then(() => {
+  if (resetting && cloud.account) return authScreen('newpass', () => home('you'));
+  if (cloud.account) void syncDown();
+});

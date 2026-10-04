@@ -259,3 +259,22 @@ a.btn { color: inherit; text-decoration: none; }
 .btn-sm { padding: 8px 12px; font-size: 13px; width: auto; min-height: 0; }
 .btn-sm svg { width: 14px; height: 14px; vertical-align: -2px; }
 .btn-sm:disabled { opacity: 0.45; }
+
+/* accounts */
+.auth-note { color: #ffb4a8; }
+.auth-note.good { color: var(--gold); }
+.auth-note[hidden] { display: none; }
+
+/* leaderboards */
+.board-tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.board-tabs::-webkit-scrollbar { display: none; }
+.board-tabs button { flex: none; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: inherit; border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.board-tabs button.on { background: var(--gold); color: #1a1400; border-color: var(--gold); }
+.board { display: flex; flex-direction: column; gap: 2px; }
+.board-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+.board-row:last-child { border-bottom: 0; }
+.board-row .rank { width: 22px; text-align: center; font-weight: 800; color: var(--muted, #9aa3b5); }
+.board-row .hall-swatch { flex: none; width: 6px; height: 22px; }
+.board-row small { display: block; font-size: 11.5px; opacity: 0.6; }
+.board-row.me { color: var(--gold); }
+.board-row.me .rank { color: var(--gold); }
