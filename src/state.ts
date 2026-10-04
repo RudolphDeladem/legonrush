@@ -124,3 +124,38 @@ export function applyRide(p: Profile, r: RideResult, reward = 250): RideRewards 
 
   return { score, coins, xp, newBestScore: newBestScore && p.rides > 1, newBestTime: newBestTime && prevTime !== undefined, levelBefore, levelAfter: levelFor(p.xp) };
 }
+
+// Ghost runs: your best ride on each race, replayed beside you next time.
+const GHOST_KEY = 'legonrush.ghost.v1.';
+
+export interface StoredGhost {
+  time: number;
+  step: number;
+  d: number[];
+  x: number[];
+}
+
+export function loadGhost(routeId: string): StoredGhost | null {
+  try {
+    const g = JSON.parse(localStorage.getItem(GHOST_KEY + routeId) ?? 'null');
+    return g && Array.isArray(g.d) && Array.isArray(g.x) ? g : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveGhost(routeId: string, g: StoredGhost) {
+  try {
+    localStorage.setItem(GHOST_KEY + routeId, JSON.stringify(g));
+  } catch {
+    /* storage full or unavailable: no ghost next time */
+  }
+}
+
+export function clearGhosts() {
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith(GHOST_KEY)) localStorage.removeItem(k);
+  } catch {
+    /* ignore */
+  }
+}

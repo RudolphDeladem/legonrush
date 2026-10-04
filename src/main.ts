@@ -5,16 +5,31 @@ import '@fontsource/sora/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
-import { BIKES, HALLS, HALL_PLACE, UPCOMING_ROUTES, bikeById, hallById } from './data/campus';
-import { CAMPUS_LOOP, TOUR_STOPS, exploreRoute, freshersTour, type Route } from './game/routes';
+import { BIKES, HALLS, HALL_PLACE, bikeById, hallById } from './data/campus';
+import { CAMPUS_LOOP, RACES, TOUR_STOPS, exploreRoute, freshersTour, raceRoute, type RaceDef, type Route } from './game/routes';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { applyRide, clearProfile, levelFor, loadProfile, loadSettings, newProfile, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { applyRide, clearGhosts, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { setSound, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
-if ('serviceWorker' in navigator) registerSW({ immediate: true, onRegisterError: () => {} });
+// A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
+const updateBar = document.createElement('div');
+updateBar.className = 'update-bar';
+updateBar.hidden = true;
+updateBar.innerHTML = `<span>A new version of LEGONRUSH is ready.</span><button class="btn btn-primary" id="updateNow">Update</button>`;
+document.body.appendChild(updateBar);
+let updateReady = false;
+const showUpdate = (screen: 'ride' | 'menu') => { updateBar.hidden = !updateReady || screen === 'ride'; };
+if ('serviceWorker' in navigator) {
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh: () => { updateReady = true; showUpdate(game?.isRiding ? 'ride' : 'menu'); },
+    onRegisterError: () => {},
+  });
+  updateBar.querySelector('#updateNow')!.addEventListener('click', () => updateSW(true));
+}
 
 const app = document.getElementById('app')!;
 const canvas = document.getElementById('world') as HTMLCanvasElement;
@@ -48,6 +63,23 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 function render(html: string) {
   app.innerHTML = html;
 }
+
+// The phone's back button steps back inside the app instead of closing it.
+let backAction: (() => void) | null = null;
+let trapped = false;
+function onBack(fn: (() => void) | null) {
+  backAction = fn;
+  if (fn && !trapped) {
+    history.pushState({ legonrush: true }, '');
+    trapped = true;
+  }
+}
+addEventListener('popstate', () => {
+  trapped = false;
+  const fn = backAction;
+  backAction = null;
+  if (fn) fn();
+});
 
 function on(sel: string, ev: string, fn: (e: Event, el: HTMLElement) => void) {
   app.querySelectorAll<HTMLElement>(sel).forEach((el) => el.addEventListener(ev, (e) => fn(e, el)));
@@ -100,6 +132,7 @@ function welcome() {
         <button class="btn btn-link" disabled>Sign in · coming soon</button>
       </div>
     </div>`);
+  onBack(null);
   on('#start', 'click', () => createRider(newProfile()));
   on('#guest', 'click', () => {
     profile = newProfile();
@@ -155,8 +188,11 @@ function createRider(draft: Profile, editing = false) {
       home('you');
     } else chooseBike(draft);
   });
-  on('#back', 'click', welcome);
-  on('#cancel', 'click', () => home('you'));
+  // a guest who already has progress goes back home, never to the welcome screen that would start over
+  const back = () => (editing ? home('you') : profile ? home() : welcome());
+  on('#back', 'click', back);
+  on('#cancel', 'click', back);
+  onBack(back);
 }
 
 function chooseBike(draft: Profile) {
@@ -195,6 +231,7 @@ function chooseBike(draft: Profile) {
     applyLook();
     play(!profile.tutorialDone);
   });
+  onBack(() => createRider(draft));
 }
 
 // ---------- gameplay ----------
@@ -224,6 +261,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
         <div class="hud-progress">
           <div class="xpbar"><div id="prog" style="width:0%"></div></div>
           <p class="muted">${esc((route.id === 'explore' ? `To ${route.to.name}` : route.name).toUpperCase())}</p>
+          <p class="ghost-gap" id="ghostGap" hidden></p>
         </div>
         <div class="row">
           <div class="hud-pill">${icons.coin} <span id="coins">0</span></div>
@@ -250,6 +288,10 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   const boostBtn = app.querySelector<HTMLButtonElement>('#boostBtn');
   const drawMap = miniMap(app.querySelector<HTMLCanvasElement>('#minimap')!, route);
   const turn = $('turn'), turnArrow = $('turnArrow'), turnDist = $('turnDist'), turnText = $('turnText');
+  const ghostGap = $('ghostGap');
+  // races: your best run rides with you
+  const ghost = route.kind === 'race' ? loadGhost(route.id) : null;
+  game.setGhost(ghost);
   let lastTurn = '';
 
   // tutorial: teach through play, one move at a time
@@ -297,6 +339,12 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
       turn.classList.toggle('soon', h.next.dist < 60);
     }
     prog.style.width = `${(h.distance / h.routeLength) * 100}%`;
+    ghostGap.hidden = h.ghostGap === null;
+    if (h.ghostGap !== null) {
+      const behind = h.ghostGap > 0.05;
+      ghostGap.textContent = `Best run ${behind ? '+' : '−'}${Math.abs(h.ghostGap).toFixed(1)} s`;
+      ghostGap.classList.toggle('behind', behind);
+    }
     coins.textContent = String(h.coins);
     boost.style.width = `${h.boost * 100}%`;
     const ready = h.boost >= 0.25 && !h.boosting;
@@ -316,8 +364,10 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   game.onEnd = (r) => {
     cleanup();
     const result: RideResult = { routeId: routeKey(route), ...r };
+    const run = game.lastRun;
     const rewards = applyRide(profile!, result, finishReward(route));
-    results(result, rewards, route);
+    if (route.kind === 'race' && r.finished && profile!.bestTimes[result.routeId] === r.time) saveGhost(route.id, { time: r.time, ...run });
+    results(result, rewards, route, !!ghost);
   };
 
   // controls
@@ -353,7 +403,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   boostBtn?.addEventListener('pointerdown', (e) => { e.stopPropagation(); game.action('boost'); });
 
   const togglePause = () => {
-    if (!game.isRiding) return;
+    if (!game.isRiding) return onBack(togglePause);
     if (game.paused) return resume();
     game.paused = true;
     const ov = document.createElement('div');
@@ -369,6 +419,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
         <button class="btn btn-link" data-p="exit">Exit ride</button>
       </div>`;
     app.appendChild(ov);
+    onBack(resume);
     ov.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => b.addEventListener('click', () => {
       const p = b.dataset.p;
       if (p === 'continue') resume();
@@ -379,13 +430,15 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
         saveSettings(settings);
         b.textContent = `Sound: ${settings.sound ? 'On' : 'Off'}`;
       }
-      if (p === 'exit') { cleanup(); home(); }
+      if (p === 'exit') { cleanup(); leave(); }
     }));
   };
   const resume = () => {
     game.paused = false;
     app.querySelector('#pauseOverlay')?.remove();
+    onBack(togglePause);
   };
+  const leave = () => (route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
   document.addEventListener('visibilitychange', onHidden);
@@ -402,13 +455,17 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
 
   game.calm = isExplore(route) && exploreOpts.calm;
   game.start(bike, tutorial);
+  showUpdate('ride');
+  onBack(togglePause);
 }
 
 // ---------- results ----------
 
-function results(r: RideResult, rw: RideRewards, route: Route) {
+function results(r: RideResult, rw: RideRewards, route: Route, hadGhost = false) {
   const p = profile!;
+  showUpdate('menu');
   const levelUp = rw.levelAfter > rw.levelBefore;
+  const unlocked = RACES.filter((x) => x.level > rw.levelBefore && x.level <= rw.levelAfter);
   const explore = isExplore(route);
   const headline = r.finished ? (explore ? 'You made it' : 'Finish!') : 'Wiped out';
   render(`
@@ -428,6 +485,8 @@ function results(r: RideResult, rw: RideRewards, route: Route) {
           <div class="reward-row"><span>XP</span><b>+<span data-count="${rw.xp}">0</span></b></div>
         </div>
         ${levelUp ? `<div class="levelup">🎉 Level up! You're now level ${rw.levelAfter}</div>` : ''}
+        ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>🔓 New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
+        ${route.kind === 'race' && r.finished && !hadGhost ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
         ${p.guest ? `<div class="card stack"><p><b>Save your progress</b></p><p class="muted small">Create your rider to pick your hall and keep your stats.</p><button class="btn btn-ghost" id="create">Create rider</button></div>` : ''}
         <button class="btn btn-primary" id="again">Ride again</button>
         ${explore ? '<button class="btn btn-ghost" id="explore">Go somewhere else</button>' : ''}
@@ -449,6 +508,8 @@ function results(r: RideResult, rw: RideRewards, route: Route) {
   on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
   on('#home', 'click', () => home());
   on('#create', 'click', () => createRider({ ...p, name: '' }, false));
+  on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((x) => x.id === el.dataset.race)!)));
+  onBack(() => home());
 }
 
 // ---------- hub ----------
@@ -483,6 +544,16 @@ function home(next: Tab = 'home') {
   const hi = xpForLevel(level + 1);
   const hall = hallById(p.hall);
   const best = p.bestTimes[CAMPUS_LOOP.id];
+  const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
+  const TIME_ICON = { day: '☀️', sunset: '🌅', night: '🌙' };
+  const raceCard = (r: RaceDef) => {
+    if (level < r.level) {
+      return `<div class="card locked"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge">Level ${r.level}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">Reach level ${r.level} to unlock.</p></div>`;
+    }
+    const route = raceRoute(r);
+    const b = p.bestTimes[r.id];
+    return `<button class="card selectable" data-race="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">${(route.length / 1000).toFixed(1)} km · Difficulty ${stars(r.difficulty)}${b ? ` · Best ${clock(b)} 👻` : ''}</p></button>`;
+  };
   const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">${icons.ride} EXPLORE CAMPUS</h3><span class="grow"></span><span class="badge gold">New</span></div><p class="muted small" style="margin-top:4px">New on campus? Pick where you are and where you need to be, then ride the real way there with directions.</p></button>
     <button class="card selectable explore-card" id="quizBtn"><div class="row"><h3 style="font-weight:800">📍 WHERE IS IT?</h3><span class="grow"></span><span class="badge gold">Earn ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">Five campus places. Tap the map where you think each one is.</p></button>`;
 
@@ -521,16 +592,13 @@ function home(next: Tab = 'home') {
           <div><div class="big" style="font-size:26px">QUICK RIDE</div><div class="sub">Start immediately</div></div>${icons.arrow}
         </button>
         ${exploreCard}
-        <p class="kicker" style="margin-top:8px">Routes</p>
+        <p class="kicker" style="margin-top:8px">Races</p>
+        <p class="muted small">Beat your best time: a ghost of your best run rides with you.</p>
         <div class="card selectable" id="routeCard">
           <div class="row"><h3 style="font-weight:800">${esc(CAMPUS_LOOP.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div>
-          <p class="muted small" style="margin-top:4px">${(CAMPUS_LOOP.length / 1000).toFixed(1)} km · Difficulty ${'★'.repeat(CAMPUS_LOOP.difficulty)}${'☆'.repeat(5 - CAMPUS_LOOP.difficulty)}${best ? ` · Best ${clock(best)}` : ''}</p>
+          <p class="muted small" style="margin-top:4px">${(CAMPUS_LOOP.length / 1000).toFixed(1)} km · Difficulty ${stars(CAMPUS_LOOP.difficulty)}${best ? ` · Best ${clock(best)} 👻` : ''}</p>
         </div>
-        ${UPCOMING_ROUTES.map((r) => `
-          <div class="card locked">
-            <div class="row"><h3 style="font-weight:800">${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge">Phase 2</span></div>
-            <p class="muted small" style="margin-top:4px">${(r.length / 1000).toFixed(1)} km · Difficulty ${'★'.repeat(r.difficulty)}${'☆'.repeat(5 - r.difficulty)}</p>
-          </div>`).join('')}
+        ${RACES.map(raceCard).join('')}
       </div>`,
     race: `
       <div class="hub">
@@ -541,7 +609,7 @@ function home(next: Tab = 'home') {
         <div class="card locked"><h3 style="font-weight:800">CREATE CHALLENGE</h3><p class="muted small">Create your own room</p></div>
         <div class="card locked"><h3 style="font-weight:800">JOIN WITH CODE</h3><p class="muted small">Enter a friend's code</p></div>
         <div class="card locked"><h3 style="font-weight:800">HALL RACE</h3><p class="muted small">Represent ${esc(hall.name)}</p></div>
-        <button class="btn btn-primary" id="ride">Practise on ${esc(CAMPUS_LOOP.name)}</button>
+        <button class="btn btn-primary" data-tab="ride">Race your ghost on solo routes</button>
       </div>`,
     events: `
       <div class="hub">
@@ -572,6 +640,7 @@ function home(next: Tab = 'home') {
         </div>
         <div class="card row"><span class="muted small">Bike</span><span class="grow"></span><b>${bikeById(p.bike).name}</b></div>
         <button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit rider'}</button>
+        <button class="btn btn-ghost" id="sound">Sound: ${settings.sound ? 'On' : 'Off'}</button>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
         <button class="btn btn-link" id="reset">Reset progress</button>
         <p class="muted small">Progress is saved on this device. Accounts and cross-device sync arrive with Phase 2.</p>
@@ -583,6 +652,16 @@ function home(next: Tab = 'home') {
   on('#ride', 'click', () => play(false));
   on('#routeCard', 'click', () => play(false));
   on('#exploreBtn', 'click', () => explorePicker());
+  on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
+  on('#sound', 'click', (_, el) => {
+    settings.sound = !settings.sound;
+    setSound(settings.sound);
+    saveSettings(settings);
+    el.textContent = `Sound: ${settings.sound ? 'On' : 'Off'}`;
+  });
+  showUpdate('menu');
+  // back from another tab goes to Home; from Home it leaves the app
+  onBack(tab === 'home' ? null : () => home());
   on('#quizBtn', 'click', () => whereIsIt());
   on('#edit', 'click', () => createRider({ ...p }, !p.guest));
   on('#install', 'click', async () => {
@@ -597,6 +676,7 @@ function home(next: Tab = 'home') {
       return;
     }
     clearProfile();
+    clearGhosts();
     profile = null;
     welcome();
   });
@@ -814,6 +894,7 @@ function explorePicker(fromName?: string, toName = '') {
     app.querySelectorAll('#calm [data-v]').forEach((b) => b.classList.toggle('on', b === el));
   });
   on('#back', 'click', () => home());
+  onBack(() => home());
   on('#tour', 'click', () => play(false, freshersTour()));
   update();
 }
@@ -914,6 +995,7 @@ function whereIsIt() {
   });
   on('#qRide', 'click', () => explorePicker(undefined, picks[round].name));
   on('#back', 'click', () => home());
+  onBack(() => home());
   ask();
 }
 

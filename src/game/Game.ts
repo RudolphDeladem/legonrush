@@ -6,7 +6,7 @@ import { sfx } from '../audio';
 import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderRig } from './models';
 import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
-import { buildCampus, buildRouteLayer, buildSky, disposeLayer, LANES } from './world';
+import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES } from './world';
 
 export type Action = 'left' | 'right' | 'jump' | 'boost';
 
@@ -23,7 +23,17 @@ export interface HudState {
   yaw: number;
   /** explore rides: the next direction and how far away it is */
   next: { text: string; turn: string; dist: number } | null;
+  /** seconds behind your best run's ghost (negative: ahead), when racing one */
+  ghostGap: number | null;
 }
+
+/** A recorded ride: road distance and lateral offset every `step` seconds. */
+export interface GhostRun {
+  step: number;
+  d: number[];
+  x: number[];
+}
+const GHOST_STEP = 0.1;
 
 export interface RideEnd {
   distance: number;
@@ -57,10 +67,10 @@ type Phase = 'showcase' | 'cinematic' | 'countdown' | 'riding' | 'crashed' | 'fi
 
 export type TimeOfDay = 'day' | 'sunset' | 'night';
 
-const SKIES: Record<TimeOfDay, { top: string; bottom: string; fog: [number, number]; sun: string; sunI: number; sunPos: [number, number, number]; hemiSky: string; hemiGround: string; hemiI: number; env: number; exposure: number }> = {
-  day: { top: '#3f7fcf', bottom: '#f2d7b0', fog: [70, 340], sun: '#fff1d6', sunI: 2.6, sunPos: [-30, 45, 20], hemiSky: '#cfe3ff', hemiGround: '#5a6b3a', hemiI: 1.1, env: 0.35, exposure: 1.05 },
-  sunset: { top: '#2b3f7a', bottom: '#ff9a4a', fog: [60, 300], sun: '#ffb070', sunI: 2.4, sunPos: [-40, 14, -60], hemiSky: '#ffc59a', hemiGround: '#4a3a2a', hemiI: 0.8, env: 0.3, exposure: 1.0 },
-  night: { top: '#03060f', bottom: '#1b2650', fog: [40, 220], sun: '#9fb6ff', sunI: 0.55, sunPos: [20, 40, 10], hemiSky: '#3a4f8a', hemiGround: '#10131c', hemiI: 0.45, env: 0.12, exposure: 1.15 },
+const SKIES: Record<TimeOfDay, { lamps: number; top: string; bottom: string; fog: [number, number]; sun: string; sunI: number; sunPos: [number, number, number]; hemiSky: string; hemiGround: string; hemiI: number; env: number; exposure: number }> = {
+  day: { lamps: 0, top: '#3f7fcf', bottom: '#f2d7b0', fog: [70, 340], sun: '#fff1d6', sunI: 2.6, sunPos: [-30, 45, 20], hemiSky: '#cfe3ff', hemiGround: '#5a6b3a', hemiI: 1.1, env: 0.35, exposure: 1.05 },
+  sunset: { lamps: 0.5, top: '#2b3f7a', bottom: '#ff9a4a', fog: [60, 300], sun: '#ffb070', sunI: 2.4, sunPos: [-40, 14, -60], hemiSky: '#ffc59a', hemiGround: '#4a3a2a', hemiI: 0.8, env: 0.3, exposure: 1.0 },
+  night: { lamps: 1, top: '#03060f', bottom: '#1b2650', fog: [40, 220], sun: '#9fb6ff', sunI: 0.55, sunPos: [20, 40, 10], hemiSky: '#3a4f8a', hemiGround: '#10131c', hemiI: 0.45, env: 0.12, exposure: 1.15 },
 };
 
 const GRAVITY = 22;
@@ -82,6 +92,11 @@ export class Game {
   private track: Track = CAMPUS_LOOP.track;
   private routeLayer: THREE.Group | null = null;
   private timer = new THREE.Timer();
+  private headlight = new THREE.SpotLight('#fff1cf', 0, 45, 0.55, 0.6, 1.2);
+  private ghost: GhostRun | null = null;
+  private ghostRig: RiderRig;
+  private ghostCrank = 0;
+  private rec: GhostRun = { step: GHOST_STEP, d: [], x: [] };
 
   private phase: Phase = 'showcase';
   paused = false;
@@ -155,6 +170,19 @@ export class Game {
 
     this.rider = buildRider('#d64545', '#f2c230');
     this.scene.add(this.rider.root);
+    // a lamp on the handlebars for night rides
+    this.headlight.position.set(0, 1.1, -0.5);
+    this.headlight.target.position.set(0, 0, -14);
+    this.rider.root.add(this.headlight, this.headlight.target);
+
+    // your best run, ridden by a see-through rider
+    this.ghostRig = buildRider('#9fd8ff', '#9fd8ff');
+    const ghostMat = new THREE.MeshStandardMaterial({ color: '#bfe6ff', emissive: '#4aa8ff', emissiveIntensity: 0.4, transparent: true, opacity: 0.38, depthWrite: false });
+    this.ghostRig.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) { o.material = ghostMat; o.castShadow = false; }
+    });
+    this.ghostRig.root.visible = false;
+    this.scene.add(this.ghostRig.root);
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -215,6 +243,30 @@ export class Game {
     this.hemi.intensity = k.hemiI;
     this.scene.environmentIntensity = k.env;
     this.renderer.toneMappingExposure = k.exposure;
+    lampGlow.head.emissiveIntensity = k.lamps * 2.5;
+    lampGlow.pool.opacity = k.lamps * 0.45;
+    lampGlow.pool.visible = k.lamps > 0;
+    this.headlight.intensity = k.lamps * 90;
+  }
+
+  /** Your best run on this route, to race against; null for none. */
+  setGhost(g: GhostRun | null) {
+    this.ghost = g && g.d.length > 1 ? g : null;
+  }
+
+  /** The ride just finished, sampled for a ghost. */
+  get lastRun(): GhostRun {
+    return { step: this.rec.step, d: this.rec.d.slice(), x: this.rec.x.slice() };
+  }
+
+  /** Ghost distance and offset at ride time t. */
+  private ghostAt(t: number): [number, number] {
+    const g = this.ghost!;
+    const f = t / g.step;
+    const i = Math.min(Math.floor(f), g.d.length - 1);
+    const j = Math.min(i + 1, g.d.length - 1);
+    const k = Math.min(1, f - i);
+    return [g.d[i] + (g.d[j] - g.d[i]) * k, g.x[i] + (g.x[j] - g.x[i]) * k];
   }
 
   /** Fixed camera for trailers and marketing shots; offsets are relative to the rider. */
@@ -243,6 +295,7 @@ export class Game {
   showcase() {
     this.reset();
     this.phase = 'showcase';
+    this.setTimeOfDay('day');
   }
 
   start(bike: BikeSpec, tutorial: boolean) {
@@ -253,6 +306,9 @@ export class Game {
     this.phase = 'countdown';
     this.countdownT = tutorial ? 0.01 : 2.4;
     this.lastCount = '';
+    this.setTimeOfDay(this.route.time ?? 'day');
+    this.ghostRig.root.visible = !!this.ghost;
+    this.updateGhost(0);
   }
 
   /** Called by the tutorial once every move has been tried. */
@@ -299,6 +355,8 @@ export class Game {
     this.slowTimer = this.endTimer = this.lean = this.shake = 0;
     this.lane = 1;
     this.paused = false;
+    this.rec = { step: GHOST_STEP, d: [], x: [] };
+    if (this.ghostRig) this.ghostRig.root.visible = false;
     this.rider.body.rotation.set(0, 0, 0);
     this.rider.body.position.set(0, 0, 0);
   }
@@ -390,6 +448,12 @@ export class Game {
     }
 
     this.d += this.speed * dt;
+    if (this.phase === 'riding' || this.phase === 'finished') {
+      while (this.rec.d.length * GHOST_STEP <= this.time) {
+        this.rec.d.push(Math.round(Math.min(this.d, this.route.length + 30) * 100) / 100);
+        this.rec.x.push(Math.round(this.x * 100) / 100);
+      }
+    }
 
     // lateral + vertical motion
     const handling = this.bike?.handling ?? 3;
@@ -414,9 +478,41 @@ export class Game {
       }
     }
     this.updateDynamic(dt);
+    this.updateGhost(dt);
     this.crank += dt * this.speed * 0.9;
     this.animateRider(dt, this.speed);
     this.emitHud(null);
+  }
+
+  private updateGhost(dt: number) {
+    if (!this.ghost) return;
+    const r = this.ghostRig;
+    const [gd, gx] = this.ghostAt(this.time);
+    // the ghost runs on after its finish line, then fades out
+    const p = this.pose(gd, gx);
+    r.root.position.set(p.x, 0, p.z);
+    r.root.rotation.y = p.yaw;
+    const [pd] = this.ghostAt(Math.max(0, this.time - 0.2));
+    const v = (gd - pd) / 0.2;
+    this.ghostCrank += dt * v * 0.9;
+    for (const w of r.wheels) w.rotation.x -= (v / 0.38) * dt;
+    r.crank.rotation.x = -this.ghostCrank;
+    r.legs[0].rotation.x = Math.sin(this.ghostCrank) * 0.55;
+    r.legs[1].rotation.x = Math.sin(this.ghostCrank + Math.PI) * 0.55;
+    r.root.visible = gd < this.route.length + 25;
+  }
+
+  private ghostGap(): number | null {
+    if (!this.ghost || this.phase === 'countdown') return null;
+    const [gd] = this.ghostAt(this.time);
+    if (gd >= this.route.length) {
+      // the ghost has finished: the gap is how long ago it crossed the line
+      const g = this.ghost;
+      let i = g.d.length - 1;
+      while (i > 0 && g.d[i - 1] >= this.route.length) i--;
+      return this.time - i * g.step;
+    }
+    return (gd - this.d) / Math.max(this.speed, 8);
   }
 
   private emitHud(countdown: string | null) {
@@ -430,6 +526,7 @@ export class Game {
       countdown,
       pos: [this.rider.root.position.x, this.rider.root.position.z],
       yaw: this.rider.root.rotation.y,
+      ghostGap: this.ghostGap(),
       next: this.route.kind === 'explore' ? (() => { const n = this.nextStep(); return n && { text: n.step.text, turn: n.step.turn, dist: n.dist }; })() : null,
     });
   }

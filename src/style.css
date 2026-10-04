@@ -208,3 +208,16 @@ a.btn { color: inherit; text-decoration: none; }
 .quiz-result b { color: var(--gold); }
 .place-card { text-align: left; }
 .place-card .kind-icon { font-size: 26px; width: 36px; text-align: center; }
+
+/* best-run ghost gap under the progress bar */
+.ghost-gap { display: inline-block; margin-top: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; background: rgba(34, 197, 94, 0.85); color: #04210f; }
+.ghost-gap.behind { background: rgba(239, 68, 68, 0.88); color: #fff; }
+.unlock-card { border-color: var(--gold); text-align: left; }
+
+/* new version ready */
+.update-bar { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 12px; width: min(440px, calc(100% - 32px)); padding: 10px 10px 10px 16px; border-radius: 16px; background: #0f1830; border: 1px solid var(--gold); box-shadow: 0 10px 30px rgba(0,0,0,0.45); font-size: 14px; font-weight: 600; }
+.update-bar span { flex: 1; }
+.update-bar .btn { width: auto; padding: 10px 16px; min-height: 0; }
+.update-bar[hidden] { display: none; }
+.ghost-gap[hidden] { display: none; }
+.explore-card h3 svg, .unlock-card svg { width: 20px; height: 20px; vertical-align: -4px; flex: none; }

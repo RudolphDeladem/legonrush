@@ -34,13 +34,6 @@ export const HALL_PLACE: Record<string, string> = {
   sey: 'Elizabeth Frances Sey Hall', limann: 'Dr. Hilla Limann Hall',
 };
 
-/** Routes that are not rideable yet, shown as locked cards. */
-export const UPCOMING_ROUTES = [
-  { name: 'Engineering Run', length: 3600, difficulty: 3 },
-  { name: 'Sunset Route', length: 4200, difficulty: 3 },
-  { name: 'Night Circuit', length: 3100, difficulty: 4 },
-];
-
 export interface BikeSpec {
   id: string;
   name: string;

@@ -5,6 +5,23 @@ import type { Track } from './track';
 import { asphaltTexture, billboardTexture, concreteTexture, grassTexture, labelTexture, wallTexture } from './textures';
 
 export const LANES = [-2.4, 0, 2.4];
+
+/** Street-lamp heads and the light they throw on the road; the game turns them up after dark. */
+export const lampGlow = {
+  head: new THREE.MeshStandardMaterial({ color: '#d9d4c4', emissive: '#ffd98a', emissiveIntensity: 0, roughness: 0.5 }),
+  pool: new THREE.MeshBasicMaterial({ color: '#ffcf7a', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, visible: false, map: (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  })() }),
+};
 export const ROAD_HALF = 3.8;
 
 export const KIND_ACCENT: Record<PlaceKind, string> = {
@@ -382,9 +399,13 @@ export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
   const lampPole = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.09, 6, 6).translate(0, 3, 0), lampMat, Math.max(1, lamps.length));
   const lampArm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.12, 0.25).translate(0.45, 6, 0), lampMat, Math.max(1, lamps.length));
   lamps.forEach((mm, k) => { lampPole.setMatrixAt(k, mm); lampArm.setMatrixAt(k, mm); });
-  lampPole.count = lampArm.count = lamps.length;
+  const lampHead = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.1, 0.3).translate(0.75, 5.9, 0), lampGlow.head, Math.max(1, lamps.length));
+  const lampPool = new THREE.InstancedMesh(new THREE.PlaneGeometry(8, 8).rotateX(-Math.PI / 2).translate(1.4, 0.04, 0), lampGlow.pool, Math.max(1, lamps.length));
+  lamps.forEach((mm, k) => { lampHead.setMatrixAt(k, mm); lampPool.setMatrixAt(k, mm); });
+  lampPole.count = lampArm.count = lampHead.count = lampPool.count = lamps.length;
   lampPole.castShadow = true;
-  group.add(lampPole, lampArm);
+  lampPool.renderOrder = 1;
+  group.add(lampPole, lampArm, lampHead, lampPool);
 
   // labels over the places the route passes
   for (const l of o.labels) {

@@ -2,6 +2,7 @@
 import { PLACES, directions, findPath, nodeXZ, placeByName, ROADS, type Place, type PlaceKind, type RoadClass, type Step, type TravelMode } from './campusmap';
 import { Track } from './track';
 import type { RouteLabel } from './world';
+import type { TimeOfDay } from './Game';
 
 export type RouteKind = 'race' | 'explore';
 
@@ -18,6 +19,8 @@ export interface Route {
   /** rideable length in metres, start line to finish line */
   length: number;
   difficulty: number;
+  /** lighting for the ride; day when unset */
+  time?: TimeOfDay;
   track: Track;
   /** track metres before the start line and after the finish line */
   lead: number;
@@ -35,7 +38,7 @@ const TAIL = 40;
 const LABEL_PRIORITY: Record<PlaceKind, number> = { landmark: 0, hall: 1, academic: 2, food: 3, sport: 3, health: 4, bank: 5, worship: 5, transport: 6, other: 7 };
 
 /** Builds a ride along the shortest real way through the given places, in order. */
-export function routeThrough(stops: Place[], opts: { id: string; name: string; kind: RouteKind; difficulty?: number; mode?: TravelMode }): Route | null {
+export function routeThrough(stops: Place[], opts: { id: string; name: string; kind: RouteKind; difficulty?: number; mode?: TravelMode; time?: TimeOfDay }): Route | null {
   const nodes: number[] = [];
   const roads: number[] = [];
   for (let k = 0; k < stops.length - 1; k++) {
@@ -130,4 +133,29 @@ let tour: Route | null = null;
 export function freshersTour() {
   tour ??= routeThrough(TOUR_STOPS.map(must), { id: 'freshers-tour', name: "Freshers' Tour", kind: 'explore', difficulty: 1 });
   return tour!;
+}
+
+export interface RaceDef {
+  id: string;
+  name: string;
+  blurb: string;
+  stops: string[];
+  difficulty: number;
+  time: TimeOfDay;
+  /** player level that opens the race */
+  level: number;
+}
+
+/** Races on real campus roads, opened one by one as the player levels up. */
+export const RACES: RaceDef[] = [
+  { id: 'engineering-run', name: 'Engineering Run', blurb: 'Limann Hall, out past the Main Gate, to the School of Engineering Sciences.', stops: ['Dr. Hilla Limann Hall', 'Legon Main Entrance', 'School of Engineering Sciences'], difficulty: 3, time: 'day', level: 1 },
+  { id: 'sunset-route', name: 'Sunset Route', blurb: 'Commonwealth Hall past the Athletic Oval and the Night Market to the Sports Complex, at golden hour.', stops: ['Commonwealth Hall', 'Athletic Oval', 'Night Market', 'Sports Complex'], difficulty: 3, time: 'sunset', level: 2 },
+  { id: 'night-circuit', name: 'Night Circuit', blurb: 'From the Sports Complex through the Night Market and Bush Canteen to Legon Hospital, after dark.', stops: ['Sports Complex', 'Night Market', 'Bush Canteen (near Department of Music)', 'University of Ghana Hospital'], difficulty: 4, time: 'night', level: 3 },
+];
+
+const races = new Map<string, Route>();
+/** A race's route, built the first time it is asked for. */
+export function raceRoute(def: RaceDef) {
+  if (!races.has(def.id)) races.set(def.id, routeThrough(def.stops.map(must), { id: def.id, name: def.name, kind: 'race', difficulty: def.difficulty, time: def.time })!);
+  return races.get(def.id)!;
 }

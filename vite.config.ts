@@ -5,7 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   plugins: [
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['icons/favicon.png', 'icons/apple-touch-icon.png'],
       manifest: {
         name: 'LEGONRUSH',
