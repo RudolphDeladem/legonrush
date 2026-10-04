@@ -77,6 +77,8 @@ const fmt = (n: number) => Math.round(n).toLocaleString('en-GB');
 const km = (m: number) => (m / 1000).toFixed(2);
 const clock = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(2).padStart(5, '0')}`;
 const dots = (n: number) => '●'.repeat(n) + '○'.repeat(5 - n);
+/** the game's own address, for links people share */
+const PLAY_URL = `${location.origin}${import.meta.env.BASE_URL}play/`;
 const isTouch = matchMedia('(pointer: coarse)').matches;
 
 function render(html: string) {
@@ -684,7 +686,7 @@ const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 =
 
 /** A link that lets a friend race this run. */
 const challengeLink = (route: Route, run: GhostRun, time: number) =>
-  `${location.origin}/play/?c=${encodeChallenge({ routeId: route.id, name: profile?.name || 'A friend', time, run })}`;
+  `${PLAY_URL}?c=${encodeChallenge({ routeId: route.id, name: profile?.name || 'A friend', time, run })}`;
 
 /** the route a challenge or event names: the Campus Loop or one of the races */
 function routeById(id: string): Route | null {
@@ -978,10 +980,10 @@ function campusSheet(after: () => void) {
 }
 
 const MODES = [
-  { id: 'explore', icon: '🗺️', title: 'Explore', text: 'Discover the campus your way. Ride freely, find hidden routes and shortcuts, and visit iconic landmarks.', img: '/photos/lm-aerial.webp' },
-  { id: 'match', icon: '🏁', title: 'Quick Match', text: 'Race against riders online. Get matched and jump straight into a live race.', img: '/photos/sc-night.webp' },
-  { id: 'challenge', icon: '⚡', title: 'Challenge', text: 'Create or join a personal challenge. Beat their time and claim the top spot.', img: '/photos/sc-sunset.webp' },
-  { id: 'vibe', icon: '💛', title: 'Vibe Ride', text: 'Find someone and enjoy the ride together. No racing, just ride and connect.', img: '/photos/together.webp' },
+  { id: 'explore', icon: '🗺️', title: 'Explore', text: 'Discover the campus your way. Ride freely, find hidden routes and shortcuts, and visit iconic landmarks.', img: import.meta.env.BASE_URL + 'photos/lm-aerial.webp' },
+  { id: 'match', icon: '🏁', title: 'Quick Match', text: 'Race against riders online. Get matched and jump straight into a live race.', img: import.meta.env.BASE_URL + 'photos/sc-night.webp' },
+  { id: 'challenge', icon: '⚡', title: 'Challenge', text: 'Create or join a personal challenge. Beat their time and claim the top spot.', img: import.meta.env.BASE_URL + 'photos/sc-sunset.webp' },
+  { id: 'vibe', icon: '💛', title: 'Vibe Ride', text: 'Find someone and enjoy the ride together. No racing, just ride and connect.', img: import.meta.env.BASE_URL + 'photos/together.webp' },
 ];
 
 function quickRideCard() {
@@ -1155,7 +1157,7 @@ function home(next: Tab = 'home') {
         </div>
         <div class="card stack">
           <b>Join a challenge</b>
-          <div class="field"><label for="cLink">Paste the link or code a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="legonrush.netlify.app/play/?c=..."></div>
+          <div class="field"><label for="cLink">Paste the link or code a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="${esc(PLAY_URL.replace(/^https?:\/\//, ''))}?c=..."></div>
           <button class="btn btn-ghost" id="cOpen">Open challenge</button>
         </div>
         <button class="card selectable" id="boards" style="text-align:left"><div class="row"><h3 style="font-weight:800">🏆 LEADERBOARDS</h3><span class="grow"></span><span class="badge gold">Live</span></div><p class="muted small" style="margin-top:4px">The fastest riders on every route, and this week's hall standings.${cloud.account ? '' : ' Sign in to post your times.'}</p></button>
@@ -1446,7 +1448,7 @@ function gotInvite(n: Notice) {
   // the game is open in the background: tell the phone too
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     try {
-      new Notification('LEGONRUSH', { body: inviteText(n.from.name), icon: '/icons/icon-192.png', tag: n.code });
+      new Notification('LEGONRUSH', { body: inviteText(n.from.name), icon: `${import.meta.env.BASE_URL}icons/icon-192.png`, tag: n.code });
     } catch { /* some phones only allow this from a service worker */ }
   }
 }
@@ -1929,7 +1931,7 @@ function setVibeRoute(from: string, to: string) {
 }
 
 function vibeLink(code: string) {
-  return `${location.origin}/play/?v=${code}&n=${encodeURIComponent(profile!.name)}`;
+  return `${PLAY_URL}?v=${code}&n=${encodeURIComponent(profile!.name)}`;
 }
 
 /** the room: who you're riding with, where you're going, the invite and the chat */
@@ -2351,7 +2353,7 @@ function placeCard(place: Place) {
 }
 
 function shareRoute(from: Place, to: Place, note: HTMLElement) {
-  const url = `${location.origin}/play/?${new URLSearchParams({ from: from.name, to: to.name, mode: exploreOpts.mode })}`;
+  const url = `${PLAY_URL}?${new URLSearchParams({ from: from.name, to: to.name, mode: exploreOpts.mode })}`;
   return share(`How to get from ${from.name} to ${to.name} on campus, on LEGONRUSH`, url, note);
 }
 

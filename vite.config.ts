@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // GitHub Pages serves the site from /legonrush/; set BASE_PATH there (see .github/workflows/pages.yml)
+  base: process.env.BASE_PATH ?? '/',
   plugins: [
     VitePWA({
       registerType: 'prompt',
@@ -16,8 +18,8 @@ export default defineConfig({
         background_color: '#0a1020',
         display: 'fullscreen',
         orientation: 'any',
-        start_url: '/play/',
-        scope: '/',
+        start_url: 'play/',
+        scope: './',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },

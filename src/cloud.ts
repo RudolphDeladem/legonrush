@@ -84,7 +84,7 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 
 export async function signUp(email: string, password: string): Promise<AuthResult> {
   try {
-    const { data, error } = await (await sb()).auth.signUp({ email, password, options: { emailRedirectTo: `${location.origin}/play/` } });
+    const { data, error } = await (await sb()).auth.signUp({ email, password, options: { emailRedirectTo: `${location.origin}${import.meta.env.BASE_URL}play/` } });
     if (error) return { ok: false, error: friendly(error.message) };
     if (!data.session) return { ok: 'confirm' };
     setAccount(data.user);
@@ -96,7 +96,7 @@ export async function signUp(email: string, password: string): Promise<AuthResul
 
 export async function resetPassword(email: string): Promise<AuthResult> {
   try {
-    const { error } = await (await sb()).auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/play/` });
+    const { error } = await (await sb()).auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}${import.meta.env.BASE_URL}play/` });
     return error ? { ok: false, error: friendly(error.message) } : { ok: true };
   } catch (e) {
     return { ok: false, error: friendly(String(e)) };
