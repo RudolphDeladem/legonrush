@@ -9,8 +9,8 @@ import { BIKES, HALLS, HALL_PLACE, bikeById, hallById } from './data/campus';
 import { CAMPUS_LOOP, RACES, TOUR_STOPS, exploreRoute, freshersTour, raceRoute, type RaceDef, type Route } from './game/routes';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { applyRide, clearGhosts, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
-import { setSound, sfx, unlockAudio } from './audio';
+import { applyRide, claimDaily, clearGhosts, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
@@ -42,6 +42,8 @@ let profile: Profile | null = loadProfile();
 const settings = loadSettings();
 function applySettings() {
   setSound(settings.sound, settings.volume);
+  setMusicVolume(settings.musicVolume);
+  if (!settings.sound || settings.musicVolume <= 0) music(false);
   game.reducedMotion = settings.reducedMotion;
   document.documentElement.classList.toggle('reduce-motion', settings.reducedMotion);
   game.setQuality(settings.graphics === 'low' || (settings.graphics === 'auto' && settings.slowDevice) ? 'low' : 'high');
@@ -417,6 +419,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
     if (!game.isRiding) return onBack(togglePause);
     if (game.paused) return resume();
     game.paused = true;
+    music(false);
     const ov = document.createElement('div');
     ov.className = 'overlay fade-in';
     ov.id = 'pauseOverlay';
@@ -444,6 +447,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   };
   const resume = () => {
     game.paused = false;
+    music(true);
     app.querySelector('#pauseOverlay')?.remove();
     onBack(togglePause);
   };
@@ -453,6 +457,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   document.addEventListener('visibilitychange', onHidden);
 
   function cleanup() {
+    music(false);
     if (keyHandler) removeEventListener('keydown', keyHandler);
     keyHandler = null;
     document.removeEventListener('visibilitychange', onHidden);
@@ -471,6 +476,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
     setTimeout(() => { if (prompt.textContent?.includes('smooth mode')) prompt.innerHTML = ''; }, 3000);
   };
   game.start(bike, tutorial);
+  music(true);
   showUpdate('ride');
   onBack(togglePause);
 }
@@ -560,6 +566,7 @@ function home(next: Tab = 'home') {
   const hi = xpForLevel(level + 1);
   const hall = hallById(p.hall);
   const best = p.bestTimes[CAMPUS_LOOP.id];
+  const daily = dailyReward(p);
   const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
   const TIME_ICON = { day: '☀️', sunset: '🌅', night: '🌙' };
   const raceCard = (r: RaceDef) => {
@@ -588,6 +595,7 @@ function home(next: Tab = 'home') {
           <div class="xpbar"><div style="width:${((p.xp - lo) / (hi - lo)) * 100}%"></div></div>
           <div class="row small muted"><span class="hall-swatch" style="background:${hall.color}"></span>${esc(hall.name)}</div>
         </div>
+        ${daily ? `<button class="card selectable daily-card" id="daily"><div class="row"><span class="daily-icon">🎁</span><div class="grow"><b>Daily reward · Day ${daily.day}</b><p class="muted small">${daily.day > 1 ? `${daily.day} days in a row. ` : ''}Come back tomorrow for more.</p></div><span class="badge gold">+${daily.coins} ${icons.coin}</span></div></button>` : p.streak > 1 ? `<p class="muted small">🔥 ${p.streak}-day streak. Your next reward unlocks tomorrow.</p>` : ''}
         <div class="spacer"></div>
         <button class="ride-cta" id="ride">
           <div><div class="big">RIDE</div><div class="sub">Quick Ride · ${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</div></div>
@@ -670,6 +678,10 @@ function home(next: Tab = 'home') {
   on('#exploreBtn', 'click', () => explorePicker());
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
   on('#settings', 'click', () => settingsScreen());
+  on('#daily', 'click', () => {
+    if (claimDaily(p)) sfx.finish();
+    home('home');
+  });
   showUpdate('menu');
   // back from another tab goes to Home; from Home it leaves the app
   onBack(tab === 'home' ? null : () => home());
@@ -708,7 +720,9 @@ function settingsScreen() {
         <h1 class="title">Settings</h1>
         <div class="card stack">
           <div class="set-row"><b>Sound</b>${seg('sound', [['1', 'On'], ['0', 'Off']], settings.sound ? '1' : '0')}</div>
-          <label class="set-row"><span>Volume</span><input type="range" id="volume" min="0" max="100" step="5" value="${Math.round(settings.volume * 100)}" aria-label="Sound volume"></label>
+          <label class="set-row"><span>Effects</span><input type="range" id="volume" min="0" max="100" step="5" value="${Math.round(settings.volume * 100)}" aria-label="Sound effects volume"></label>
+          <label class="set-row"><span>Music</span><input type="range" id="musicVol" min="0" max="100" step="5" value="${Math.round(settings.musicVolume * 100)}" aria-label="Ride music volume"></label>
+          <p class="muted small">Music plays during rides. Slide it to zero to turn it off.</p>
         </div>
         <div class="card stack">
           <div class="set-row"><b>Graphics</b>${seg('graphics', [['auto', 'Auto'], ['high', 'Sharp'], ['low', 'Smooth']], settings.graphics)}</div>
@@ -738,6 +752,7 @@ function settingsScreen() {
   pick('motion', (v) => changeSettings({ reducedMotion: v === '1' }));
   on('#volume', 'input', (_, el) => changeSettings({ volume: Number((el as HTMLInputElement).value) / 100 }));
   on('#volume', 'change', () => sfx.coin());
+  on('#musicVol', 'input', (_, el) => changeSettings({ musicVolume: Number((el as HTMLInputElement).value) / 100 }));
   on('#back', 'click', () => home('you'));
   onBack(() => home('you'));
 }

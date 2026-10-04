@@ -14,6 +14,9 @@ export interface Profile {
   /** best finish time per route id, seconds */
   bestTimes: Record<string, number>;
   tutorialDone: boolean;
+  /** local date (YYYY-MM-DD) of the last daily reward, and how many days in a row */
+  lastDaily: string;
+  streak: number;
 }
 
 const KEY = 'legonrush.profile.v1';
@@ -23,7 +26,7 @@ export function newProfile(): Profile {
   return {
     name: 'Rider', username: '', hall: 'none', bike: 'city', guest: true,
     coins: 0, xp: 0, rides: 0, finishes: 0, totalDistance: 0, bestScore: 0, bestDistance: 0,
-    bestTimes: {}, tutorialDone: false,
+    bestTimes: {}, tutorialDone: false, lastDaily: '', streak: 0,
   };
 }
 
@@ -58,6 +61,8 @@ export interface Settings {
   sound: boolean;
   /** sound effects volume, 0 to 1 */
   volume: number;
+  /** ride music volume, 0 to 1; 0 is off */
+  musicVolume: number;
   /** auto starts high and drops to low if the phone struggles */
   graphics: Graphics;
   /** set once auto mode has found this device too slow for high */
@@ -67,7 +72,7 @@ export interface Settings {
 }
 
 const defaultSettings = (): Settings => ({
-  sound: true, volume: 0.8, graphics: 'auto', slowDevice: false, leftHanded: false,
+  sound: true, volume: 0.8, musicVolume: 0.5, graphics: 'auto', slowDevice: false, leftHanded: false,
   reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
 });
 
@@ -85,6 +90,28 @@ export function saveSettings(s: Settings) {
   } catch {
     /* ignore */
   }
+}
+
+// Daily reward: grows each day in a row, up to a week, and resets after a missed day.
+const DAILY_COINS = [50, 75, 100, 125, 150, 175, 250];
+const localDay = (d: Date) => d.toLocaleDateString('en-CA');
+
+export function dailyReward(p: Profile, now = new Date()) {
+  const today = localDay(now);
+  if (p.lastDaily === today) return null;
+  const yesterday = localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const day = p.lastDaily === yesterday ? p.streak + 1 : 1;
+  return { day, coins: DAILY_COINS[Math.min(day, DAILY_COINS.length) - 1], today };
+}
+
+export function claimDaily(p: Profile, now = new Date()) {
+  const r = dailyReward(p, now);
+  if (!r) return null;
+  p.lastDaily = r.today;
+  p.streak = r.day;
+  p.coins += r.coins;
+  saveProfile(p);
+  return r;
 }
 
 // Level n needs 250 * n(n-1)/2 XP in total: 0, 250, 750, 1500, ...

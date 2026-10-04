@@ -6,7 +6,8 @@ import { sfx } from '../audio';
 import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderRig } from './models';
 import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
-import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES } from './world';
+import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES, ROAD_HALF } from './world';
+import { buildingAt } from './campusmap';
 
 export type Action = 'left' | 'right' | 'jump' | 'boost';
 
@@ -52,6 +53,15 @@ interface Obstacle {
   vd: number;
   hit: boolean;
   fling?: THREE.Vector3;
+}
+
+/** A student walking along the pavement: scenery, not an obstacle. */
+interface Walker {
+  mesh: THREE.Object3D;
+  d: number;
+  x: number;
+  v: number;
+  t: number;
 }
 
 interface Coin {
@@ -127,6 +137,7 @@ export class Game {
   private coinList: Coin[] = [];
   private nextSpawn = 0;
   private dynamic = new THREE.Group();
+  private walkers: Walker[] = [];
   private orbit = 0;
 
   onHud: (h: HudState) => void = () => {};
@@ -376,6 +387,7 @@ export class Game {
   }
 
   private reset() {
+    for (const w of this.walkers) { w.d = -1e9; w.mesh.visible = false; }
     for (const o of this.obstacles) this.dynamic.remove(o.mesh);
     for (const c of this.coinList) this.dynamic.remove(c.mesh);
     this.obstacles = [];
@@ -445,6 +457,7 @@ export class Game {
       return;
     }
     if (this.phase === 'showcase') {
+      this.updateWalkers(dt);
       this.orbit += dt * (this.reducedMotion ? 0.04 : 0.18);
       this.crank += dt * 3;
       this.animateRider(dt, 0.4);
@@ -521,10 +534,43 @@ export class Game {
       }
     }
     this.updateDynamic(dt);
+    this.updateWalkers(dt);
     this.updateGhost(dt);
     this.crank += dt * this.speed * 0.9;
     this.animateRider(dt, this.speed);
     this.emitHud(null);
+  }
+
+  /** Keeps a few students walking on the pavements around the rider, reusing the same figures. */
+  private updateWalkers(dt: number) {
+    const want = this.quality === 'low' ? 10 : 22;
+    const end = this.route.length + this.route.tail - 5;
+    while (this.walkers.length < want) {
+      const mesh = buildObstacle('pedestrian');
+      mesh.traverse((o) => { o.castShadow = false; });
+      mesh.visible = false;
+      this.dynamic.add(mesh);
+      this.walkers.push({ mesh, d: -1e9, x: 0, v: 0, t: Math.random() * 6 });
+    }
+    const spread = this.phase === 'showcase' || this.walkers.every((w) => !w.mesh.visible);
+    for (let i = 0; i < this.walkers.length; i++) {
+      const w = this.walkers[i];
+      w.mesh.visible = i < want && w.d > this.d - 25 && w.d > -this.route.lead + 2 && w.d < end;
+      if (!w.mesh.visible && i < want) {
+        // respawn: spread around at first, later far ahead where it can't pop into view
+        const d = this.d + (spread ? -20 + Math.random() * 200 : 90 + Math.random() * 110);
+        const x = (Math.random() < 0.5 ? -1 : 1) * (ROAD_HALF + 0.4 + Math.random() * 1.0);
+        const p = this.pose(d, x);
+        if (d >= end || d < -this.route.lead + 2 || buildingAt(p.x, p.z, 0.6) || this.track.distanceToRoad(p.x, p.z) < ROAD_HALF + 0.3) continue;
+        Object.assign(w, { d, x, v: (Math.random() < 0.5 ? -1 : 1) * (1.1 + Math.random() * 0.5) });
+        w.mesh.visible = true;
+      }
+      if (!w.mesh.visible) continue;
+      w.d += w.v * dt;
+      w.t += dt * 7;
+      this.place(w.mesh, w.d, w.x, 0.12 + Math.abs(Math.sin(w.t)) * 0.05, w.v < 0 ? Math.PI : 0);
+      w.mesh.rotation.z = Math.sin(w.t) * 0.04;
+    }
   }
 
   private updateGhost(dt: number) {
