@@ -40,6 +40,13 @@ create table if not exists public.rides (
 );
 create index if not exists rides_created on public.rides (created_at);
 
+-- Added with the richer sign-up: department, Snapchat (null when hidden) and the rider's look.
+alter table public.profiles add column if not exists department text check (char_length(department) <= 80);
+alter table public.profiles add column if not exists snap text check (snap ~ '^[A-Za-z][A-Za-z0-9._-]{2,14}$');
+alter table public.profiles add column if not exists gender text check (gender in ('male', 'female'));
+alter table public.profiles add column if not exists look jsonb;
+alter table public.rides add column if not exists department text check (char_length(department) <= 80);
+
 alter table public.profiles enable row level security;
 alter table public.saves enable row level security;
 alter table public.runs enable row level security;
@@ -64,10 +71,11 @@ drop policy if exists "insert own rides" on public.rides;
 create policy "insert own rides" on public.rides for insert to authenticated with check (user_id = auth.uid());
 
 -- Fastest riders on one route, one row each.
+drop function if exists public.leaderboard(text, integer);
 create or replace function public.leaderboard(p_route text, p_limit integer default 20)
-returns table (name text, username text, hall text, best numeric, me boolean)
+returns table (name text, username text, hall text, department text, snap text, best numeric, me boolean)
 language sql stable security definer set search_path = public as $$
-  select p.name, p.username, p.hall, min(r.time) as best, p.id = auth.uid() as me
+  select p.name, p.username, p.hall, p.department, p.snap, min(r.time) as best, p.id = auth.uid() as me
   from public.runs r join public.profiles p on p.id = r.user_id
   where r.route = p_route
   group by p.id
@@ -86,5 +94,18 @@ language sql stable security definer set search_path = public as $$
   order by km desc;
 $$;
 
+-- Kilometres ridden per department since a time.
+create or replace function public.department_standings(p_since timestamptz)
+returns table (department text, km numeric, riders bigint)
+language sql stable security definer set search_path = public as $$
+  select r.department, round(sum(r.km), 1) as km, count(distinct r.user_id) as riders
+  from public.rides r
+  where r.created_at >= p_since and r.department is not null and r.department <> 'Other / not a student'
+  group by r.department
+  order by km desc
+  limit 50;
+$$;
+
 grant execute on function public.leaderboard(text, integer) to anon, authenticated;
+grant execute on function public.department_standings(timestamptz) to anon, authenticated;
 grant execute on function public.hall_standings(timestamptz) to anon, authenticated;

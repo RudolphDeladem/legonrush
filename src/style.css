@@ -278,3 +278,34 @@ a.btn { color: inherit; text-decoration: none; }
 .board-row small { display: block; font-size: 11.5px; opacity: 0.6; }
 .board-row.me { color: var(--gold); }
 .board-row.me .rank { color: var(--gold); }
+
+/* about you */
+.seg.wide { display: flex; }
+.seg.wide button { flex: 1; padding: 11px 12px; font-size: 14px; }
+.select-wrap { position: relative; display: flex; align-items: center; }
+.select-wrap select { flex: 1; appearance: none; -webkit-appearance: none; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; color: var(--white); padding: 14px 40px 14px 40px; font: inherit; font-size: 16px; outline: none; }
+.select-wrap select:focus { border-color: var(--gold); }
+.select-wrap::after { content: '▾'; position: absolute; right: 16px; color: var(--muted); pointer-events: none; }
+.hall-dot { position: absolute; left: 14px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); pointer-events: none; }
+.prefix-input { display: flex; align-items: center; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; }
+.prefix-input:focus-within { border-color: var(--gold); }
+.prefix-input span { padding-left: 14px; color: var(--muted); font-weight: 700; }
+.prefix-input input { flex: 1; border: 0; background: transparent; padding-left: 4px; }
+.field .check-row { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--white); cursor: pointer; }
+.check-row input { width: 18px; height: 18px; accent-color: var(--gold); }
+
+/* dress your rider: the rider turns in the top half, options scroll below */
+.screen.dress { padding: 0; overflow: hidden; background: linear-gradient(180deg, rgba(10,16,32,0.55) 0%, rgba(10,16,32,0) 22%); }
+.dress-head { padding: calc(16px + var(--safe-t)) 16px 0; }
+.dress-panel { max-height: 54%; overflow-y: auto; background: rgba(10,16,32,0.94); border-top: 1px solid var(--line); border-radius: 22px 22px 0 0; padding: 18px 16px calc(18px + var(--safe-b)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.dress-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dress-row.col { flex-direction: column; align-items: stretch; gap: 8px; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.18); position: relative; }
+.swatch.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+.swatch span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 9px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; text-transform: uppercase; }
+.chips-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 13px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.06); font-size: 13.5px; font-weight: 700; }
+.chip-btn.on { background: var(--gold); color: var(--navy); border-color: var(--gold); }
+.chip-btn .dot { width: 10px; height: 10px; border-radius: 50%; }
+@media (min-width: 900px) { .dress-panel { max-height: 60%; width: min(560px, 100%); margin: 0 auto; } }

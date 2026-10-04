@@ -21,7 +21,33 @@ export interface Profile {
   ownedBikes: string[];
   /** this week's riding for your hall */
   week: { id: string; km: number; claimed: boolean };
+  gender: Gender;
+  department: string;
+  /** Snapchat username, without the @ */
+  snap: string;
+  /** show the Snapchat handle to other riders */
+  snapPublic: boolean;
+  look: Look;
 }
+
+export type Gender = 'male' | 'female';
+export type BodyType = 'slim' | 'regular' | 'broad';
+export type Outfit = 'jersey' | 'hall-tee' | 'hoodie' | 'kente';
+export type Accessory = 'backpack' | 'sunglasses' | 'helmet' | 'watch' | 'gloves';
+
+/** how your rider looks; colours are hex, and an empty jersey colour means your hall's */
+export interface Look {
+  body: BodyType;
+  skin: string;
+  outfit: Outfit;
+  jersey: string;
+  helmet: string;
+  accessories: Accessory[];
+}
+
+export const SKIN_TONES = ['#3b2219', '#5a3523', '#7a4b2e', '#9a6440', '#c28a5c', '#e0b48c'];
+
+export const defaultLook = (): Look => ({ body: 'regular', skin: '#7a4b2e', outfit: 'jersey', jersey: '', helmet: '#f5c518', accessories: ['helmet'] });
 
 const KEY = 'legonrush.profile.v1';
 const SETTINGS_KEY = 'legonrush.settings.v1';
@@ -32,13 +58,17 @@ export function newProfile(): Profile {
     coins: 0, xp: 0, rides: 0, finishes: 0, totalDistance: 0, bestScore: 0, bestDistance: 0,
     bestTimes: {}, tutorialDone: false, lastDaily: '', streak: 0,
     ownedBikes: [], week: { id: '', km: 0, claimed: false },
+    gender: 'male', department: '', snap: '', snapPublic: true, look: defaultLook(),
   };
 }
 
 export function loadProfile(): Profile | null {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...newProfile(), ...JSON.parse(raw) } : null;
+    if (!raw) return null;
+    const p = { ...newProfile(), ...JSON.parse(raw) } as Profile;
+    p.look = { ...defaultLook(), ...p.look };
+    return p;
   } catch {
     return null;
   }

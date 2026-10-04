@@ -19,9 +19,9 @@
       <div class="container topbar-inner">
         <a href="/" class="logo" aria-label="LEGONRUSH home">LEGON<span>RUSH</span></a>
         <nav class="links" id="links" aria-label="Main">
-          <a href="#about">About</a>
           <a href="#freshers">Freshers</a>
           <a href="#races">Races</a>
+          <a href="#fastest">Leaderboard</a>
           <a href="#events">Events</a>
           <a href="#community">Community</a>
           <a href="#brands">Partners</a>
@@ -43,9 +43,9 @@
           <div class="live-card">
             <p class="live-title"><span class="dot"></span>LEGONRUSH live</p>
             <dl>
-              <div><dt>1,600</dt><dd>Real buildings</dd></div>
-              <div><dt>400+</dt><dd>Places to find</dd></div>
-              <div><dt>9</dt><dd>Halls</dd></div>
+              <div><dt data-count="1600">1,600</dt><dd>Real buildings</dd></div>
+              <div><dt data-count="400" data-suffix="+">400+</dt><dd>Places to find</dd></div>
+              <div><dt data-count="9">9</dt><dd>Halls</dd></div>
             </dl>
           </div>
         </div>
@@ -118,6 +118,31 @@
         </div>
       </section>
 
+      <!-- HOW IT WORKS -->
+      <section class="section how" id="how">
+        <div class="container">
+          <h2 class="h2-line">How it <span class="gold">works.</span></h2>
+          <ol class="steps">
+            <li class="step">
+              <span class="step-n">1</span>
+              <h3>Create your rider</h3>
+              <p>Pick your hall and department, then dress your rider: outfit, colours, helmet, shades, backpack and more.</p>
+            </li>
+            <li class="step">
+              <span class="step-n">2</span>
+              <h3>Ride campus</h3>
+              <p>Race the clock, race friends, join the evening events or explore your way around the real campus.</p>
+            </li>
+            <li class="step">
+              <span class="step-n">3</span>
+              <h3>Climb the boards</h3>
+              <p>Post the fastest times, and push your hall and your department up the weekly standings.</p>
+            </li>
+          </ol>
+          <a class="btn btn-gold btn-sm" href="/play/">Create your rider <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
       <!-- WORLD -->
       <section class="world" id="world">
         <div class="world-photo"><img src="/photos/world.webp" alt="Cyclists riding past campus buildings and palm trees" loading="lazy" /></div>
@@ -134,13 +159,19 @@
           <a class="btn btn-gold btn-sm" href="/play/">Explore the world <span aria-hidden="true">→</span></a>
         </div>
         <div class="container">
-          <ul class="landmarks">
+          <div class="marquee" aria-label="Campus landmarks"><ul class="landmarks">
             <li><img src="/photos/lm-gate.webp" alt="Main Gate" loading="lazy" /></li>
             <li><img src="/photos/lm-balme.webp" alt="Balme Library" loading="lazy" /></li>
             <li><img src="/photos/lm-tower.webp" alt="Balme Library clock tower" loading="lazy" /></li>
             <li><img src="/photos/lm-hall.webp" alt="A University of Ghana hall" loading="lazy" /></li>
             <li><img src="/photos/lm-aerial.webp" alt="Aerial view of the campus" loading="lazy" /></li>
-          </ul>
+          </ul><ul class="landmarks" aria-hidden="true">
+            <li><img src="/photos/lm-gate.webp" alt="" data-alt="Main Gate" loading="lazy" /></li>
+            <li><img src="/photos/lm-balme.webp" alt="" data-alt="Balme Library" loading="lazy" /></li>
+            <li><img src="/photos/lm-tower.webp" alt="" data-alt="Balme Library clock tower" loading="lazy" /></li>
+            <li><img src="/photos/lm-hall.webp" alt="" data-alt="A University of Ghana hall" loading="lazy" /></li>
+            <li><img src="/photos/lm-aerial.webp" alt="" data-alt="Aerial view of the campus" loading="lazy" /></li>
+          </ul></div>
         </div>
       </section>
 
@@ -162,7 +193,7 @@
           </div>
           <div class="phones">
             <figure class="phone"><img src="/photos/sc-explore.webp" alt="Explore screen with the Freshers' Tour and a From and To planner" loading="lazy" width="585" height="1170" /><figcaption>Plan any trip</figcaption></figure>
-            <figure class="phone lift"><img src="/photos/sc-tour.webp" alt="Riding the Freshers' Tour with a turn-left direction on screen" loading="lazy" width="585" height="1170" /><figcaption>Ride it with directions</figcaption></figure>
+            <figure class="phone lift"><video class="clip" muted loop playsinline preload="none" poster="/photos/sc-tour.webp" data-src="/photos/clip-tour.mp4" aria-label="Riding the Freshers' Tour with a turn-left direction on screen" width="585" height="1170"></video><figcaption>Ride it with directions</figcaption></figure>
             <figure class="phone"><img src="/photos/sc-quiz.webp" alt="The Where is it? map quiz asking for the Balme Library" loading="lazy" width="585" height="1170" /><figcaption>Learn the map</figcaption></figure>
           </div>
         </div>
@@ -180,7 +211,7 @@
           </div>
           <div class="race-grid">
             <article class="race-card">
-              <figure class="phone"><img src="/photos/sc-day.webp" alt="Riding the Engineering Run in daylight" loading="lazy" width="585" height="1170" /></figure>
+              <figure class="phone"><video class="clip" muted loop playsinline preload="none" poster="/photos/sc-day.webp" data-src="/photos/clip-day.mp4" aria-label="Riding the Engineering Run in daylight" width="585" height="1170"></video></figure>
               <div>
                 <p class="race-tag">☀️ Day · Level 1</p>
                 <h3>Engineering Run</h3>
@@ -188,7 +219,7 @@
               </div>
             </article>
             <article class="race-card">
-              <figure class="phone"><img src="/photos/sc-sunset.webp" alt="Riding the Sunset Route at golden hour" loading="lazy" width="585" height="1170" /></figure>
+              <figure class="phone"><video class="clip" muted loop playsinline preload="none" poster="/photos/sc-sunset.webp" data-src="/photos/clip-sunset.mp4" aria-label="Riding the Sunset Route at golden hour" width="585" height="1170"></video></figure>
               <div>
                 <p class="race-tag">🌅 Sunset · Level 2</p>
                 <h3>Sunset Route</h3>
@@ -196,7 +227,7 @@
               </div>
             </article>
             <article class="race-card">
-              <figure class="phone"><img src="/photos/sc-night.webp" alt="Riding the Night Circuit under street lamps" loading="lazy" width="585" height="1170" /></figure>
+              <figure class="phone"><video class="clip" muted loop playsinline preload="none" poster="/photos/sc-night.webp" data-src="/photos/clip-night.mp4" aria-label="Riding the Night Circuit under street lamps" width="585" height="1170"></video></figure>
               <div>
                 <p class="race-tag">🌙 Night · Level 3</p>
                 <h3>Night Circuit</h3>
@@ -205,6 +236,25 @@
             </article>
           </div>
           <p class="tiny" style="margin-top:14px">Plus the Limann to Great Hall quick ride, open from your first day.</p>
+        </div>
+      </section>
+
+      <!-- FASTEST -->
+      <section class="section fastest" id="fastest">
+        <div class="container">
+          <div class="section-head">
+            <div>
+              <h2 class="h2-line">Fastest on <span class="gold">campus.</span></h2>
+              <p class="body small">The top three riders on every route, live from the game.</p>
+            </div>
+            <a class="see-all" href="/play/">Post your time <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="boards" id="boards">
+            <article class="board" data-route="limann-great-hall"><h3>Limann to Great Hall</h3><ol><li class="empty">Loading…</li></ol></article>
+            <article class="board" data-route="engineering-run"><h3>Engineering Run</h3><ol><li class="empty">Loading…</li></ol></article>
+            <article class="board" data-route="sunset-route"><h3>Sunset Route</h3><ol><li class="empty">Loading…</li></ol></article>
+            <article class="board" data-route="night-circuit"><h3>Night Circuit</h3><ol><li class="empty">Loading…</li></ol></article>
+          </div>
         </div>
       </section>
 

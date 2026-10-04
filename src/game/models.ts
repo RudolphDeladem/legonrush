@@ -19,6 +19,7 @@ export interface RiderRig {
   legs: [THREE.Object3D, THREE.Object3D];
   setJersey(color: string): void;
   setBikeColor(color: string): void;
+  setLook(look: RiderLook): void;
 }
 
 export function buildRider(jersey: string, bikeColor: string): RiderRig {
@@ -93,11 +94,27 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
   const skin = std('#7a4b2e', { roughness: 0.6 });
   const shorts = std('#1c2433');
   const helmetMat = std('#f5c518', { roughness: 0.35, metalness: 0.2 });
+  const hairMat = std('#15100d', { roughness: 0.9 });
+  const trim = std('#ffffff', { roughness: 0.6 });
+  const gear = std('#20242c', { roughness: 0.55 });
 
+  // the upper body sits in its own group so body types can widen it
+  const upper = new THREE.Group();
+  body.add(upper);
   const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.42, 6, 12), jerseyMat);
   torso.position.set(0, 1.25, -0.02);
   torso.rotation.x = -0.85;
-  body.add(torso);
+  upper.add(torso);
+  // a collar ring for the hall T-shirt, a hood for the hoodie
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.022, 6, 16), trim);
+  collar.position.set(0, 1.46, -0.2);
+  collar.rotation.x = -0.85 + Math.PI / 2;
+  upper.add(collar);
+  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), jerseyMat);
+  hood.position.set(0, 1.46, -0.08);
+  hood.rotation.x = 1.9;
+  hood.scale.set(1.1, 0.8, 0.9);
+  upper.add(hood);
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), skin);
   head.position.set(0, 1.58, -0.3);
@@ -106,27 +123,60 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
   helmet.position.copy(head.position).add(new THREE.Vector3(0, 0.02, 0.01));
   helmet.scale.set(1, 0.95, 1.2);
   body.add(helmet);
+  // hair shows without a helmet; a puff of braids at the back marks the female rider
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.138, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.2), hairMat);
+  hair.position.copy(head.position).add(new THREE.Vector3(0, 0.015, 0.01));
+  body.add(hair);
+  const bun = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), hairMat);
+  bun.position.copy(head.position).add(new THREE.Vector3(0, 0.06, 0.15));
+  body.add(bun);
+  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.045, 0.03), std('#0b0d12', { metalness: 0.6, roughness: 0.15 }));
+  shades.position.copy(head.position).add(new THREE.Vector3(0, 0.02, -0.125));
+  body.add(shades);
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.36, 0.14), gear);
+  pack.position.set(0, 1.3, 0.12);
+  pack.rotation.x = -0.85;
+  upper.add(pack);
 
+  const sleeves: THREE.Mesh[] = [];
+  const arms: THREE.Mesh[] = [];
+  const gloves: THREE.Mesh[] = [];
+  let watch: THREE.Mesh | null = null;
   for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.42, 4, 8), skin);
     const shoulder = new THREE.Vector3(side * 0.19, 1.42, -0.18);
     const hand = new THREE.Vector3(side * 0.24, 1.02, -0.4);
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), hand.clone().sub(shoulder).normalize());
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.42, 4, 8), skin);
     arm.position.copy(shoulder).lerp(hand, 0.5);
-    arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), hand.clone().sub(shoulder).normalize());
-    body.add(arm);
+    arm.quaternion.copy(q);
+    upper.add(arm);
+    arms.push(arm);
     const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.1, 4, 8), jerseyMat);
     sleeve.position.copy(shoulder).lerp(hand, 0.15);
-    sleeve.quaternion.copy(arm.quaternion);
-    body.add(sleeve);
+    sleeve.quaternion.copy(q);
+    upper.add(sleeve);
+    sleeves.push(sleeve);
+    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.058, 10, 8), gear);
+    glove.position.copy(hand).add(new THREE.Vector3(0, -0.02, -0.01));
+    upper.add(glove);
+    gloves.push(glove);
+    if (side === -1) {
+      watch = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.04, 12), std('#e8e8ea', { metalness: 0.7, roughness: 0.25 }));
+      watch.position.copy(shoulder).lerp(hand, 0.86);
+      watch.quaternion.copy(q);
+      upper.add(watch);
+    }
   }
 
   const legs: THREE.Object3D[] = [];
+  const thighs: THREE.Mesh[] = [];
   for (const side of [-1, 1]) {
     const hip = new THREE.Group();
     hip.position.set(side * 0.1, 0.98, 0.16);
     const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.3, 4, 8), shorts);
     thigh.position.set(0, -0.2, 0);
     hip.add(thigh);
+    thighs.push(thigh);
     const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.3, 4, 8), skin);
     shin.position.set(0, -0.52, 0.02);
     hip.add(shin);
@@ -137,12 +187,78 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
     legs.push(hip);
   }
 
+  const setLook = (look: RiderLook) => {
+    skin.color.set(look.skin);
+    // body type: shoulders and chest width, and thicker arms and thighs for broad
+    const w = { slim: 0.88, regular: 1, broad: 1.16 }[look.body] * (look.gender === 'female' ? 0.94 : 1);
+    torso.scale.set(w, 1, w);
+    for (const a of arms) a.scale.set(w, 1, w);
+    for (const t of thighs) t.scale.set(w, 1, w);
+    // outfit
+    jerseyMat.color.set(look.outfit === 'kente' ? '#ffffff' : look.jersey);
+    jerseyMat.map = look.outfit === 'kente' ? kenteTexture() : null;
+    jerseyMat.roughness = look.outfit === 'hoodie' ? 0.9 : 0.6;
+    jerseyMat.needsUpdate = true;
+    collar.visible = look.outfit === 'hall-tee';
+    hood.visible = look.outfit === 'hoodie' && !look.accessories.includes('backpack');
+    // long sleeves for the hoodie
+    for (const sl of sleeves) {
+      sl.scale.set(1, look.outfit === 'hoodie' ? 3.1 : 1, 1);
+      sl.position.copy(sl.userData.base ??= sl.position.clone()).lerp(new THREE.Vector3(Math.sign(sl.position.x) * 0.24, 1.02, -0.4), look.outfit === 'hoodie' ? 0.32 : 0);
+    }
+    // accessories
+    const has = (a: string) => look.accessories.includes(a);
+    helmet.visible = has('helmet');
+    helmetMat.color.set(look.helmet);
+    hair.visible = !has('helmet');
+    bun.visible = look.gender === 'female';
+    shades.visible = has('sunglasses');
+    pack.visible = has('backpack');
+    if (watch) watch.visible = has('watch');
+    for (const g of gloves) g.visible = has('gloves');
+  };
+
   shadowed(root);
-  return {
+  const rig: RiderRig = {
     root, body, wheels, crank, legs: legs as [THREE.Object3D, THREE.Object3D],
     setJersey: (c) => jerseyMat.color.set(c),
     setBikeColor: (c) => frameMat.color.set(c),
+    setLook,
   };
+  setLook({ gender: 'male', body: 'regular', skin: '#7a4b2e', outfit: 'jersey', jersey, helmet: '#f5c518', accessories: ['helmet'] });
+  return rig;
+}
+
+export interface RiderLook {
+  gender: 'male' | 'female';
+  body: 'slim' | 'regular' | 'broad';
+  skin: string;
+  outfit: 'jersey' | 'hall-tee' | 'hoodie' | 'kente';
+  /** resolved jersey colour */
+  jersey: string;
+  helmet: string;
+  accessories: string[];
+}
+
+/** Kente-style stripes in gold, green, red and black, drawn once. */
+let kente: THREE.CanvasTexture | null = null;
+function kenteTexture() {
+  if (kente) return kente;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const bands = ['#f2b705', '#0f7b3a', '#f2b705', '#c8102e', '#111111', '#f2b705', '#0f7b3a', '#c8102e'];
+  bands.forEach((col, i) => { g.fillStyle = col; g.fillRect(0, i * 8, 64, 8); });
+  // the woven blocks that make it read as kente
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x += 2) {
+    g.fillStyle = (x + y) % 4 === 0 ? '#111111' : '#f2b705';
+    g.fillRect(x * 8 + (y % 2) * 8, y * 8 + 2, 6, 4);
+  }
+  kente = new THREE.CanvasTexture(c);
+  kente.colorSpace = THREE.SRGBColorSpace;
+  kente.wrapS = kente.wrapT = THREE.RepeatWrapping;
+  kente.repeat.set(2, 2);
+  return kente;
 }
 
 // ---------- obstacles ----------

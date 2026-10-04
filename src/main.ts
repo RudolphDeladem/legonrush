@@ -11,9 +11,10 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { WEEK_GOAL_KM, WEEK_REWARD, onProfileSave, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, onProfileSave, type Accessory, type Look, type Outfit, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
+import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
 import * as cloud from './cloud';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
@@ -101,9 +102,12 @@ function on(sel: string, ev: string, fn: (e: Event, el: HTMLElement) => void) {
   app.querySelectorAll<HTMLElement>(sel).forEach((el) => el.addEventListener(ev, (e) => fn(e, el)));
 }
 
-function applyLook() {
-  if (!profile) return;
-  game.setLook(hallById(profile.hall).color, bikeById(profile.bike).color);
+/** the profile's rider as the 3D model draws it */
+const riderLook = (p: Profile) => ({ ...p.look, gender: p.gender, jersey: p.look.jersey || hallById(p.hall).color });
+
+function applyLook(p: Profile | null = profile) {
+  if (!p) return;
+  game.setLook(riderLook(p), bikeById(p.bike).color);
 }
 
 // ---------- splash + welcome ----------
@@ -172,47 +176,74 @@ function welcome() {
 // ---------- onboarding ----------
 
 function createRider(draft: Profile, editing = false) {
+  game.showcase();
+  applyLook(draft);
+  const hallOpt = (h: (typeof HALLS)[number]) => `<option value="${h.id}" ${draft.hall === h.id ? 'selected' : ''}>${esc(h.name)}</option>`;
   render(`
     <div class="screen solid fade-in">
       <div class="wrap stack">
         <p class="kicker">${editing ? 'Edit rider' : 'Step 1 of 2'}</p>
-        <h1 class="title">Create your rider</h1>
-        <div class="field"><label for="name">Display name</label><input id="name" maxlength="18" autocomplete="nickname" value="${esc(draft.guest && draft.name === 'Rider' ? '' : draft.name)}" placeholder="Rudolph"></div>
+        <h1 class="title">About you</h1>
+        <div class="field"><label for="name">Display name</label><input id="name" maxlength="18" autocomplete="nickname" value="${esc(draft.guest && ['Rider', 'Guest'].includes(draft.name) ? '' : draft.name)}" placeholder="Rudolph"></div>
         <div class="field"><label for="user">Username</label><input id="user" maxlength="20" autocapitalize="off" value="${esc(draft.username)}" placeholder="rudolphrides"></div>
-        <p class="kicker" style="margin-top:8px">Choose your hall</p>
-        <p class="muted small">Represent your hall across LEGONRUSH.</p>
-        <div class="hall-grid">
-          ${HALLS.map((h) => `
-            <button class="card selectable hall-card ${draft.hall === h.id ? 'selected' : ''}" data-hall="${h.id}">
-              <div class="hall-swatch" style="background:${h.color}"></div>
-              <div class="hall-name">${esc(h.name)}</div>
-            </button>`).join('')}
+        <div class="field"><label>Gender</label><div class="seg wide" id="gender">${(['male', 'female'] as const).map((g) => `<button data-v="${g}" class="${draft.gender === g ? 'on' : ''}">${g === 'male' ? 'Male' : 'Female'}</button>`).join('')}</div></div>
+        <div class="field"><label for="hall">Hall</label>
+          <div class="select-wrap"><span class="hall-dot" id="hallDot" style="background:${hallById(draft.hall).color}"></span><select id="hall">
+            <option value="" disabled ${draft.hall === 'none' && draft.guest ? 'selected' : ''}>Choose your hall</option>
+            ${HALLS.filter((h) => h.id !== 'none').map(hallOpt).join('')}
+            ${hallOpt(hallById('none'))}
+          </select></div>
+          <p class="muted small">Every kilometre you ride counts for your hall.</p>
         </div>
+        <div class="field"><label for="dept">Department</label>
+          <input id="dept" list="depts" autocomplete="off" value="${esc(draft.department)}" placeholder="Start typing, like Computer Science">
+          <datalist id="depts">${DEPARTMENTS.flatMap((g) => g.departments.map((d) => `<option value="${esc(d)}" label="${esc(g.college)}"></option>`)).join('')}<option value="${OTHER_DEPARTMENT}"></option></datalist>
+        </div>
+        <div class="field"><label for="snap">Snapchat <span class="muted">(optional)</span></label>
+          <div class="prefix-input"><span>@</span><input id="snap" maxlength="15" autocapitalize="off" autocomplete="off" value="${esc(draft.snap)}" placeholder="yoursnap"></div>
+          <label class="check-row"><input type="checkbox" id="snapPublic" ${draft.snapPublic ? 'checked' : ''}> Show it to other riders</label>
+        </div>
+        <p class="small auth-note" id="note" role="status" hidden></p>
         <button class="btn btn-primary" id="next" style="margin-top:8px">${editing ? 'Save' : 'Continue'}</button>
         ${editing ? '<button class="btn btn-link" id="cancel">Cancel</button>' : '<button class="btn btn-link" id="back">Back</button>'}
       </div>
     </div>`);
-  on('[data-hall]', 'click', (_, el) => {
-    draft.hall = el.dataset.hall!;
-    app.querySelectorAll('[data-hall]').forEach((b) => b.classList.toggle('selected', b === el));
-    game.setLook(hallById(draft.hall).color, bikeById(draft.bike).color);
+  const $ = <T extends HTMLElement>(id: string) => app.querySelector<T>('#' + id)!;
+  on('#gender [data-v]', 'click', (_, el) => {
+    draft.gender = el.dataset.v as Profile['gender'];
+    app.querySelectorAll('#gender button').forEach((b) => b.classList.toggle('on', b === el));
+    applyLook(draft);
   });
+  $('hall').addEventListener('change', () => {
+    draft.hall = $<HTMLSelectElement>('hall').value;
+    $('hallDot').style.background = hallById(draft.hall).color;
+    applyLook(draft);
+  });
+  app.querySelectorAll('input, select').forEach((i) => i.addEventListener('input', () => ($('note').hidden = true)));
+  const say = (t: string, field: string) => {
+    const n = $('note');
+    n.hidden = false;
+    n.textContent = t;
+    $(field).focus();
+  };
   on('#next', 'click', () => {
-    const name = (app.querySelector('#name') as HTMLInputElement).value.trim();
-    const user = (app.querySelector('#user') as HTMLInputElement).value.trim().replace(/^@/, '').replace(/[^a-zA-Z0-9_.]/g, '');
-    if (!name) {
-      (app.querySelector('#name') as HTMLInputElement).focus();
-      return;
-    }
-    draft.name = name;
-    draft.username = user;
-    draft.guest = false;
+    const name = $<HTMLInputElement>('name').value.trim();
+    const user = $<HTMLInputElement>('user').value.trim().replace(/^@/, '').replace(/[^a-zA-Z0-9_.]/g, '');
+    const hall = $<HTMLSelectElement>('hall').value;
+    const typed = $<HTMLInputElement>('dept').value.trim();
+    const dept = ALL_DEPARTMENTS.find((d) => d.toLowerCase() === typed.toLowerCase());
+    const snap = $<HTMLInputElement>('snap').value.trim().replace(/^@/, '');
+    if (!name) return say('Add a display name.', 'name');
+    if (!hall) return say('Choose your hall, or Non-resident.', 'hall');
+    if (!dept) return say(typed ? 'Pick your department from the list, or choose "Other / not a student".' : 'Choose your department.', 'dept');
+    if (snap && !/^[A-Za-z][A-Za-z0-9._-]{2,14}$/.test(snap)) return say('That Snapchat username doesn\'t look right. It has 3 to 15 letters, numbers, dots, dashes or underscores.', 'snap');
+    Object.assign(draft, { name, username: user, hall, department: dept, snap, snapPublic: $<HTMLInputElement>('snapPublic').checked, guest: false });
     if (editing) {
       profile = draft;
       saveProfile(draft);
       applyLook();
       home('you');
-    } else chooseBike(draft);
+    } else dressRider(draft);
   });
   // a guest who already has progress goes back home, never to the welcome screen that would start over
   const back = () => (editing ? home('you') : profile ? home() : welcome());
@@ -221,43 +252,71 @@ function createRider(draft: Profile, editing = false) {
   onBack(back);
 }
 
-function chooseBike(draft: Profile) {
-  game.showcase();
-  game.setLook(hallById(draft.hall).color, bikeById(draft.bike).color);
+const JERSEY_COLORS = ['#d64545', '#f2c230', '#2e8b3a', '#1f6fd6', '#7b3fc4', '#ff7a1a', '#111418', '#f4f4f4'];
+const HELMET_COLORS = ['#f5c518', '#f4f4f4', '#111418', '#d64545', '#1f6fd6', '#2ecc71'];
+const OUTFITS: [Outfit, string][] = [['jersey', 'Jersey'], ['hall-tee', 'Hall T-shirt'], ['hoodie', 'Hoodie'], ['kente', 'Kente jersey']];
+const ACCESSORIES: [Accessory, string, string][] = [['helmet', '⛑️', 'Helmet'], ['sunglasses', '🕶️', 'Sunglasses'], ['backpack', '🎒', 'Backpack'], ['watch', '⌚', 'Watch'], ['gloves', '🧤', 'Gloves']];
+
+/** Step 2: dress the rider, with the 3D rider turning above the options. */
+function dressRider(draft: Profile, editing = false) {
+  game.dressView();
+  applyLook(draft);
+  const L = draft.look;
+  const hall = hallById(draft.hall);
+  const swatches = (id: string, colors: string[], value: string, first?: [string, string]) =>
+    `<div class="swatches" id="${id}">${first ? `<button class="swatch ${value === first[0] ? 'on' : ''}" data-v="${first[0]}" style="background:${first[1]}" aria-label="Hall colour"><span>Hall</span></button>` : ''}${colors.map((c) => `<button class="swatch ${value === c ? 'on' : ''}" data-v="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>`;
+  const prev = app.querySelector('.dress-panel');
+  const prevScroll = prev?.scrollTop ?? 0;
   render(`
-    <div class="screen scrim fade-in">
-      <div class="wrap stack">
-        <p class="kicker">Step 2 of 2</p>
-        <h1 class="title">Choose your starter bike</h1>
+    <div class="screen dress${prev ? '' : ' fade-in'}">
+      <div class="wrap dress-head">
+        <p class="kicker">${editing ? 'Your look' : 'Step 2 of 2'}</p>
+        <h1 class="title">Dress your rider</h1>
       </div>
       <div class="grow"></div>
-      <div class="wrap stack">
-        <div class="bike-grid">
-          ${BIKES.map((b) => `
-            <button class="card selectable bike-card ${draft.bike === b.id ? 'selected' : ''}" data-bike="${b.id}">
-              <div class="hall-swatch" style="background:${b.color};margin:0 auto 8px"></div>
-              <h3>${b.name}</h3>
-              <p class="muted small">${b.tagline}</p>
-              <div class="stat-line"><span>SPD</span><span class="dots">${dots(b.speed)}</span></div>
-              <div class="stat-line"><span>ACC</span><span class="dots">${dots(b.acceleration)}</span></div>
-              <div class="stat-line"><span>HDL</span><span class="dots">${dots(b.handling)}</span></div>
-            </button>`).join('')}
+      <div class="dress-panel">
+        <div class="wrap stack">
+          <div class="dress-row"><b>Body type</b><div class="seg" id="body">${(['slim', 'regular', 'broad'] as const).map((b) => `<button data-v="${b}" class="${L.body === b ? 'on' : ''}">${b[0].toUpperCase() + b.slice(1)}</button>`).join('')}</div></div>
+          <div class="dress-row"><b>Skin tone</b>${swatches('skin', SKIN_TONES, L.skin)}</div>
+          <div class="dress-row col"><b>Outfit</b><div class="chips-row" id="outfit">${OUTFITS.map(([v, label]) => `<button data-v="${v}" class="chip-btn ${L.outfit === v ? 'on' : ''}">${label}</button>`).join('')}</div></div>
+          ${L.outfit === 'kente' ? '' : `<div class="dress-row col"><b>${L.outfit === 'hall-tee' ? 'T-shirt' : L.outfit === 'hoodie' ? 'Hoodie' : 'Jersey'} colour</b>${swatches('jersey', JERSEY_COLORS, L.jersey, ['', hall.color])}</div>`}
+          <div class="dress-row col"><b>Accessories</b><div class="chips-row" id="acc">${ACCESSORIES.map(([v, icon, label]) => `<button data-v="${v}" class="chip-btn ${L.accessories.includes(v) ? 'on' : ''}" aria-pressed="${L.accessories.includes(v)}">${icon} ${label}</button>`).join('')}</div></div>
+          ${L.accessories.includes('helmet') ? `<div class="dress-row col"><b>Helmet colour</b>${swatches('helmet', HELMET_COLORS, L.helmet)}</div>` : ''}
+          ${editing ? '' : `<div class="dress-row col"><b>Starter bike</b><div class="chips-row" id="bike">${BIKES.map((b) => `<button data-v="${b.id}" class="chip-btn ${draft.bike === b.id ? 'on' : ''}"><span class="dot" style="background:${b.color}"></span>${b.name} · ${b.tagline}</button>`).join('')}</div></div>`}
+          <button class="btn btn-primary" id="go">${editing ? 'Save' : "Let's go"}</button>
+          ${editing ? '<button class="btn btn-link" id="cancel">Cancel</button>' : ''}
         </div>
-        <button class="btn btn-primary" id="go">Let's go</button>
       </div>
     </div>`);
-  on('[data-bike]', 'click', (_, el) => {
-    draft.bike = el.dataset.bike!;
-    app.querySelectorAll('[data-bike]').forEach((b) => b.classList.toggle('selected', b === el));
-    game.setLook(hallById(draft.hall).color, bikeById(draft.bike).color);
+  const panel = app.querySelector<HTMLElement>('.dress-panel')!;
+  panel.scrollTop = prevScroll;
+  const redraw = () => dressRider(draft, editing);
+  on('#body [data-v]', 'click', (_, el) => { L.body = el.dataset.v as Look['body']; redraw(); });
+  on('#skin [data-v]', 'click', (_, el) => { L.skin = el.dataset.v!; redraw(); });
+  on('#outfit [data-v]', 'click', (_, el) => { L.outfit = el.dataset.v as Outfit; redraw(); });
+  on('#jersey [data-v]', 'click', (_, el) => { L.jersey = el.dataset.v!; redraw(); });
+  on('#helmet [data-v]', 'click', (_, el) => { L.helmet = el.dataset.v!; redraw(); });
+  on('#bike [data-v]', 'click', (_, el) => { draft.bike = el.dataset.v!; redraw(); });
+  on('#acc [data-v]', 'click', (_, el) => {
+    const a = el.dataset.v as Accessory;
+    L.accessories = L.accessories.includes(a) ? L.accessories.filter((x) => x !== a) : [...L.accessories, a];
+    redraw();
   });
   on('#go', 'click', () => {
     profile = draft;
     saveProfile(profile);
+    game.showcase();
     applyLook();
-    play(!profile.tutorialDone);
+    if (editing) home('you');
+    else play(!profile.tutorialDone);
   });
-  onBack(() => createRider(draft));
+  const back = () => {
+    game.showcase();
+    if (editing) return home('you');
+    createRider(draft);
+  };
+  on('#cancel', 'click', back);
+  onBack(back);
 }
 
 // ---------- gameplay ----------
@@ -409,7 +468,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     const run = game.lastRun;
     const event = opts.event && eventStatus(opts.event).live ? opts.event : undefined;
     const rewards = applyRide(profile!, result, finishReward(route), event ? 2 : 1);
-    cloud.record({ hall: profile!.hall, km: r.distance / 1000, race: route.kind === 'race' && r.finished ? { route: route.id, time: r.time } : undefined });
+    cloud.record({ hall: profile!.hall, department: profile!.department, km: r.distance / 1000, race: route.kind === 'race' && r.finished ? { route: route.id, time: r.time } : undefined });
     if (route.kind === 'race' && r.finished && profile!.bestTimes[result.routeId] === r.time) saveGhost(route.id, { time: r.time, ...run });
     // finishing a live event wins its bike
     let prize: string | undefined;
@@ -868,6 +927,8 @@ function home(next: Tab = 'home') {
             <h1 class="title" style="font-size:26px">${esc(p.name)}</h1>
             ${p.username ? `<p class="muted">@${esc(p.username)}</p>` : ''}
             <p class="small" style="margin-top:4px">Level ${level} · ${esc(hall.name)}</p>
+            ${p.department ? `<p class="muted small">${esc(p.department)}</p>` : ''}
+            ${p.snap ? `<p class="muted small">👻 @${esc(p.snap)}${p.snapPublic ? '' : ' · hidden'}</p>` : ''}
           </div>
         </div>
         <div class="stats">
@@ -879,7 +940,7 @@ function home(next: Tab = 'home') {
           <div class="stat"><b>${fmt(p.xp)}</b><span>XP</span></div>
         </div>
         <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
-        <button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit rider'}</button>
+        <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit details'}</button></div>
         <button class="btn btn-ghost" id="settings">Settings</button>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
         ${cloud.account
@@ -940,7 +1001,8 @@ function home(next: Tab = 'home') {
   // back from another tab goes to Home; from Home it leaves the app
   onBack(tab === 'home' ? null : () => home());
   on('#quizBtn', 'click', () => whereIsIt());
-  on('#edit', 'click', () => createRider({ ...p }, !p.guest));
+  on('#edit', 'click', () => createRider({ ...p, look: structuredClone(p.look) }, !p.guest));
+  on('#dress', 'click', () => dressRider({ ...p, look: structuredClone(p.look) }, true));
   on('#install', 'click', async () => {
     await installPrompt?.prompt();
     installPrompt = null;
@@ -1059,8 +1121,8 @@ function boardScreen(view: string, back: () => void) {
       <div class="wrap stack">
         <button class="btn btn-link back" id="back">← Back</button>
         <p class="kicker">Leaderboards</p>
-        <h1 class="title">${view === 'halls' ? 'Hall Week' : esc(routes.find(([id]) => id === view)?.[1] ?? 'Leaderboard')}</h1>
-        <div class="board-tabs">${[['halls', '🏫 Halls'] as [string, string], ...routes].map(([id, name]) => `<button class="${id === view ? 'on' : ''}" data-view="${id}">${esc(name)}</button>`).join('')}</div>
+        <h1 class="title">${view === 'halls' ? 'Hall Week' : view === 'depts' ? 'Departments' : esc(routes.find(([id]) => id === view)?.[1] ?? 'Leaderboard')}</h1>
+        <div class="board-tabs">${[['halls', '🏫 Halls'] as [string, string], ['depts', '🎓 Departments'] as [string, string], ...routes].map(([id, name]) => `<button class="${id === view ? 'on' : ''}" data-view="${id}">${esc(name)}</button>`).join('')}</div>
         <div id="board" class="card board"><p class="muted small">Loading…</p></div>
         ${cloud.account ? '' : '<p class="muted small">Your times and kilometres appear here once you sign in.</p><button class="btn btn-ghost" id="signIn">Sign in or create an account</button>'}
       </div>
@@ -1078,11 +1140,18 @@ function boardScreen(view: string, back: () => void) {
       }).sort((a, b) => b.km - a.km || a.h.name.localeCompare(b.h.name));
       box.innerHTML = `<p class="muted small">Kilometres ridden for each hall since Monday.</p>${all.map((x, i) => `<div class="board-row${x.h.id === myHall ? ' me' : ''}"><span class="rank">${i + 1}</span><span class="hall-swatch" style="background:${x.h.color}"></span><span class="grow">${esc(x.h.name)}<small>${x.riders} rider${x.riders === 1 ? '' : 's'}</small></span><b>${x.km.toFixed(1)} km</b></div>`).join('')}`;
     }, fail);
+  } else if (view === 'depts') {
+    const mine = profile?.department ?? '';
+    cloud.departmentStandings().then((rows) => {
+      box.innerHTML = `<p class="muted small">Kilometres ridden for each department since Monday.</p>${rows.length
+        ? rows.map((x, i) => `<div class="board-row${x.department === mine ? ' me' : ''}"><span class="rank">${i + 1}</span><span class="grow">${esc(x.department)}<small>${esc(collegeOf(x.department))} · ${x.riders} rider${x.riders === 1 ? '' : 's'}</small></span><b>${x.km.toFixed(1)} km</b></div>`).join('')
+        : '<p class="muted small">No kilometres yet this week. Ride to put your department on the board.</p>'}`;
+    }, fail);
   } else {
     cloud.leaderboard(view).then((rows) => {
       const mine = profile?.bestTimes[view];
       box.innerHTML = rows.length
-        ? rows.map((r, i) => `<div class="board-row${r.me ? ' me' : ''}"><span class="rank">${i + 1}</span><span class="hall-swatch" style="background:${hallById(r.hall).color}"></span><span class="grow">${esc(r.name)}<small>${r.username ? `@${esc(r.username)} · ` : ''}${esc(hallById(r.hall).short)}</small></span><b>${clock(r.best)}</b></div>`).join('')
+        ? rows.map((r, i) => `<div class="board-row${r.me ? ' me' : ''}"><span class="rank">${i + 1}</span><span class="hall-swatch" style="background:${hallById(r.hall).color}"></span><span class="grow">${esc(r.name)}<small>${r.username ? `@${esc(r.username)} · ` : ''}${esc(hallById(r.hall).short)}${r.snap ? ` · 👻 ${esc(r.snap)}` : ''}</small></span><b>${clock(r.best)}</b></div>`).join('')
           + (mine && !rows.some((r) => r.me) ? `<p class="muted small" style="margin-top:8px">Your best: ${clock(mine)}${cloud.account ? '' : ' (sign in to post it)'}</p>` : '')
         : `<p class="muted small">No times yet. Finish this race to be the first.</p>`;
     }, fail);

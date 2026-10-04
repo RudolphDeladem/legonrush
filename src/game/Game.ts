@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import type { BikeSpec } from '../data/campus';
 import { CAMPUS_LOOP, type Route, type RideStep } from './routes';
 import { sfx } from '../audio';
-import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderRig } from './models';
+import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderLook, type RiderRig } from './models';
 import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
 import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES, ROAD_HALF } from './world';
@@ -270,8 +270,8 @@ export class Game {
     return null;
   }
 
-  setLook(jersey: string, bikeColor: string) {
-    this.rider.setJersey(jersey);
+  setLook(look: RiderLook, bikeColor: string) {
+    this.rider.setLook(look);
     this.rider.setBikeColor(bikeColor);
   }
 
@@ -381,8 +381,18 @@ export class Game {
   showcase() {
     this.reset();
     this.phase = 'showcase';
+    this.dressing = false;
     this.setTimeOfDay('day');
   }
+
+  /** a close orbit with the rider in the top half of the screen, for dressing the rider */
+  dressView() {
+    if (this.phase !== 'showcase') this.showcase();
+    // start from the front, so the face, glasses and outfit show first
+    if (!this.dressing) this.orbit = Math.PI * 0.8;
+    this.dressing = true;
+  }
+  private dressing = false;
 
   start(bike: BikeSpec, tutorial: boolean) {
     this.reset();
@@ -856,8 +866,9 @@ export class Game {
     } else if (this.phase === 'showcase') {
       const a = this.orbit;
       const p = this.pose(this.d);
-      cam.position.set(p.x + Math.sin(a) * 5.5, 2.1, p.z + Math.cos(a) * 5.5);
-      cam.lookAt(p.x, 0.9, p.z);
+      const r = this.dressing ? 3.3 : 5.5;
+      cam.position.set(p.x + Math.sin(a) * r, this.dressing ? 1.7 : 2.1, p.z + Math.cos(a) * r);
+      cam.lookAt(p.x, this.dressing ? -0.15 : 0.9, p.z);
     } else {
       const boosting = this.boostTime > 0;
       const back = boosting ? 7.2 : 6.2;

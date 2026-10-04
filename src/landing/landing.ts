@@ -72,3 +72,73 @@ function showEvents() {
 }
 showEvents();
 setInterval(showEvents, 60_000);
+
+// ---------- motion ----------
+document.documentElement.classList.add('js');
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// headline numbers count up once the page is showing
+for (const el of document.querySelectorAll<HTMLElement>('[data-count]')) {
+  const target = Number(el.dataset.count);
+  const suffix = el.dataset.suffix ?? '';
+  if (still) continue;
+  const t0 = performance.now();
+  const tick = (t: number) => {
+    const k = Math.min(1, (t - t0) / 1400);
+    el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3))).toLocaleString('en-GB') + (k === 1 ? suffix : '');
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// sections rise into view; siblings follow one another
+const revealables = document.querySelectorAll<HTMLElement>(
+  '.section-head, .split > *, .split-r > *, .pillar, .event, .live-panel, .race-card, .features li, .step, .board, .faq details, .panel, .together > *, .world-copy, .brands-copy, .ready-copy, .how .h2-line',
+);
+const seen = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    e.target.classList.add('in');
+    seen.unobserve(e.target);
+  }
+}, { rootMargin: '0px 0px -8% 0px' });
+revealables.forEach((el) => {
+  const i = [...(el.parentElement?.children ?? [])].indexOf(el);
+  el.style.setProperty('--d', `${Math.min(i, 5) * 0.08}s`);
+  el.classList.add('reveal');
+  seen.observe(el);
+});
+
+// gameplay clips download and play only when they're on screen
+const clips = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    const v = e.target as HTMLVideoElement;
+    if (e.isIntersecting) {
+      if (!v.src) v.src = v.dataset.src!;
+      v.play().catch(() => { /* autoplay blocked: the poster still shows */ });
+    } else v.pause();
+  }
+}, { rootMargin: '120px' });
+if (!still) document.querySelectorAll<HTMLVideoElement>('video.clip').forEach((v) => clips.observe(v));
+
+// ---------- fastest on campus ----------
+const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`;
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+for (const board of document.querySelectorAll<HTMLElement>('.board[data-route]')) {
+  const list = board.querySelector('ol')!;
+  fetch(`${SUPABASE_URL}/rest/v1/rpc/leaderboard`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_route: board.dataset.route, p_limit: 3 }),
+  })
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((rows: { name: string; hall: string; best: number }[]) => {
+      list.innerHTML = rows.length
+        ? rows.map((r, i) => {
+          const h = HALLS.find((x) => x.id === r.hall);
+          return `<li><span class="medal">${i + 1}</span><span class="who"><b>${esc(r.name)}</b><span>${esc(h?.name ?? 'Non-resident')}</span></span><span class="t">${fmtTime(Number(r.best))}</span></li>`;
+        }).join('')
+        : '<li class="empty">No times yet. Be the first.</li>';
+    })
+    .catch(() => { list.innerHTML = '<li class="empty">Open the game to see the leaderboard.</li>'; });
+}

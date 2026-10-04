@@ -150,6 +150,10 @@ async function pushNow(p: Profile) {
       username: /^[A-Za-z0-9_.]{2,20}$/.test(p.username) ? p.username : null,
       hall: p.hall,
       bike: p.bike,
+      department: p.department || null,
+      snap: p.snapPublic && /^[A-Za-z][A-Za-z0-9._-]{2,14}$/.test(p.snap) ? p.snap : null,
+      gender: p.gender,
+      look: p.look,
       xp: Math.round(p.xp),
       km: Math.round(p.totalDistance / 10) / 100,
       updated_at: new Date().toISOString(),
@@ -179,6 +183,8 @@ export function merge(local: Profile, remote: Profile): Profile {
   return {
     ...base,
     name: who.name, username: who.username, hall: who.hall, bike: who.bike, guest: false,
+    gender: who.gender ?? local.gender, department: who.department ?? local.department ?? '',
+    snap: who.snap ?? '', snapPublic: who.snapPublic ?? true, look: { ...local.look, ...who.look },
     xp: Math.max(local.xp, remote.xp),
     rides: Math.max(local.rides, remote.rides),
     finishes: Math.max(local.finishes, remote.finishes),
@@ -195,7 +201,7 @@ export function merge(local: Profile, remote: Profile): Profile {
 
 // ---------- results: sent now, or kept until the phone is back online ----------
 
-type Outgoing = { table: 'runs'; row: { route: string; time: number } } | { table: 'rides'; row: { hall: string; km: number } };
+type Outgoing = { table: 'runs'; row: { route: string; time: number } } | { table: 'rides'; row: { hall: string; department: string | null; km: number } };
 
 function readOutbox(): Outgoing[] {
   try {
@@ -213,10 +219,10 @@ function writeOutbox(items: Outgoing[]) {
 }
 
 /** Records a ride for Hall Week, and a finished race for the leaderboard. */
-export function record(r: { hall: string; km: number; race?: { route: string; time: number } }) {
+export function record(r: { hall: string; department: string; km: number; race?: { route: string; time: number } }) {
   if (!account) return;
   const items = readOutbox();
-  if (r.km >= 0.05 && r.hall !== 'none') items.push({ table: 'rides', row: { hall: r.hall, km: Math.min(15, Math.round(r.km * 1000) / 1000) } });
+  if (r.km >= 0.05 && r.hall !== 'none') items.push({ table: 'rides', row: { hall: r.hall, department: r.department || null, km: Math.min(15, Math.round(r.km * 1000) / 1000) } });
   if (r.race) items.push({ table: 'runs', row: { route: r.race.route, time: Math.round(r.race.time * 100) / 100 } });
   writeOutbox(items);
   flush();
@@ -250,6 +256,8 @@ export interface BoardRow {
   name: string;
   username: string | null;
   hall: string;
+  department: string | null;
+  snap: string | null;
   best: number;
   me: boolean;
 }
@@ -271,4 +279,17 @@ export async function hallStandings(): Promise<HallRow[]> {
   const { data, error } = await (await sb()).rpc('hall_standings', { p_since: weekStart().toISOString() });
   if (error) throw error;
   return (data ?? []).map((r: HallRow) => ({ hall: r.hall, km: Number(r.km), riders: Number(r.riders) }));
+}
+
+export interface DeptRow {
+  department: string;
+  km: number;
+  riders: number;
+}
+
+/** kilometres per department since Monday */
+export async function departmentStandings(): Promise<DeptRow[]> {
+  const { data, error } = await (await sb()).rpc('department_standings', { p_since: weekStart().toISOString() });
+  if (error) throw error;
+  return (data ?? []).map((r: DeptRow) => ({ department: r.department, km: Number(r.km), riders: Number(r.riders) }));
 }
