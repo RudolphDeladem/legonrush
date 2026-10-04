@@ -133,3 +133,59 @@ export function routeMap(canvas: HTMLCanvasElement, route: Route) {
   ctx.font = '700 20px Sora, system-ui, sans-serif';
   ctx.fillText('N ↑', 12, 28);
 }
+
+export interface Pin { x: number; z: number; color: string; label?: string }
+
+/** North-up view of the whole campus, fitted to the canvas; for tapping on the map. */
+export function campusOverview(canvas: HTMLCanvasElement, around: { x: number; z: number }[]) {
+  const ctx = canvas.getContext('2d')!;
+  const { canvas: map, x0, z0 } = campusCanvas();
+  const b = { minX: Math.min(...around.map((p) => p.x)), maxX: Math.max(...around.map((p) => p.x)), minZ: Math.min(...around.map((p) => p.z)), maxZ: Math.max(...around.map((p) => p.z)) };
+  const pad = 250;
+  const w = b.maxX - b.minX + pad * 2, h = b.maxZ - b.minZ + pad * 2;
+  const k = Math.min(canvas.width / w, canvas.height / h);
+  const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+  const toScreen = (x: number, z: number): [number, number] => [canvas.width / 2 + (x - cx) * k, canvas.height / 2 + (z - cz) * k];
+  /** canvas pixel (in canvas units) to map metres */
+  const toWorld = (px: number, py: number): [number, number] => [cx + (px - canvas.width / 2) / k, cz + (py - canvas.height / 2) / k];
+  const draw = (pins: Pin[] = [], line?: [Pin, Pin]) => {
+    ctx.save();
+    ctx.fillStyle = '#16233f';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.scale(k, k);
+    ctx.translate(-cx, -cz);
+    ctx.drawImage(map, x0, z0, map.width * M_PER_PX, map.height * M_PER_PX);
+    ctx.restore();
+    if (line) {
+      ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(...toScreen(line[0].x, line[0].z));
+      ctx.lineTo(...toScreen(line[1].x, line[1].z));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.font = '700 22px Sora, system-ui, sans-serif';
+    for (const p of pins) {
+      const [sx, sy] = toScreen(p.x, p.z);
+      pin(ctx, sx, sy, 11, p.color);
+      if (p.label) {
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = 'rgba(11,21,48,0.9)';
+        const left = sx > canvas.width * 0.6;
+        ctx.textAlign = left ? 'right' : 'left';
+        const lx = left ? sx - 16 : sx + 16;
+        ctx.strokeText(p.label, lx, sy + 8);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(p.label, lx, sy + 8);
+        ctx.textAlign = 'left';
+      }
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.font = '700 24px Sora, system-ui, sans-serif';
+    ctx.fillText('N ↑', 14, 32);
+  };
+  return { draw, toWorld, toScreen };
+}

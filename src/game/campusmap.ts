@@ -11,6 +11,8 @@ export interface Place {
   kind: PlaceKind;
   x: number;
   z: number;
+  /** trotro lines that stop here */
+  lines?: string[];
 }
 export interface Road {
   name?: string;
@@ -33,15 +35,22 @@ export interface Area {
 
 interface RawData {
   attribution: string;
+  origin: [number, number];
   nodes: number[];
   roads: { c: number; w: number[]; n?: string }[];
   buildings: { p: number[]; h?: number; n?: string; i?: number[][] }[];
   areas: { k: string; p: number[] }[];
-  places: { n: string; k: string; x: number; z: number }[];
+  places: { n: string; k: string; x: number; z: number; l?: string[] }[];
+  lines: Record<string, string[]>;
 }
-const data = raw as RawData;
+const data = raw as unknown as RawData;
 
 export const ATTRIBUTION = data.attribution;
+
+// local metres <-> latitude/longitude (same projection as scripts/osm-campus.mjs)
+const [LAT0, LNG0] = data.origin;
+const M_LAT = 110574, M_LNG = 111320 * Math.cos((LAT0 * Math.PI) / 180);
+export const toLatLng = (x: number, z: number): [number, number] => [LAT0 - z / M_LAT, LNG0 + x / M_LNG];
 /** road graph node positions: x, z pairs in metres */
 export const NODE_XZ = Float32Array.from(data.nodes, (v) => v / 10);
 export const ROADS: Road[] = data.roads.map((r) => ({ name: r.n, cls: r.c as RoadClass, nodes: r.w }));
@@ -55,7 +64,9 @@ export const BUILDINGS: Building[] = data.buildings.map((b) => {
   return { name: b.n, height: b.h, pts, holes: (b.i ?? []).map((h) => Float32Array.from(h, (v) => v / 10)), minX, maxX, minZ, maxZ };
 });
 export const AREAS: Area[] = data.areas.map((a) => ({ kind: a.k as Area['kind'], pts: Float32Array.from(a.p, (v) => v / 10) }));
-export const PLACES: Place[] = data.places.map((p) => ({ name: p.n, kind: p.k as PlaceKind, x: p.x / 10, z: p.z / 10 }));
+export const PLACES: Place[] = data.places.map((p) => ({ name: p.n, kind: p.k as PlaceKind, x: p.x / 10, z: p.z / 10, ...(p.l && { lines: p.l }) }));
+/** trotro line ref -> the places it runs between */
+export const LINE_ENDS = data.lines;
 
 export const placeByName = (name: string) => PLACES.find((p) => p.name === name);
 
@@ -318,8 +329,16 @@ export function findPath(from: [number, number], to: [number, number], mode: Tra
 
 export const nodeXZ = (i: number): [number, number] => [nx(i), nz(i)];
 
+/** Direction (radians, atan2(dx, dz)) of the road nearest to (x, z), and where on it. */
+export function roadAt(x: number, z: number): { x: number; z: number; angle: number } | null {
+  const i = nearestNode(x, z);
+  if (i < 0 || !adj[i].length) return null;
+  const j = adj[i][0].to;
+  return { x: nx(i), z: nz(i), angle: Math.atan2(nx(j) - nx(i), nz(j) - nz(i)) };
+}
+
 // ---------- directions ----------
-export type Turn = 'start' | 'straight' | 'slight-left' | 'slight-right' | 'left' | 'right' | 'sharp-left' | 'sharp-right' | 'arrive';
+export type Turn = 'start' | 'straight' | 'slight-left' | 'slight-right' | 'left' | 'right' | 'sharp-left' | 'sharp-right' | 'arrive' | 'stop';
 export interface Step {
   turn: Turn;
   text: string;

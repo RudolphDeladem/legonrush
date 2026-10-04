@@ -36,22 +36,28 @@ const LABEL_PRIORITY: Record<PlaceKind, number> = { landmark: 0, hall: 1, academ
 
 /** Builds a ride along the shortest real way through the given places, in order. */
 export function routeThrough(stops: Place[], opts: { id: string; name: string; kind: RouteKind; difficulty?: number; mode?: TravelMode }): Route | null {
-  const pts: [number, number][] = [];
-  const tags: number[] = [];
-  const steps: Step[] = [];
-  let offset = 0;
+  const nodes: number[] = [];
+  const roads: number[] = [];
   for (let k = 0; k < stops.length - 1; k++) {
     const path = findPath([stops[k].x, stops[k].z], [stops[k + 1].x, stops[k + 1].z], opts.mode);
     if (!path || path.nodes.length < 2) return null;
-    const seg = path.nodes.map(nodeXZ);
-    if (pts.length) seg.shift(); // shared node between legs
-    pts.push(...seg);
-    tags.push(...path.roads);
-    const legSteps = directions(path, stops[k + 1].name).map((s) => ({ ...s, at: s.at + offset }));
-    // between legs, "arrive" and the next "head ..." are not useful
-    steps.push(...legSteps.filter((s, i) => (k === 0 || s.turn !== 'start') && (k === stops.length - 2 || s.turn !== 'arrive' || i !== legSteps.length - 1)));
-    offset += path.length;
+    nodes.push(...(nodes.length ? path.nodes.slice(1) : path.nodes)); // legs share their end node
+    roads.push(...path.roads);
   }
+  // a stop at the end of a side road would mean riding in and turning back: ride past it instead
+  for (let i = 1; i < nodes.length - 1; ) {
+    if (nodes[i - 1] === nodes[i + 1]) {
+      nodes.splice(i, 2);
+      roads.splice(i - 1, 2);
+      i = Math.max(1, i - 1);
+    } else i++;
+  }
+  if (nodes.length < 2) return null;
+  const pts = nodes.map(nodeXZ);
+  const tags = roads;
+  let pathLength = 0;
+  for (let k = 0; k < pts.length - 1; k++) pathLength += Math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
+  const steps: Step[] = directions({ nodes, roads, length: pathLength }, stops[stops.length - 1].name);
   // straight run-up before the start line and run-out after the finish line
   const ext = (a: [number, number], b: [number, number], len: number): [number, number] => {
     const dx = a[0] - b[0], dz = a[1] - b[1], l = Math.hypot(dx, dz) || 1;
@@ -64,6 +70,12 @@ export function routeThrough(stops: Place[], opts: { id: string; name: string; k
   const length = Math.round(track.length - LEAD - TAIL);
   const rideD = (x: number, z: number) => Math.max(0, Math.min(length, track.project(x, z).d - LEAD));
   const rideSteps: RideStep[] = steps.map((s) => ({ ...s, d: s.turn === 'start' ? 0 : s.turn === 'arrive' ? length : rideD(s.x, s.z) }));
+  // tours: announce each stop on the way
+  stops.slice(1, -1).forEach((stop, k) => {
+    const d = rideD(stop.x, stop.z);
+    rideSteps.push({ turn: 'stop', text: `Stop ${k + 1}: ${stop.name}`, at: d, x: stop.x, z: stop.z, d });
+  });
+  rideSteps.sort((a, b) => a.d - b.d || (a.turn === 'start' ? -1 : b.turn === 'start' ? 1 : 0));
 
   // label the places the route passes, nearest and most useful first, spaced out
   const near: (RouteLabel & { pr: number; dist: number })[] = [];
@@ -74,7 +86,7 @@ export function routeThrough(stops: Place[], opts: { id: string; name: string; k
     near.push({ place, d: pr.d, pr: LABEL_PRIORITY[place.kind], dist: pr.dist });
   }
   near.sort((a, b) => a.pr - b.pr || a.dist - b.dist);
-  const labels: RouteLabel[] = [];
+  const labels: RouteLabel[] = stops.slice(1, -1).map((place) => ({ place, d: track.project(place.x, place.z).d }));
   for (const n of near) {
     if (n.place === stops[stops.length - 1]) continue;
     if (labels.some((l) => Math.abs(l.d - n.d) < 45 || l.place.name === n.place.name)) continue;
@@ -110,3 +122,12 @@ const must = (name: string) => {
 
 /** Quick Ride: from Hilla Limann Hall in the south, past Sarbah and Legon Hall, up to the Great Hall. */
 export const CAMPUS_LOOP = routeThrough([must('Dr. Hilla Limann Hall'), must('Great Hall')], { id: 'limann-great-hall', name: 'Limann to Great Hall', kind: 'race' })!;
+
+/** The places a new student needs in week one, in an order that rides as one loop up to the Great Hall. */
+export const TOUR_STOPS = ['Night Market', 'Central Cafeteria, CC', 'Jones Quartey Building, JQB', 'The Balme Library', 'University of Ghana Business School', 'University of Ghana Registry', 'Great Hall'];
+let tour: Route | null = null;
+/** Freshers' Tour, built the first time it is asked for. */
+export function freshersTour() {
+  tour ??= routeThrough(TOUR_STOPS.map(must), { id: 'freshers-tour', name: "Freshers' Tour", kind: 'explore', difficulty: 1 });
+  return tour!;
+}

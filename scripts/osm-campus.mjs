@@ -27,7 +27,7 @@ for (const m of xml.matchAll(/<node ([^>]*?)(\/>|>([\s\S]*?)<\/node>)/g)) {
   nodes.set(a.id, p);
   if (m[3]) {
     const t = tagsOf(m[3]);
-    if (t.name) nodeTags.push({ p, t });
+    if (t.name) nodeTags.push({ id: a.id, p, t });
   }
 }
 const ways = new Map();
@@ -159,8 +159,16 @@ for (const rel of relations) {
   }
   if (!rel.t.building && rel.t.name && rings.length) { const [x, z] = centroid(ringCoords(rings[0])); named.push({ name: rel.t.name, t: rel.t, x, z, from: 'area', size: area(ringCoords(rings[0])) }); }
 }
-for (const { p, t } of nodeTags) {
-  if (t.amenity || t.shop || t.tourism || t.office || t.leisure || t.highway === 'bus_stop' || t.building) named.push({ name: t.name, t, x: p[0], z: p[1], from: 'node', size: 0 });
+// trotro lines that stop at each node (route=bus relations)
+const linesAt = new Map();
+const lineEnds = {}; // ref -> the places the line runs between
+for (const rel of relations) {
+  if (rel.t.type !== 'route' || rel.t.route !== 'bus' || !rel.t.ref) continue;
+  lineEnds[rel.t.ref] = [...new Set([...(lineEnds[rel.t.ref] ?? []), rel.t.from, rel.t.to].filter(Boolean))];
+  for (const m of rel.members) if (m.type === 'node') linesAt.set(m.ref, new Set([...(linesAt.get(m.ref) ?? []), rel.t.ref]));
+}
+for (const { id, p, t } of nodeTags) {
+  if (t.amenity || t.shop || t.tourism || t.office || t.leisure || t.highway === 'bus_stop' || t.building) named.push({ id, name: t.name, t, x: p[0], z: p[1], from: 'node', size: 0 });
 }
 
 // ---------- places ----------
@@ -186,7 +194,10 @@ for (const c of named) {
   if (SKIP.test(name) || name.length < 3) continue;
   const key = norm(name);
   if (places.some((p) => (norm(p.n) === key && Math.hypot(p.x - c.x, p.z - c.z) < 300) || (Math.hypot(p.x - c.x, p.z - c.z) < 150 && norm(p.n).startsWith(key) && /^( (hall|building|block|centre|center))+$/.test(norm(p.n).slice(key.length))))) continue;
-  places.push({ n: name, k: kindOf(name, c.t), x: c.x, z: c.z });
+  const place = { n: name, k: kindOf(name, c.t), x: c.x, z: c.z };
+  const lines = c.id && linesAt.get(c.id);
+  if (lines) place.l = [...lines].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  places.push(place);
 }
 // fill gaps from the UG Campus Map list
 const listed = JSON.parse(readFileSync('data/ug-campus-map-pois.json', 'utf8'));
@@ -239,7 +250,8 @@ const json = {
   roads,
   buildings,
   areas,
-  places: places.map((p) => ({ n: p.n, k: p.k, x: dm(p.x), z: dm(p.z) })),
+  lines: lineEnds,
+  places: places.map((p) => ({ n: p.n, k: p.k, x: dm(p.x), z: dm(p.z), ...(p.l && { l: p.l }) })),
 };
 writeFileSync(out, JSON.stringify(json));
 console.log(`courtyards ${courtyards}, renamed ${renamed} same-name places`);

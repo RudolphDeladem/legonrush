@@ -5,6 +5,7 @@ import { CAMPUS_LOOP, type Route, type RideStep } from './routes';
 import { sfx } from '../audio';
 import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderRig } from './models';
 import type { Track } from './track';
+import { buildLandmarks } from './landmarks';
 import { buildCampus, buildRouteLayer, buildSky, disposeLayer, LANES } from './world';
 
 export type Action = 'left' | 'right' | 'jump' | 'boost';
@@ -148,7 +149,7 @@ export class Game {
     this.sun.shadow.bias = -0.0005;
     this.scene.add(this.sun, this.sun.target);
 
-    this.scene.add(buildCampus());
+    this.scene.add(buildCampus(), buildLandmarks());
     this.setRoute(CAMPUS_LOOP);
     this.scene.add(this.dynamic);
 

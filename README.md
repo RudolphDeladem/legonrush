@@ -14,7 +14,10 @@ A browser-based 3D cycling game set on the University of Ghana, Legon campus, de
 - Splash → Welcome → Create Rider (name, username, hall) → Choose Starter Bike → tutorial first ride → Results → Home
 - Guest play (skip sign-up, create a rider later)
 - **The real campus from OpenStreetMap**: every road and footpath, 1,600 building footprints at their real positions and sizes, pitches, parking and water, and 400+ named places
-- **Explore**: pick where you are and where you need to be (for example Limann Hall to the School of Law or Pent), see the real shortest way on a map with distance, walking and cycling time and turn-by-turn directions, then ride it with a direction banner, place labels and a heading-up mini map. Built so freshers can learn their way around.
+- **Explore**: pick where you are and where you need to be (for example Limann Hall to the School of Law or Pent), see the real shortest way on a map with distance, walking and cycling time and turn-by-turn directions, then ride it with a direction banner, place labels and a heading-up mini map. Built so freshers can learn their way around. Routes can be shared as a link (or on WhatsApp) and opened in Google Maps; each destination gets a card with what it is, what is nearby and the nearest trotro stop.
+- **Freshers' Tour**: one 3.5 km ride past Night Market, Central Cafeteria, JQB, the Balme Library, the Business School, the Registry and the Great Hall
+- **Where is it?**: five campus places, tap the map where you think each one is, earn coins
+- First-draft landmark models: the Balme Library clock tower, the Great Hall tower, the main gate and the Night Market stalls
 - **Quick Ride, Limann to Great Hall (2.6 km)**: 3-lane arcade runner on the real roads with cars, trotros, pedestrians, barriers and potholes, Rush Coins, a boost meter, score, distance, finish line and results
 - Real halls of residence to represent; jersey colour follows your hall
 - Home hub, Ride, Race (coming soon), Events (coming soon) and You (profile + stats)
