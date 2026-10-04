@@ -42,6 +42,10 @@ export interface BikeSpec {
   acceleration: number;
   handling: number;
   color: string;
+  /** Rush Coins to buy it in the garage; starter bikes have none */
+  price?: number;
+  /** won by finishing this event while it is live */
+  event?: string;
 }
 
 export const BIKES: BikeSpec[] = [
@@ -50,4 +54,14 @@ export const BIKES: BikeSpec[] = [
   { id: 'cruiser', name: 'Cruiser', tagline: 'Stable', speed: 2, acceleration: 4, handling: 5, color: '#3bb6e8' },
 ];
 
-export const bikeById = (id: string) => BIKES.find((b) => b.id === id) ?? BIKES[0];
+/** Bikes beyond the starters: bought with Rush Coins or won in events. */
+export const GARAGE_BIKES: BikeSpec[] = [
+  { id: 'bmx', name: 'BMX', tagline: 'Quick off the line', speed: 3, acceleration: 5, handling: 5, color: '#2ecc71', price: 1200 },
+  { id: 'pro', name: 'Pro Racer', tagline: 'Built for records', speed: 5, acceleration: 4, handling: 4, color: '#f5f5f5', price: 3000 },
+  { id: 'sunset', name: 'Sunset Bike', tagline: 'Sunset Rush prize', speed: 4, acceleration: 4, handling: 4, color: '#ff8c42', event: 'sunset-rush' },
+  { id: 'neon', name: 'Neon Bike', tagline: 'Night Rush prize', speed: 4, acceleration: 5, handling: 4, color: '#39ff14', event: 'night-rush' },
+];
+
+export const ALL_BIKES = [...BIKES, ...GARAGE_BIKES];
+
+export const bikeById = (id: string) => ALL_BIKES.find((b) => b.id === id) ?? BIKES[0];

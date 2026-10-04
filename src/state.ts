@@ -17,6 +17,10 @@ export interface Profile {
   /** local date (YYYY-MM-DD) of the last daily reward, and how many days in a row */
   lastDaily: string;
   streak: number;
+  /** garage bikes bought or won (the starter bikes are always available) */
+  ownedBikes: string[];
+  /** this week's riding for your hall */
+  week: { id: string; km: number; claimed: boolean };
 }
 
 const KEY = 'legonrush.profile.v1';
@@ -27,6 +31,7 @@ export function newProfile(): Profile {
     name: 'Rider', username: '', hall: 'none', bike: 'city', guest: true,
     coins: 0, xp: 0, rides: 0, finishes: 0, totalDistance: 0, bestScore: 0, bestDistance: 0,
     bestTimes: {}, tutorialDone: false, lastDaily: '', streak: 0,
+    ownedBikes: [], week: { id: '', km: 0, claimed: false },
   };
 }
 
@@ -143,11 +148,26 @@ export interface RideRewards {
   levelAfter: number;
 }
 
-/** reward is the coin bonus for reaching the finish */
-export function applyRide(p: Profile, r: RideResult, reward = 250): RideRewards {
+// Hall Week: ride a set distance for your hall each week (Monday to Sunday) for a bonus.
+export const WEEK_GOAL_KM = 10;
+export const WEEK_REWARD = 500;
+export function weekId(now = new Date()) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // back to Monday
+  return d.toLocaleDateString('en-CA');
+}
+export function currentWeek(p: Profile) {
+  const id = weekId();
+  if (p.week.id !== id) p.week = { id, km: 0, claimed: false };
+  return p.week;
+}
+
+/** reward is the coin bonus for reaching the finish; boost multiplies all coins (events) */
+export function applyRide(p: Profile, r: RideResult, reward = 250, boost = 1): RideRewards {
   const finishBonus = r.finished ? reward : 0;
   const score = Math.round(r.distance + r.coins * 10 + (r.finished ? 500 : 0));
-  const coins = r.coins + finishBonus;
+  const coins = (r.coins + finishBonus) * boost;
+  currentWeek(p).km += r.distance / 1000;
   const xp = Math.round(r.distance / 10 + r.coins + (r.finished ? 200 : 0));
   const levelBefore = levelFor(p.xp);
 

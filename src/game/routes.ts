@@ -159,3 +159,5 @@ export function raceRoute(def: RaceDef) {
   if (!races.has(def.id)) races.set(def.id, routeThrough(def.stops.map(must), { id: def.id, name: def.name, kind: 'race', difficulty: def.difficulty, time: def.time })!);
   return races.get(def.id)!;
 }
+
+export { EVENTS, eventStatus, type EventDef } from '../data/events';

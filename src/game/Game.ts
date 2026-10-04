@@ -24,8 +24,10 @@ export interface HudState {
   yaw: number;
   /** explore rides: the next direction and how far away it is */
   next: { text: string; turn: string; dist: number } | null;
-  /** seconds behind your best run's ghost (negative: ahead), when racing one */
+  /** seconds behind the first rival (negative: ahead), when racing one */
   ghostGap: number | null;
+  /** your place among the rivals, when racing more than one */
+  place: { pos: number; of: number } | null;
 }
 
 /** A recorded ride: road distance and lateral offset every `step` seconds. */
@@ -35,6 +37,21 @@ export interface GhostRun {
   x: number[];
 }
 const GHOST_STEP = 0.1;
+
+/** Another rider on the road: your best run, a friend's challenge or a bot, replayed from a recording. */
+export interface Rival {
+  run: GhostRun;
+  name: string;
+  color: string;
+  /** see-through, for your own best run */
+  ghostly: boolean;
+}
+
+interface RivalState extends Rival {
+  rig: RiderRig;
+  crank: number;
+  finish: number;
+}
 
 export interface RideEnd {
   distance: number;
@@ -103,9 +120,8 @@ export class Game {
   private routeLayer: THREE.Group | null = null;
   private timer = new THREE.Timer();
   private headlight = new THREE.SpotLight('#fff1cf', 0, 45, 0.55, 0.6, 1.2);
-  private ghost: GhostRun | null = null;
-  private ghostRig: RiderRig;
-  private ghostCrank = 0;
+  private rivals: RivalState[] = [];
+  private rigPool: { rig: RiderRig; mat: THREE.MeshStandardMaterial }[] = [];
   private rec: GhostRun = { step: GHOST_STEP, d: [], x: [] };
 
   private phase: Phase = 'showcase';
@@ -196,14 +212,6 @@ export class Game {
     this.headlight.target.position.set(0, 0, -14);
     this.rider.root.add(this.headlight, this.headlight.target);
 
-    // your best run, ridden by a see-through rider
-    this.ghostRig = buildRider('#9fd8ff', '#9fd8ff');
-    const ghostMat = new THREE.MeshStandardMaterial({ color: '#bfe6ff', emissive: '#4aa8ff', emissiveIntensity: 0.4, transparent: true, opacity: 0.38, depthWrite: false });
-    this.ghostRig.root.traverse((o) => {
-      if (o instanceof THREE.Mesh) { o.material = ghostMat; o.castShadow = false; }
-    });
-    this.ghostRig.root.visible = false;
-    this.scene.add(this.ghostRig.root);
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -291,7 +299,46 @@ export class Game {
 
   /** Your best run on this route, to race against; null for none. */
   setGhost(g: GhostRun | null) {
-    this.ghost = g && g.d.length > 1 ? g : null;
+    this.setRivals(g ? [{ run: g, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
+  }
+
+  /** Riders replayed beside you; the first one is the gap shown in the HUD. */
+  setRivals(list: Rival[]) {
+    for (const p of this.rigPool) p.rig.root.visible = false;
+    this.rivals = list.filter((r) => r.run.d.length > 1).map((r, i) => {
+      let p = this.rigPool[i];
+      if (!p) {
+        const rig = buildRider('#ffffff', '#ffffff');
+        const mat = new THREE.MeshStandardMaterial({ transparent: true, depthWrite: false });
+        rig.root.traverse((o) => {
+          if (o instanceof THREE.Mesh) { o.material = mat; o.castShadow = false; }
+        });
+        rig.root.visible = false;
+        this.scene.add(rig.root);
+        p = this.rigPool[i] = { rig, mat };
+      }
+      p.mat.color.set(r.color);
+      p.mat.emissive.set(r.color);
+      p.mat.emissiveIntensity = r.ghostly ? 0.4 : 0.15;
+      p.mat.opacity = r.ghostly ? 0.38 : 0.7;
+      return { ...r, rig: p.rig, crank: 0, finish: this.finishTime(r.run) };
+    });
+  }
+
+  /** When a recorded run crossed the finish line, in seconds; Infinity if it never did. */
+  private finishTime(g: GhostRun) {
+    for (let i = 1; i < g.d.length; i++) {
+      if (g.d[i] >= this.route.length) {
+        const k = (this.route.length - g.d[i - 1]) / Math.max(1e-6, g.d[i] - g.d[i - 1]);
+        return (i - 1 + Math.min(1, Math.max(0, k))) * g.step;
+      }
+    }
+    return Infinity;
+  }
+
+  /** Finish times of the rivals in this ride, in order. */
+  get rivalTimes() {
+    return this.rivals.map((r) => ({ name: r.name, time: r.finish }));
   }
 
   /** The ride just finished, sampled for a ghost. */
@@ -299,9 +346,8 @@ export class Game {
     return { step: this.rec.step, d: this.rec.d.slice(), x: this.rec.x.slice() };
   }
 
-  /** Ghost distance and offset at ride time t. */
-  private ghostAt(t: number): [number, number] {
-    const g = this.ghost!;
+  /** A recorded run's distance and offset at ride time t. */
+  private runAt(g: GhostRun, t: number): [number, number] {
     const f = t / g.step;
     const i = Math.min(Math.floor(f), g.d.length - 1);
     const j = Math.min(i + 1, g.d.length - 1);
@@ -347,7 +393,7 @@ export class Game {
     this.countdownT = tutorial ? 0.01 : 2.4;
     this.lastCount = '';
     this.setTimeOfDay(this.route.time ?? 'day');
-    this.ghostRig.root.visible = !!this.ghost;
+    for (const r of this.rivals) r.rig.root.visible = true;
     this.updateGhost(0);
   }
 
@@ -397,7 +443,7 @@ export class Game {
     this.lane = 1;
     this.paused = false;
     this.rec = { step: GHOST_STEP, d: [], x: [] };
-    if (this.ghostRig) this.ghostRig.root.visible = false;
+    for (const p of this.rigPool) p.rig.root.visible = false;
     this.rider.body.rotation.set(0, 0, 0);
     this.rider.body.position.set(0, 0, 0);
   }
@@ -574,34 +620,40 @@ export class Game {
   }
 
   private updateGhost(dt: number) {
-    if (!this.ghost) return;
-    const r = this.ghostRig;
-    const [gd, gx] = this.ghostAt(this.time);
-    // the ghost runs on after its finish line, then fades out
-    const p = this.pose(gd, gx);
-    r.root.position.set(p.x, 0, p.z);
-    r.root.rotation.y = p.yaw;
-    const [pd] = this.ghostAt(Math.max(0, this.time - 0.2));
-    const v = (gd - pd) / 0.2;
-    this.ghostCrank += dt * v * 0.9;
-    for (const w of r.wheels) w.rotation.x -= (v / 0.38) * dt;
-    r.crank.rotation.x = -this.ghostCrank;
-    r.legs[0].rotation.x = Math.sin(this.ghostCrank) * 0.55;
-    r.legs[1].rotation.x = Math.sin(this.ghostCrank + Math.PI) * 0.55;
-    r.root.visible = gd < this.route.length + 25;
+    for (const r of this.rivals) {
+      const rig = r.rig;
+      const [gd, gx] = this.runAt(r.run, this.time);
+      const p = this.pose(gd, gx);
+      rig.root.position.set(p.x, 0, p.z);
+      rig.root.rotation.y = p.yaw;
+      const [pd] = this.runAt(r.run, Math.max(0, this.time - 0.2));
+      const v = (gd - pd) / 0.2;
+      r.crank += dt * v * 0.9;
+      for (const w of rig.wheels) w.rotation.x -= (v / 0.38) * dt;
+      rig.crank.rotation.x = -r.crank;
+      rig.legs[0].rotation.x = Math.sin(r.crank) * 0.55;
+      rig.legs[1].rotation.x = Math.sin(r.crank + Math.PI) * 0.55;
+      // rivals ride on past their finish line, then leave the road
+      rig.root.visible = gd < this.route.length + 25;
+    }
   }
 
   private ghostGap(): number | null {
-    if (!this.ghost || this.phase === 'countdown') return null;
-    const [gd] = this.ghostAt(this.time);
-    if (gd >= this.route.length) {
-      // the ghost has finished: the gap is how long ago it crossed the line
-      const g = this.ghost;
-      let i = g.d.length - 1;
-      while (i > 0 && g.d[i - 1] >= this.route.length) i--;
-      return this.time - i * g.step;
-    }
+    const r = this.rivals[0];
+    if (!r || this.phase === 'countdown') return null;
+    const [gd] = this.runAt(r.run, this.time);
+    // the rival has finished: the gap is how long ago it crossed the line
+    if (gd >= this.route.length) return this.time - r.finish;
     return (gd - this.d) / Math.max(this.speed, 8);
+  }
+
+  private standing(): { pos: number; of: number } | null {
+    if (this.rivals.length < 2) return null;
+    const ahead = this.rivals.filter((r) => {
+      if (this.d >= this.route.length) return r.finish < this.time;
+      return this.runAt(r.run, this.time)[0] > this.d;
+    }).length;
+    return { pos: ahead + 1, of: this.rivals.length + 1 };
   }
 
   private emitHud(countdown: string | null) {
@@ -616,6 +668,7 @@ export class Game {
       pos: [this.rider.root.position.x, this.rider.root.position.z],
       yaw: this.rider.root.rotation.y,
       ghostGap: this.ghostGap(),
+      place: this.standing(),
       next: this.route.kind === 'explore' ? (() => { const n = this.nextStep(); return n && { text: n.step.text, turn: n.step.turn, dist: n.dist }; })() : null,
     });
   }

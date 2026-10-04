@@ -5,11 +5,13 @@ import '@fontsource/sora/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
-import { BIKES, HALLS, HALL_PLACE, bikeById, hallById } from './data/campus';
-import { CAMPUS_LOOP, RACES, TOUR_STOPS, exploreRoute, freshersTour, raceRoute, type RaceDef, type Route } from './game/routes';
+import { BIKES, GARAGE_BIKES, HALLS, HALL_PLACE, bikeById, hallById, type BikeSpec } from './data/campus';
+import { CAMPUS_LOOP, EVENTS, RACES, TOUR_STOPS, eventStatus, exploreRoute, freshersTour, raceRoute, type EventDef, type RaceDef, type Route } from './game/routes';
+import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './game/rivals';
+import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { applyRide, claimDaily, clearGhosts, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { WEEK_GOAL_KM, WEEK_REWARD, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 
@@ -117,19 +119,28 @@ function splash() {
   setTimeout(() => {
     // a shared route link opens straight into Explore, even for someone new
     const link = new URLSearchParams(location.search);
+    if (link.get('c')) {
+      history.replaceState(null, '', location.pathname);
+      ensureProfile();
+      return challengeIntro(decodeChallenge(link.get('c')!));
+    }
     if (link.get('to')) {
       history.replaceState(null, '', location.pathname);
       if (link.get('mode') === 'walk' || link.get('mode') === 'cycle') { exploreOpts.mode = link.get('mode') as TravelMode; saveExploreOpts(); }
-      if (!profile) {
-        profile = newProfile();
-        profile.name = 'Guest';
-        saveProfile(profile);
-      }
+      ensureProfile();
       return explorePicker(link.get('from') ?? undefined, link.get('to')!);
     }
     if (profile) home();
     else welcome();
   }, 1400);
+}
+
+/** someone opening a shared link plays straight away as a guest */
+function ensureProfile() {
+  if (profile) return;
+  profile = newProfile();
+  profile.name = 'Guest';
+  saveProfile(profile);
 }
 
 function welcome() {
@@ -260,7 +271,16 @@ const finishReward = (r: Route) => (isExplore(r) ? 50 + Math.round(r.length / 20
 
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
-function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
+interface PlayOpts {
+  /** bots for Quick Match */
+  rivals?: Rival[];
+  /** a friend's run from a challenge link */
+  challenge?: Challenge;
+  /** a timed event this ride counts for */
+  event?: EventDef;
+}
+
+function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}) {
   if (!profile) return;
   if (game.currentRoute !== route) game.setRoute(route);
   applyLook();
@@ -274,7 +294,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
         <div class="hud-progress">
           <div class="xpbar"><div id="prog" style="width:0%"></div></div>
           <p class="muted">${esc((route.id === 'explore' ? `To ${route.to.name}` : route.name).toUpperCase())}</p>
-          <p class="ghost-gap" id="ghostGap" hidden></p>
+          <div class="row" style="gap:6px;justify-content:center"><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
         </div>
         <div class="row">
           <div class="hud-pill">${icons.coin} <span id="coins">0</span></div>
@@ -302,9 +322,14 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   const drawMap = miniMap(app.querySelector<HTMLCanvasElement>('#minimap')!, route);
   const turn = $('turn'), turnArrow = $('turnArrow'), turnDist = $('turnDist'), turnText = $('turnText');
   const ghostGap = $('ghostGap');
-  // races: your best run rides with you
-  const ghost = route.kind === 'race' ? loadGhost(route.id) : null;
-  game.setGhost(ghost);
+  const placeEl = $('place');
+  // races: a friend's challenge, Quick Match bots, or else your own best run rides with you
+  const ghost = route.kind === 'race' && !opts.challenge && !opts.rivals ? loadGhost(route.id) : null;
+  const rivals: Rival[] = opts.challenge
+    ? [{ run: opts.challenge.run, name: opts.challenge.name, color: '#ffd21f', ghostly: false }]
+    : opts.rivals ?? (ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
+  game.setRivals(rivals);
+  const gapName = rivals[0]?.name.replace(/ \(bot\)$/, '') ?? '';
   let lastTurn = '';
 
   // tutorial: teach through play, one move at a time
@@ -352,10 +377,12 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
       turn.classList.toggle('soon', h.next.dist < 60);
     }
     prog.style.width = `${(h.distance / h.routeLength) * 100}%`;
+    placeEl.hidden = !h.place;
+    if (h.place) placeEl.textContent = `${ordinal(h.place.pos)} of ${h.place.of}`;
     ghostGap.hidden = h.ghostGap === null;
     if (h.ghostGap !== null) {
       const behind = h.ghostGap > 0.05;
-      ghostGap.textContent = `Best run ${behind ? '+' : '−'}${Math.abs(h.ghostGap).toFixed(1)} s`;
+      ghostGap.textContent = `${gapName} ${behind ? '+' : '−'}${Math.abs(h.ghostGap).toFixed(1)} s`;
       ghostGap.classList.toggle('behind', behind);
     }
     coins.textContent = String(h.coins);
@@ -378,9 +405,17 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
     cleanup();
     const result: RideResult = { routeId: routeKey(route), ...r };
     const run = game.lastRun;
-    const rewards = applyRide(profile!, result, finishReward(route));
+    const event = opts.event && eventStatus(opts.event).live ? opts.event : undefined;
+    const rewards = applyRide(profile!, result, finishReward(route), event ? 2 : 1);
     if (route.kind === 'race' && r.finished && profile!.bestTimes[result.routeId] === r.time) saveGhost(route.id, { time: r.time, ...run });
-    results(result, rewards, route, !!ghost);
+    // finishing a live event wins its bike
+    let prize: string | undefined;
+    if (event && r.finished && !profile!.ownedBikes.includes(event.prize)) {
+      profile!.ownedBikes.push(event.prize);
+      saveProfile(profile!);
+      prize = event.prize;
+    }
+    results(result, rewards, route, { hadGhost: !!ghost, rivals: game.rivalTimes, run, opts, event, prize });
   };
 
   // controls
@@ -437,7 +472,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
     ov.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => b.addEventListener('click', () => {
       const p = b.dataset.p;
       if (p === 'continue') resume();
-      if (p === 'restart') { cleanup(); play(false, route); }
+      if (p === 'restart') { cleanup(); play(false, route, opts); }
       if (p === 'sound') {
         changeSettings({ sound: !settings.sound });
         b.textContent = `Sound: ${settings.sound ? 'On' : 'Off'}`;
@@ -451,7 +486,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
     app.querySelector('#pauseOverlay')?.remove();
     onBack(togglePause);
   };
-  const leave = () => (route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(route.kind === 'race' ? 'ride' : 'home'));
+  const leave = () => (route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
   document.addEventListener('visibilitychange', onHidden);
@@ -483,8 +518,147 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
 
 // ---------- results ----------
 
-function results(r: RideResult, rw: RideRewards, route: Route, hadGhost = false) {
+interface ResultExtras {
+  hadGhost: boolean;
+  rivals: { name: string; time: number }[];
+  run: GhostRun;
+  opts: PlayOpts;
+  event?: EventDef;
+  prize?: string;
+}
+
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
+
+/** A link that lets a friend race this run. */
+const challengeLink = (route: Route, run: GhostRun, time: number) =>
+  `${location.origin}/play/?c=${encodeChallenge({ routeId: route.id, name: profile?.name || 'A friend', time, run })}`;
+
+/** the route a challenge or event names: the Campus Loop or one of the races */
+function routeById(id: string): Route | null {
+  if (id === CAMPUS_LOOP.id) return CAMPUS_LOOP;
+  const def = RACES.find((r) => r.id === id);
+  return def ? raceRoute(def) : null;
+}
+
+const hourText = (d: Date) => {
+  const h = d.getHours();
+  return h === 0 ? 'midnight' : `${h % 12 || 12} ${h < 12 ? 'am' : 'pm'}`;
+};
+const inText = (d: Date) => {
+  const m = Math.max(1, Math.round((d.getTime() - Date.now()) / 60000));
+  return m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)} h ${m % 60 ? `${m % 60} min` : ''}`.trim();
+};
+
+/** Quick Match: three bot riders on any race you have unlocked */
+function quickMatch() {
+  const level = levelFor(profile!.xp);
+  const pool = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)];
+  const route = pool[Math.floor(Math.random() * pool.length)];
+  play(false, route, { rivals: botRivals(route) });
+}
+
+function playEvent(e: EventDef) {
+  const route = routeById(e.race)!;
+  play(false, route, eventStatus(e).live ? { event: e } : {});
+}
+
+/** what someone sees after opening a friend's challenge link */
+function challengeIntro(ch: Challenge | null) {
+  game.showcase();
+  applyLook();
+  const route = ch ? routeById(ch.routeId) : null;
+  if (!ch || !route || !ch.run.d.length) {
+    render(`
+      <div class="screen scrim fade-in">
+        <div class="grow"></div>
+        <div class="wrap stack">
+          <p class="kicker">Challenge</p>
+          <h1 class="title">That link didn't work</h1>
+          <p class="muted">The challenge link is incomplete or from an older version. Ask your friend to send it again.</p>
+          <button class="btn btn-primary" id="quick">Race bots instead</button>
+          <button class="btn btn-ghost" id="home">Home</button>
+        </div>
+      </div>`);
+    on('#quick', 'click', () => quickMatch());
+    on('#home', 'click', () => home());
+    onBack(() => home());
+    return;
+  }
+  render(`
+    <div class="screen scrim fade-in">
+      <div class="grow"></div>
+      <div class="wrap stack">
+        <p class="kicker">Challenge</p>
+        <h1 class="title">${esc(ch.name)} challenges you</h1>
+        <div class="card stack" style="gap:6px">
+          <div class="row"><b>${esc(route.name)}</b><span class="grow"></span><span class="muted small">${(route.length / 1000).toFixed(1)} km</span></div>
+          <p class="muted small">Beat <b>${clock(ch.time)}</b>. ${esc(ch.name)}'s exact ride races alongside you in yellow.</p>
+        </div>
+        <button class="btn btn-primary" id="go">Ride</button>
+        <button class="btn btn-ghost" id="home">Not now</button>
+      </div>
+    </div>`);
+  on('#go', 'click', () => play(!profile!.tutorialDone, route, { challenge: ch }));
+  on('#home', 'click', () => home());
+  onBack(() => home());
+}
+
+function garageScreen() {
   const p = profile!;
+  const owns = (b: BikeSpec) => (!b.price && !b.event) || p.ownedBikes.includes(b.id);
+  const card = (b: BikeSpec) => {
+    const ev = b.event ? EVENTS.find((e) => e.id === b.event) : undefined;
+    const action = p.bike === b.id ? '<span class="badge gold">Riding</span>'
+      : owns(b) ? `<button class="btn btn-ghost btn-sm" data-equip="${b.id}">Ride this</button>`
+      : b.price ? `<button class="btn btn-primary btn-sm" data-buy="${b.id}" ${p.coins < b.price ? 'disabled' : ''}>${fmt(b.price)} ${icons.coin}</button>`
+      : `<span class="muted small">Win it in ${esc(ev?.name ?? 'an event')}</span>`;
+    return `<div class="card bike-card garage-card ${p.bike === b.id ? 'selected' : ''}${owns(b) ? '' : ' locked-bike'}">
+      <div class="hall-swatch" style="background:${b.color};margin:0 auto 8px"></div>
+      <h3>${esc(b.name)}</h3>
+      <p class="muted small">${esc(b.tagline)}</p>
+      <div class="stat-line"><span>SPD</span><span class="dots">${dots(b.speed)}</span></div>
+      <div class="stat-line"><span>ACC</span><span class="dots">${dots(b.acceleration)}</span></div>
+      <div class="stat-line"><span>HDL</span><span class="dots">${dots(b.handling)}</span></div>
+      <div class="garage-action">${action}</div>
+    </div>`;
+  };
+  render(`
+    <div class="screen solid fade-in">
+      <div class="wrap stack">
+        <button class="btn btn-link back" id="back">← Back</button>
+        <div class="row"><h1 class="title">Garage</h1><span class="grow"></span><span class="chip">${icons.coin} ${fmt(p.coins)}</span></div>
+        <p class="muted small">Buy bikes with Rush Coins, or win the event bikes by finishing Sunset Rush or Night Rush while they are live.</p>
+        <div class="bike-grid garage-grid">${[...BIKES, ...GARAGE_BIKES].map(card).join('')}</div>
+      </div>
+    </div>`);
+  const equip = (id: string) => {
+    p.bike = id;
+    saveProfile(p);
+    applyLook();
+    garageScreen();
+  };
+  on('[data-equip]', 'click', (_, el) => equip(el.dataset.equip!));
+  on('[data-buy]', 'click', (_, el) => {
+    const b = bikeById(el.dataset.buy!);
+    if (!b.price || p.coins < b.price || p.ownedBikes.includes(b.id)) return;
+    p.coins -= b.price;
+    p.ownedBikes.push(b.id);
+    sfx.finish();
+    equip(b.id);
+  });
+  on('#back', 'click', () => home('you'));
+  onBack(() => home('you'));
+}
+
+function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) {
+  const p = profile!;
+  const hadGhost = x.hadGhost;
+  // standings: you and every rival, by finish time (unfinished last)
+  const you = { name: 'You', time: r.finished ? r.time : Infinity, me: true };
+  const table = x.rivals.length ? [you, ...x.rivals.map((v) => ({ ...v, me: false }))].sort((a, b) => a.time - b.time) : [];
+  const ch = x.opts.challenge;
+  const verdict = ch ? (r.finished && r.time < ch.time ? `You beat ${esc(ch.name)} by ${(ch.time - r.time).toFixed(1)} s` : `${esc(ch.name)} wins${r.finished ? ` by ${(r.time - ch.time).toFixed(1)} s` : ''}. Try again?`) : '';
+  const prizeBike = x.prize ? bikeById(x.prize) : undefined;
   showUpdate('menu');
   const levelUp = rw.levelAfter > rw.levelBefore;
   const unlocked = RACES.filter((x) => x.level > rw.levelBefore && x.level <= rw.levelAfter);
@@ -508,7 +682,12 @@ function results(r: RideResult, rw: RideRewards, route: Route, hadGhost = false)
         </div>
         ${levelUp ? `<div class="levelup">🎉 Level up! You're now level ${rw.levelAfter}</div>` : ''}
         ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>🔓 New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
-        ${route.kind === 'race' && r.finished && !hadGhost ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
+        ${verdict ? `<div class="levelup">${verdict}</div>` : ''}
+        ${table.length > 1 ? `<div class="card standings">${table.map((t, i) => `<div class="reward-row${t.me ? ' me' : ''}"><span>${ordinal(i + 1)} · ${esc(t.name)}</span><b>${Number.isFinite(t.time) ? clock(t.time) : 'DNF'}</b></div>`).join('')}</div>` : ''}
+        ${x.event ? `<p class="muted small">${x.event.icon} ${esc(x.event.name)} is live: coins doubled.</p>` : ''}
+        ${prizeBike ? `<div class="levelup">🚲 You won the ${esc(prizeBike.name)}! Equip it in the Garage.</div>` : ''}
+        ${route.kind === 'race' && r.finished && !hadGhost && !x.rivals.length ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
+        ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="challenge">${ch ? `Send ${esc(ch.name)} your answer` : 'Challenge a friend to beat this'}</button><p class="muted small" id="shareNote" hidden></p>` : ''}
         ${p.guest ? `<div class="card stack"><p><b>Save your progress</b></p><p class="muted small">Create your rider to pick your hall and keep your stats.</p><button class="btn btn-ghost" id="create">Create rider</button></div>` : ''}
         <button class="btn btn-primary" id="again">Ride again</button>
         ${explore ? '<button class="btn btn-ghost" id="explore">Go somewhere else</button>' : ''}
@@ -526,7 +705,8 @@ function results(r: RideResult, rw: RideRewards, route: Route, hadGhost = false)
     };
     requestAnimationFrame(tick);
   });
-  on('#again', 'click', () => play(false, route));
+  on('#again', 'click', () => play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route) } : x.opts));
+  on('#challenge', 'click', () => share(`Can you beat my ${clock(r.time)} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, x.run, r.time), app.querySelector('#shareNote')!));
   on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
   on('#home', 'click', () => home());
   on('#create', 'click', () => createRider({ ...p, name: '' }, false));
@@ -577,6 +757,22 @@ function home(next: Tab = 'home') {
     const b = p.bestTimes[r.id];
     return `<button class="card selectable" data-race="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">${(route.length / 1000).toFixed(1)} km · Difficulty ${stars(r.difficulty)}${b ? ` · Best ${clock(b)} 👻` : ''}</p></button>`;
   };
+  const week = currentWeek(p);
+  const liveEvent = EVENTS.find((e) => eventStatus(e).live);
+  const eventCard = (e: EventDef) => {
+    const st = eventStatus(e);
+    const route = routeById(e.race)!;
+    const prize = bikeById(e.prize);
+    const won = p.ownedBikes.includes(e.prize);
+    return `<div class="card stack event-card${st.live ? ' live' : ''}" style="gap:8px">
+      <div class="row"><h3 style="font-weight:800">${e.icon} ${esc(e.name.toUpperCase())}</h3><span class="grow"></span><span class="badge${st.live ? ' gold live-badge' : ''}">${st.live ? 'Live now' : `Starts at ${hourText(st.next)}`}</span></div>
+      <p class="muted small">${esc(e.blurb)}</p>
+      <p class="small">${esc(route.name)} · ${(route.length / 1000).toFixed(1)} km · ${st.live ? `<b>2× coins</b>, ends ${hourText(st.ends!)}` : `opens ${inText(st.next)}`}</p>
+      <div class="row small"><span class="hall-swatch" style="background:${prize.color}"></span><span>${won ? `You won the ${esc(prize.name)} ✓` : `Finish while live to win the <b>${esc(prize.name)}</b>`}</span></div>
+      <button class="btn ${st.live ? 'btn-primary' : 'btn-ghost'}" data-event="${e.id}">${st.live ? 'Ride now' : 'Practise the route'}</button>
+    </div>`;
+  };
+  const sendable = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)].filter((r) => p.bestTimes[r.id] && loadGhost(r.id));
   const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">${icons.ride} EXPLORE CAMPUS</h3><span class="grow"></span><span class="badge gold">New</span></div><p class="muted small" style="margin-top:4px">New on campus? Pick where you are and where you need to be, then ride the real way there with directions.</p></button>
     <button class="card selectable explore-card" id="quizBtn"><div class="row"><h3 style="font-weight:800">📍 WHERE IS IT?</h3><span class="grow"></span><span class="badge gold">Earn ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">Five campus places. Tap the map where you think each one is.</p></button>`;
 
@@ -596,6 +792,7 @@ function home(next: Tab = 'home') {
           <div class="row small muted"><span class="hall-swatch" style="background:${hall.color}"></span>${esc(hall.name)}</div>
         </div>
         ${daily ? `<button class="card selectable daily-card" id="daily"><div class="row"><span class="daily-icon">🎁</span><div class="grow"><b>Daily reward · Day ${daily.day}</b><p class="muted small">${daily.day > 1 ? `${daily.day} days in a row. ` : ''}Come back tomorrow for more.</p></div><span class="badge gold">+${daily.coins} ${icons.coin}</span></div></button>` : p.streak > 1 ? `<p class="muted small">🔥 ${p.streak}-day streak. Your next reward unlocks tomorrow.</p>` : ''}
+        ${liveEvent ? `<button class="card selectable event-banner" data-event="${liveEvent.id}"><div class="row"><span class="daily-icon">${liveEvent.icon}</span><div class="grow"><b>${esc(liveEvent.name)} is live</b><p class="muted small">2× coins and the ${esc(bikeById(liveEvent.prize).name)} until ${hourText(eventStatus(liveEvent).ends!)}</p></div>${icons.arrow}</div></button>` : ''}
         <div class="spacer"></div>
         <button class="ride-cta" id="ride">
           <div><div class="big">RIDE</div><div class="sub">Quick Ride · ${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</div></div>
@@ -603,8 +800,8 @@ function home(next: Tab = 'home') {
         </button>
         ${exploreCard}
         <div class="two">
-          <button class="card mini" data-tab="race" style="text-align:left"><h3>Race</h3><p class="muted small">Compete with others</p><span class="badge" style="margin-top:8px">Soon</span></button>
-          <button class="card mini" style="text-align:left" data-tab="events"><h3>Together</h3><p class="muted small">Ride with someone</p><span class="badge" style="margin-top:8px">Soon</span></button>
+          <button class="card mini" id="quick" style="text-align:left"><h3>Quick Match</h3><p class="muted small">Race three riders now</p><span class="badge gold" style="margin-top:8px">${icons.race} Race</span></button>
+          <button class="card mini" style="text-align:left" data-tab="race"><h3>Challenge</h3><p class="muted small">Send a friend your best run</p><span class="badge" style="margin-top:8px">By link</span></button>
         </div>
         ${best ? `<div class="card row"><span class="muted small">Your best on ${esc(CAMPUS_LOOP.name)}</span><span class="grow"></span><b>${clock(best)}</b></div>` : ''}
       </div>`,
@@ -627,22 +824,35 @@ function home(next: Tab = 'home') {
     race: `
       <div class="hub">
         <p class="kicker">Race</p>
-        <h1 class="title">Multiplayer is coming</h1>
-        <p class="muted">Quick Match, private rooms with a code, and hall races for up to 10 riders arrive in Phase 3.</p>
-        <div class="card locked"><h3 style="font-weight:800">QUICK MATCH</h3><p class="muted small">Find a race</p></div>
-        <div class="card locked"><h3 style="font-weight:800">CREATE CHALLENGE</h3><p class="muted small">Create your own room</p></div>
-        <div class="card locked"><h3 style="font-weight:800">JOIN WITH CODE</h3><p class="muted small">Enter a friend's code</p></div>
-        <div class="card locked"><h3 style="font-weight:800">HALL RACE</h3><p class="muted small">Represent ${esc(hall.name)}</p></div>
-        <button class="btn btn-primary" data-tab="ride">Race your ghost on solo routes</button>
+        <h1 class="title">Race someone</h1>
+        <button class="ride-cta" id="quick">
+          <div><div class="big" style="font-size:26px">QUICK MATCH</div><div class="sub">Three riders · a random route you've unlocked</div></div>${icons.arrow}
+        </button>
+        <p class="kicker" style="margin-top:8px">Challenge a friend</p>
+        <p class="muted small">Send your best run as a link. Your friend races your exact ride, then can send theirs back.</p>
+        ${sendable.length ? sendable.map((r) => `<button class="card selectable" data-send="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">${clock(p.bestTimes[r.id])}</span></div><p class="muted small" style="margin-top:4px">Send this run to a friend →</p></button>`).join('') : '<div class="card"><p class="muted small">Finish any race first. Your best run on it can then be sent from here.</p></div>'}
+        <p class="muted small" id="sendNote" hidden></p>
+        <p class="kicker" style="margin-top:8px">Got a challenge link?</p>
+        <div class="card stack">
+          <div class="field"><label for="cLink">Paste the link a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="legonrush.netlify.app/play/?c=..."></div>
+          <button class="btn btn-ghost" id="cOpen">Open challenge</button>
+        </div>
+        <div class="card locked"><div class="row"><h3 style="font-weight:800">HALL RACE</h3><span class="grow"></span><span class="badge">Needs sign-in</span></div><p class="muted small" style="margin-top:4px">Live races for ${esc(hall.name)} against other halls arrive with accounts.</p></div>
       </div>`,
     events: `
       <div class="hub">
         <p class="kicker">Events</p>
         <h1 class="title">Campus events</h1>
-        <p class="muted">Live events, hall championships and Together rides arrive in Phase 4.</p>
-        <div class="card locked"><div class="row"><h3 style="font-weight:800">🌅 SUNSET RUSH</h3><span class="grow"></span><span class="badge">Soon</span></div><p class="muted small">A sunset route with exclusive rewards.</p></div>
-        <div class="card locked"><div class="row"><h3 style="font-weight:800">🌙 NIGHT RUSH</h3><span class="grow"></span><span class="badge">Soon</span></div><p class="muted small">Night-time campus cycling.</p></div>
-        <div class="card locked"><div class="row"><h3 style="font-weight:800">🏫 HALL CHAMPIONSHIP</h3><span class="grow"></span><span class="badge">Soon</span></div><p class="muted small">Ride for ${esc(hall.name)}.</p></div>
+        <p class="muted">Ride an event while it is live for double coins and a bike you can only win there.</p>
+        ${EVENTS.map(eventCard).join('')}
+        <div class="card stack" style="gap:8px">
+          <div class="row"><h3 style="font-weight:800">🏫 HALL WEEK</h3><span class="grow"></span><span class="badge gold">+${WEEK_REWARD} ${icons.coin}</span></div>
+          <p class="muted small">Ride ${WEEK_GOAL_KM} km for ${esc(hall.name)} between Monday and Sunday. Every ride counts.</p>
+          <div class="xpbar"><div style="width:${Math.min(100, (week.km / WEEK_GOAL_KM) * 100)}%"></div></div>
+          <div class="row small"><span>${Math.min(week.km, WEEK_GOAL_KM).toFixed(1)} / ${WEEK_GOAL_KM} km</span><span class="grow"></span><span class="muted">${week.claimed ? 'Claimed ✓ New goal on Monday' : 'Resets on Monday'}</span></div>
+          ${week.km >= WEEK_GOAL_KM && !week.claimed ? `<button class="btn btn-primary" id="weekClaim">Claim ${WEEK_REWARD} coins</button>` : ''}
+          <p class="muted small">Standings between halls arrive with accounts.</p>
+        </div>
       </div>`,
     you: `
       <div class="hub">
@@ -662,12 +872,12 @@ function home(next: Tab = 'home') {
           <div class="stat"><b>${fmt(p.coins)}</b><span>Rush coins</span></div>
           <div class="stat"><b>${fmt(p.xp)}</b><span>XP</span></div>
         </div>
-        <div class="card row"><span class="muted small">Bike</span><span class="grow"></span><b>${bikeById(p.bike).name}</b></div>
+        <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
         <button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit rider'}</button>
         <button class="btn btn-ghost" id="settings">Settings</button>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
         <button class="btn btn-link" id="reset">Reset progress</button>
-        <p class="muted small">Progress is saved on this device. Accounts and cross-device sync arrive with Phase 2.</p>
+        <p class="muted small">Progress is saved on this device. Accounts and syncing between devices are coming.</p>
       </div>`,
   };
 
@@ -678,6 +888,29 @@ function home(next: Tab = 'home') {
   on('#exploreBtn', 'click', () => explorePicker());
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
   on('#settings', 'click', () => settingsScreen());
+  on('#quick', 'click', () => quickMatch());
+  on('#garage', 'click', () => garageScreen());
+  on('[data-event]', 'click', (_, el) => playEvent(EVENTS.find((e) => e.id === el.dataset.event)!));
+  on('[data-send]', 'click', (_, el) => {
+    const route = routeById(el.dataset.send!)!;
+    share(`Can you beat my ${clock(p.bestTimes[route.id])} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, loadGhost(route.id)!, p.bestTimes[route.id]), app.querySelector('#sendNote')!);
+  });
+  on('#cOpen', 'click', () => {
+    const raw = (app.querySelector('#cLink') as HTMLInputElement).value.trim();
+    let code = raw;
+    try {
+      code = new URL(raw.includes('://') ? raw : `https://${raw}`).searchParams.get('c') ?? raw;
+    } catch { /* a bare code */ }
+    challengeIntro(decodeChallenge(code));
+  });
+  on('#weekClaim', 'click', () => {
+    if (week.claimed || week.km < WEEK_GOAL_KM) return;
+    week.claimed = true;
+    p.coins += WEEK_REWARD;
+    saveProfile(p);
+    sfx.finish();
+    home('events');
+  });
   on('#daily', 'click', () => {
     if (claimDaily(p)) sfx.finish();
     home('home');
@@ -708,7 +941,7 @@ function home(next: Tab = 'home') {
 // ---------- settings ----------
 
 /** first-visit download, measured from the build (see vite.config.ts) */
-const INSTALL_KB = 470;
+const INSTALL_KB = 500;
 
 function settingsScreen() {
   const seg = (id: string, options: [string, string][], value: string) =>
@@ -830,9 +1063,13 @@ function placeCard(place: Place) {
     </div>`;
 }
 
-async function shareRoute(from: Place, to: Place, note: HTMLElement) {
+function shareRoute(from: Place, to: Place, note: HTMLElement) {
   const url = `${location.origin}/play/?${new URLSearchParams({ from: from.name, to: to.name, mode: exploreOpts.mode })}`;
-  const text = `How to get from ${from.name} to ${to.name} on campus, on LEGONRUSH`;
+  return share(`How to get from ${from.name} to ${to.name} on campus, on LEGONRUSH`, url, note);
+}
+
+/** Shares a link with the phone's share sheet, or copies it and offers WhatsApp. */
+async function share(text: string, url: string, note: HTMLElement) {
   try {
     if (navigator.share) return await navigator.share({ title: 'LEGONRUSH', text, url });
   } catch (e) {
