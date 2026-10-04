@@ -130,6 +130,15 @@ export class Game {
   private orbit = 0;
 
   onHud: (h: HudState) => void = () => {};
+  /** no camera shake, steady field of view, slow menu camera */
+  reducedMotion = false;
+  /** auto graphics: called once when a ride runs too slowly on high */
+  onSlow: () => void = () => {};
+  watchSpeed = false;
+  private quality: 'high' | 'low' = 'high';
+  private fpsFrames = 0;
+  private fpsTime = 0;
+  private lowEnd: boolean;
   /** no traffic or obstacles: for learning the way */
   calm = false;
   onEnd: (r: RideEnd) => void = () => {};
@@ -137,6 +146,7 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement) {
     const lowEnd = (navigator.hardwareConcurrency ?? 4) <= 4 || Math.min(screen.width, screen.height) < 500;
+    this.lowEnd = lowEnd;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowEnd || devicePixelRatio < 2, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, lowEnd ? 1.5 : 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -187,6 +197,25 @@ export class Game {
     this.resize();
     addEventListener('resize', () => this.resize());
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  /** low: no shadows and a lower resolution, for cheap phones */
+  setQuality(q: 'high' | 'low') {
+    if (q === this.quality) return;
+    this.quality = q;
+    this.renderer.shadowMap.enabled = q === 'high';
+    this.sun.castShadow = q === 'high';
+    this.renderer.setPixelRatio(q === 'low' ? Math.min(devicePixelRatio, 1) : Math.min(devicePixelRatio, this.lowEnd ? 1.5 : 2));
+    this.resize();
+    // materials compiled with shadows must be rebuilt
+    this.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (m) for (const mat of Array.isArray(m) ? m : [m]) mat.needsUpdate = true;
+    });
+  }
+
+  get currentQuality() {
+    return this.quality;
   }
 
   get currentRoute() {
@@ -390,7 +419,21 @@ export class Game {
 
   private frame() {
     this.timer.update();
-    const dt = Math.min(this.timer.getDelta(), 1 / 20);
+    const raw = this.timer.getDelta();
+    const dt = Math.min(raw, 1 / 20);
+    // auto graphics: average frame rate over a few seconds of riding
+    if (this.watchSpeed && this.quality === 'high' && this.phase === 'riding' && !this.paused && raw < 1) {
+      this.fpsFrames++;
+      this.fpsTime += raw;
+      if (this.fpsTime > 4) {
+        const fps = this.fpsFrames / this.fpsTime;
+        this.fpsFrames = this.fpsTime = 0;
+        if (fps < 28) {
+          this.watchSpeed = false;
+          this.onSlow();
+        }
+      }
+    }
     if (!this.paused) this.update(dt);
     this.render(dt);
   }
@@ -402,7 +445,7 @@ export class Game {
       return;
     }
     if (this.phase === 'showcase') {
-      this.orbit += dt * 0.18;
+      this.orbit += dt * (this.reducedMotion ? 0.04 : 0.18);
       this.crank += dt * 3;
       this.animateRider(dt, 0.4);
       return;
@@ -722,7 +765,7 @@ export class Game {
       const behind = this.pose(this.d - back, this.x * 0.6);
       const target = new THREE.Vector3(behind.x, 3.1 + this.y * 0.4, behind.z);
       cam.position.lerp(target, Math.min(1, dt * 8));
-      if (this.shake > 0) {
+      if (this.shake > 0 && !this.reducedMotion) {
         cam.position.x += (Math.random() - 0.5) * this.shake;
         cam.position.y += (Math.random() - 0.5) * this.shake;
         this.shake = Math.max(0, this.shake - dt);
@@ -730,7 +773,7 @@ export class Game {
       const ahead = this.pose(this.d + 12, this.x * 0.8);
       cam.lookAt(ahead.x, 1.1, ahead.z);
       const fovBase = innerWidth < innerHeight ? 72 : 60;
-      const fov = fovBase + (boosting ? 10 : 0) + this.speed * 0.15;
+      const fov = this.reducedMotion ? fovBase + 3 : fovBase + (boosting ? 10 : 0) + this.speed * 0.15;
       cam.fov += (fov - cam.fov) * Math.min(1, dt * 4);
       cam.updateProjectionMatrix();
     }

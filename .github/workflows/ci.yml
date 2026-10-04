@@ -16,6 +16,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Quick ride in a test browser
+        run: npm run smoke
       - name: Campus data is up to date
         run: |
           node scripts/osm-campus.mjs

@@ -221,3 +221,12 @@ a.btn { color: inherit; text-decoration: none; }
 .update-bar[hidden] { display: none; }
 .ghost-gap[hidden] { display: none; }
 .explore-card h3 svg, .unlock-card svg { width: 20px; height: 20px; vertical-align: -4px; flex: none; }
+
+/* settings */
+.settings .card { gap: 8px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.set-row input[type=range] { flex: 1; max-width: 220px; accent-color: var(--gold); }
+/* left-handed: boost button on the left */
+.hud.lefty .hud-bottom { flex-direction: row-reverse; }
+/* reduced motion */
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition: none !important; }

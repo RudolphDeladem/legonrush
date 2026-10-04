@@ -10,7 +10,7 @@ import { CAMPUS_LOOP, RACES, TOUR_STOPS, exploreRoute, freshersTour, raceRoute, 
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
 import { applyRide, clearGhosts, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
-import { setSound, unlockAudio } from './audio';
+import { setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
@@ -40,7 +40,18 @@ if (import.meta.env.DEV) Object.assign(window, { __game: game });
 
 let profile: Profile | null = loadProfile();
 const settings = loadSettings();
-setSound(settings.sound);
+function applySettings() {
+  setSound(settings.sound, settings.volume);
+  game.reducedMotion = settings.reducedMotion;
+  document.documentElement.classList.toggle('reduce-motion', settings.reducedMotion);
+  game.setQuality(settings.graphics === 'low' || (settings.graphics === 'auto' && settings.slowDevice) ? 'low' : 'high');
+}
+applySettings();
+const changeSettings = (patch: Partial<typeof settings>) => {
+  Object.assign(settings, patch);
+  saveSettings(settings);
+  applySettings();
+};
 
 type Tab = 'home' | 'ride' | 'race' | 'events' | 'you';
 let tab: Tab = 'home';
@@ -253,7 +264,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   applyLook();
   const bike = bikeById(profile.bike);
   render(`
-    <div class="hud">
+    <div class="hud${settings.leftHanded ? ' lefty' : ''}">
       <div class="touch-layer" id="touch"></div>
       <div class="boosting-vignette" id="vignette"></div>
       <div class="hud-top" style="position:relative">
@@ -425,9 +436,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
       if (p === 'continue') resume();
       if (p === 'restart') { cleanup(); play(false, route); }
       if (p === 'sound') {
-        settings.sound = !settings.sound;
-        setSound(settings.sound);
-        saveSettings(settings);
+        changeSettings({ sound: !settings.sound });
         b.textContent = `Sound: ${settings.sound ? 'On' : 'Off'}`;
       }
       if (p === 'exit') { cleanup(); leave(); }
@@ -454,6 +463,13 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   }
 
   game.calm = isExplore(route) && exploreOpts.calm;
+  // auto graphics: drop to smooth mode once if this phone can't keep up
+  game.watchSpeed = settings.graphics === 'auto' && !settings.slowDevice;
+  game.onSlow = () => {
+    changeSettings({ slowDevice: true });
+    prompt.innerHTML = `<small>GRAPHICS</small>Switched to smooth mode for this phone`;
+    setTimeout(() => { if (prompt.textContent?.includes('smooth mode')) prompt.innerHTML = ''; }, 3000);
+  };
   game.start(bike, tutorial);
   showUpdate('ride');
   onBack(togglePause);
@@ -640,7 +656,7 @@ function home(next: Tab = 'home') {
         </div>
         <div class="card row"><span class="muted small">Bike</span><span class="grow"></span><b>${bikeById(p.bike).name}</b></div>
         <button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit rider'}</button>
-        <button class="btn btn-ghost" id="sound">Sound: ${settings.sound ? 'On' : 'Off'}</button>
+        <button class="btn btn-ghost" id="settings">Settings</button>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
         <button class="btn btn-link" id="reset">Reset progress</button>
         <p class="muted small">Progress is saved on this device. Accounts and cross-device sync arrive with Phase 2.</p>
@@ -653,12 +669,7 @@ function home(next: Tab = 'home') {
   on('#routeCard', 'click', () => play(false));
   on('#exploreBtn', 'click', () => explorePicker());
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
-  on('#sound', 'click', (_, el) => {
-    settings.sound = !settings.sound;
-    setSound(settings.sound);
-    saveSettings(settings);
-    el.textContent = `Sound: ${settings.sound ? 'On' : 'Off'}`;
-  });
+  on('#settings', 'click', () => settingsScreen());
   showUpdate('menu');
   // back from another tab goes to Home; from Home it leaves the app
   onBack(tab === 'home' ? null : () => home());
@@ -680,6 +691,55 @@ function home(next: Tab = 'home') {
     profile = null;
     welcome();
   });
+}
+
+// ---------- settings ----------
+
+function settingsScreen() {
+  const seg = (id: string, options: [string, string][], value: string) =>
+    `<div class="seg" id="${id}">${options.map(([v, label]) => `<button data-v="${v}" class="${v === value ? 'on' : ''}">${label}</button>`).join('')}</div>`;
+  const graphicsNote = () => settings.graphics === 'auto'
+    ? `Starts sharp and switches to smooth if your phone struggles.${settings.slowDevice ? ' This phone is on smooth.' : ''}`
+    : settings.graphics === 'low' ? 'No shadows and a lower resolution. Runs faster and uses less battery.' : 'Shadows and full resolution.';
+  render(`
+    <div class="screen solid fade-in">
+      <div class="wrap stack settings">
+        <button class="btn btn-link back" id="back">← Back</button>
+        <h1 class="title">Settings</h1>
+        <div class="card stack">
+          <div class="set-row"><b>Sound</b>${seg('sound', [['1', 'On'], ['0', 'Off']], settings.sound ? '1' : '0')}</div>
+          <label class="set-row"><span>Volume</span><input type="range" id="volume" min="0" max="100" step="5" value="${Math.round(settings.volume * 100)}" aria-label="Sound volume"></label>
+        </div>
+        <div class="card stack">
+          <div class="set-row"><b>Graphics</b>${seg('graphics', [['auto', 'Auto'], ['high', 'Sharp'], ['low', 'Smooth']], settings.graphics)}</div>
+          <p class="muted small" id="gNote">${graphicsNote()}</p>
+        </div>
+        <div class="card stack">
+          <div class="set-row"><b>Boost button</b>${seg('hand', [['0', 'Right'], ['1', 'Left']], settings.leftHanded ? '1' : '0')}</div>
+          <p class="muted small">Put the boost button under the thumb you prefer.</p>
+        </div>
+        <div class="card stack">
+          <div class="set-row"><b>Motion</b>${seg('motion', [['0', 'Full'], ['1', 'Reduced']], settings.reducedMotion ? '1' : '0')}</div>
+          <p class="muted small">Reduced turns off camera shake, speed zoom and screen animations.</p>
+        </div>
+      </div>
+    </div>`);
+  const pick = (id: string, fn: (v: string) => void) => on(`#${id} [data-v]`, 'click', (_, el) => {
+    app.querySelectorAll(`#${id} [data-v]`).forEach((b) => b.classList.toggle('on', b === el));
+    fn(el.dataset.v!);
+  });
+  pick('sound', (v) => changeSettings({ sound: v === '1' }));
+  pick('graphics', (v) => {
+    // choosing Auto again gives the phone a fresh chance at sharp graphics
+    changeSettings({ graphics: v as typeof settings.graphics, slowDevice: false });
+    app.querySelector('#gNote')!.textContent = graphicsNote();
+  });
+  pick('hand', (v) => changeSettings({ leftHanded: v === '1' }));
+  pick('motion', (v) => changeSettings({ reducedMotion: v === '1' }));
+  on('#volume', 'input', (_, el) => changeSettings({ volume: Number((el as HTMLInputElement).value) / 100 }));
+  on('#volume', 'change', () => sfx.coin());
+  on('#back', 'click', () => home('you'));
+  onBack(() => home('you'));
 }
 
 // ---------- explore ----------

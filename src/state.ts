@@ -52,13 +52,30 @@ export function clearProfile() {
   }
 }
 
-export interface Settings { sound: boolean }
+export type Graphics = 'auto' | 'high' | 'low';
+
+export interface Settings {
+  sound: boolean;
+  /** sound effects volume, 0 to 1 */
+  volume: number;
+  /** auto starts high and drops to low if the phone struggles */
+  graphics: Graphics;
+  /** set once auto mode has found this device too slow for high */
+  slowDevice: boolean;
+  leftHanded: boolean;
+  reducedMotion: boolean;
+}
+
+const defaultSettings = (): Settings => ({
+  sound: true, volume: 0.8, graphics: 'auto', slowDevice: false, leftHanded: false,
+  reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
+});
 
 export function loadSettings(): Settings {
   try {
-    return { sound: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+    return { ...defaultSettings(), ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
   } catch {
-    return { sound: true };
+    return defaultSettings();
   }
 }
 
