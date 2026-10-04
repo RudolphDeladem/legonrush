@@ -186,3 +186,14 @@ h1, h2, h3, p { margin: 0; }
 .steps li.arrive .turn-arrow { color: #4ade80; }
 .steps li small { white-space: nowrap; }
 .explore-card { width: 100%; }
+.picker { position: relative; }
+.suggest { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); max-height: 320px; overflow-y: auto; }
+.suggest[hidden] { display: none; }
+.suggest li { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.suggest li.on, .suggest li:hover { background: var(--navy-3); }
+.suggest .kind { width: 22px; text-align: center; }
+.suggest small { white-space: nowrap; }
+.options { flex-wrap: wrap; gap: 8px; }
+.seg { display: inline-flex; background: var(--glass); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.seg button { padding: 7px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.seg button.on { background: var(--gold); color: var(--navy); }

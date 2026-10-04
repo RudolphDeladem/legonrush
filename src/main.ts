@@ -7,7 +7,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
 import { BIKES, HALLS, HALL_PLACE, UPCOMING_ROUTES, bikeById, hallById } from './data/campus';
 import { CAMPUS_LOOP, exploreRoute, type Route } from './game/routes';
-import { ATTRIBUTION, PLACES, placeByName, type Turn } from './game/campusmap';
+import { ATTRIBUTION, placeByName, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { miniMap, routeMap } from './ui/mapview';
 import { applyRide, clearProfile, levelFor, loadProfile, loadSettings, newProfile, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { setSound, unlockAudio } from './audio';
@@ -385,6 +385,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
     game.paused = false;
   }
 
+  game.calm = isExplore(route) && exploreOpts.calm;
   game.start(bike, tutorial);
 }
 
@@ -585,7 +586,6 @@ function home(next: Tab = 'home') {
 
 // ---------- explore ----------
 
-const PLACE_NAMES = [...new Set(PLACES.map((p) => p.name))].sort((a, b) => a.localeCompare(b));
 const POPULAR = ['School of Law', 'Pent Hostel Block A', 'The Balme Library', 'Great Hall', 'Night Market', 'James Quartey Building, JQB', 'University of Ghana Hospital', 'Legon Main Entrance'];
 
 function stepsList(route: Route) {
@@ -593,48 +593,66 @@ function stepsList(route: Route) {
     <li class="${s.turn === 'arrive' ? 'arrive' : ''}"><span class="turn-arrow">${ARROW[s.turn]}</span><span class="grow">${esc(s.text)}</span>${i < route.steps.length - 1 ? `<small class="muted">${dm(route.steps[i + 1].d - s.d)}</small>` : ''}</li>`).join('')}</ol>`;
 }
 
+const KIND_ICON: Record<PlaceKind, [string, string]> = {
+  hall: ['🛏️', 'Hall'], academic: ['🎓', 'Faculty'], landmark: ['⭐', 'Landmark'], food: ['🍽️', 'Food'], bank: ['🏦', 'Bank'],
+  transport: ['🚌', 'Bus stop'], worship: ['🕊️', 'Worship'], sport: ['⚽', 'Sport'], health: ['🏥', 'Health'], other: ['📍', 'Place'],
+};
+
+// Explore options, remembered on this device
+const EXPLORE_KEY = 'legonrush.explore.v1';
+const exploreOpts: { mode: TravelMode; calm: boolean } = (() => {
+  try { return { mode: 'cycle', calm: true, ...JSON.parse(localStorage.getItem(EXPLORE_KEY) ?? '{}') }; } catch { return { mode: 'cycle', calm: true }; }
+})();
+const saveExploreOpts = () => { try { localStorage.setItem(EXPLORE_KEY, JSON.stringify(exploreOpts)); } catch { /* private mode */ } };
+
 function explorePicker(fromName?: string, toName = '') {
   if (!profile) return welcome();
   const p = profile;
-  fromName ??= HALL_PLACE[p.hall] ?? 'Legon Main Entrance';
+  let from: Place | undefined = resolvePlace(fromName ?? HALL_PLACE[p.hall] ?? 'Legon Main Entrance');
+  let to: Place | undefined = toName ? resolvePlace(toName) : undefined;
+  const seg = (id: string, options: [string, string][], value: string) =>
+    `<div class="seg" id="${id}">${options.map(([v, label]) => `<button data-v="${v}" class="${v === value ? 'on' : ''}">${label}</button>`).join('')}</div>`;
   render(`
     <div class="screen scrim fade-in">
       <div class="wrap stack explore">
         <button class="btn btn-link back" id="back">← Back</button>
         <p class="kicker">Explore campus</p>
         <h1 class="title">Find your way</h1>
-        <p class="muted">Pick where you are and where you need to be. You'll ride the real shortest way on campus roads, with directions as you go.</p>
-        <datalist id="places">${PLACE_NAMES.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
-        <div class="field"><label for="from">From</label><input id="from" list="places" autocomplete="off" value="${esc(fromName)}" placeholder="Your hall, a faculty, a landmark…"></div>
+        <p class="muted">Pick where you are and where you need to be. Type a name or what students call it, like Vandals, Pent or JQB.</p>
+        <div class="field picker"><label for="from">From</label><input id="from" autocomplete="off" spellcheck="false" placeholder="Your hall, a faculty, a landmark…"><ul class="suggest" id="fromList" hidden></ul></div>
         <button class="btn btn-link swap" id="swap" aria-label="Swap from and to">⇅ Swap</button>
-        <div class="field"><label for="to">To</label><input id="to" list="places" autocomplete="off" value="${esc(toName)}" placeholder="Where do you need to be?"></div>
+        <div class="field picker"><label for="to">To</label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you need to be?"><ul class="suggest" id="toList" hidden></ul></div>
         <div class="chips">${POPULAR.filter((n) => placeByName(n)).map((n) => `<button class="chip" data-to="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <div class="row options">${seg('mode', [['cycle', '🚲 Cycle'], ['walk', '🚶 Walk']], exploreOpts.mode)}${seg('calm', [['1', 'Calm ride'], ['0', 'With traffic']], exploreOpts.calm ? '1' : '0')}</div>
         <div id="preview" class="stack"></div>
         <p class="muted small">${esc(ATTRIBUTION)}</p>
       </div>
     </div>`);
-  const from = app.querySelector<HTMLInputElement>('#from')!;
-  const to = app.querySelector<HTMLInputElement>('#to')!;
+  const fromIn = app.querySelector<HTMLInputElement>('#from')!;
+  const toIn = app.querySelector<HTMLInputElement>('#to')!;
   const preview = app.querySelector<HTMLElement>('#preview')!;
+  const show = (place: Place | undefined) => (place ? place.name : '');
+  fromIn.value = show(from);
+  toIn.value = show(to);
+
   let route: Route | null = null;
   const update = () => {
-    const a = placeByName(from.value.trim()), b = placeByName(to.value.trim());
     route = null;
-    if (!a || !b) {
-      preview.innerHTML = to.value.trim() || from.value.trim() !== fromName ? `<p class="muted small">Choose both places from the list.</p>` : '';
+    if (!from || !to) {
+      preview.innerHTML = '';
       return;
     }
-    if (a === b) {
+    if (from === to) {
       preview.innerHTML = `<p class="muted small">You're already there. Pick a different destination.</p>`;
       return;
     }
-    route = exploreRoute(a, b);
+    route = exploreRoute(from, to, exploreOpts.mode);
     if (!route) {
-      preview.innerHTML = `<p class="muted small">No road connects those two places on the map yet.</p>`;
+      preview.innerHTML = `<p class="muted small">No path connects those two places on the map yet.</p>`;
       return;
     }
     preview.innerHTML = `
-      <canvas class="route-map" width="720" height="440" aria-label="Map of the way from ${esc(a.name)} to ${esc(b.name)}"></canvas>
+      <canvas class="route-map" width="720" height="440" aria-label="Map of the way from ${esc(from.name)} to ${esc(to.name)}"></canvas>
       <div class="stats three">
         <div class="stat"><b>${dm(route.length)}</b><span>Distance</span></div>
         <div class="stat"><b>${mins(route.length / 1.3)}</b><span>Walking</span></div>
@@ -646,10 +664,62 @@ function explorePicker(fromName?: string, toName = '') {
     routeMap(preview.querySelector('canvas')!, route);
     preview.querySelector('#go')!.addEventListener('click', () => route && play(false, route));
   };
-  from.addEventListener('input', update);
-  to.addEventListener('input', update);
-  on('[data-to]', 'click', (_, el) => { to.value = el.dataset.to!; update(); });
-  on('#swap', 'click', () => { [from.value, to.value] = [to.value, from.value]; update(); });
+
+  // type-ahead with the kind of each place, nicknames included
+  const picker = (input: HTMLInputElement, list: HTMLElement, set: (p: Place) => void) => {
+    let matches: PlaceMatch[] = [];
+    let active = 0;
+    const draw = () => {
+      list.hidden = !matches.length;
+      list.innerHTML = matches.map((m, i) => {
+        const [icon, label] = KIND_ICON[m.place.kind];
+        return `<li data-i="${i}" class="${i === active ? 'on' : ''}"><span class="kind" title="${label}">${icon}</span><span class="grow">${esc(m.place.name)}${m.alias ? ` <small class="muted">“${esc(m.alias)}”</small>` : ''}</span><small class="muted">${label}</small></li>`;
+      }).join('');
+    };
+    const choose = (m: PlaceMatch | undefined) => {
+      if (!m) return;
+      set(m.place);
+      input.value = m.place.name;
+      matches = [];
+      draw();
+      update();
+    };
+    input.addEventListener('input', () => {
+      matches = searchPlaces(input.value, 7);
+      active = 0;
+      draw();
+    });
+    input.addEventListener('focus', () => input.select());
+    input.addEventListener('keydown', (e) => {
+      if (!matches.length) return;
+      if (e.key === 'ArrowDown') { active = (active + 1) % matches.length; draw(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { active = (active + matches.length - 1) % matches.length; draw(); e.preventDefault(); }
+      else if (e.key === 'Enter') { choose(matches[active]); e.preventDefault(); }
+      else if (e.key === 'Escape') { matches = []; draw(); }
+    });
+    // pointerdown fires before the input loses focus
+    list.addEventListener('pointerdown', (e) => {
+      const li = (e.target as HTMLElement).closest<HTMLElement>('li[data-i]');
+      if (li) { e.preventDefault(); choose(matches[Number(li.dataset.i)]); }
+    });
+    input.addEventListener('blur', () => setTimeout(() => { matches = []; draw(); }, 150));
+  };
+  picker(fromIn, app.querySelector('#fromList')!, (pl) => { from = pl; });
+  picker(toIn, app.querySelector('#toList')!, (pl) => { to = pl; });
+
+  on('[data-to]', 'click', (_, el) => { to = placeByName(el.dataset.to!); toIn.value = show(to); update(); });
+  on('#swap', 'click', () => { [from, to] = [to, from]; fromIn.value = show(from); toIn.value = show(to); update(); });
+  on('#mode [data-v]', 'click', (_, el) => {
+    exploreOpts.mode = el.dataset.v as TravelMode;
+    saveExploreOpts();
+    app.querySelectorAll('#mode [data-v]').forEach((b) => b.classList.toggle('on', b === el));
+    update();
+  });
+  on('#calm [data-v]', 'click', (_, el) => {
+    exploreOpts.calm = el.dataset.v === '1';
+    saveExploreOpts();
+    app.querySelectorAll('#calm [data-v]').forEach((b) => b.classList.toggle('on', b === el));
+  });
   on('#back', 'click', () => home());
   update();
 }

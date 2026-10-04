@@ -22,6 +22,8 @@ export interface Building {
   height?: number;
   /** footprint, flat x,z pairs in metres */
   pts: Float32Array;
+  /** courtyards cut out of the footprint */
+  holes: Float32Array[];
   minX: number; maxX: number; minZ: number; maxZ: number;
 }
 export interface Area {
@@ -33,7 +35,7 @@ interface RawData {
   attribution: string;
   nodes: number[];
   roads: { c: number; w: number[]; n?: string }[];
-  buildings: { p: number[]; h?: number; n?: string }[];
+  buildings: { p: number[]; h?: number; n?: string; i?: number[][] }[];
   areas: { k: string; p: number[] }[];
   places: { n: string; k: string; x: number; z: number }[];
 }
@@ -50,12 +52,95 @@ export const BUILDINGS: Building[] = data.buildings.map((b) => {
     minX = Math.min(minX, pts[i]); maxX = Math.max(maxX, pts[i]);
     minZ = Math.min(minZ, pts[i + 1]); maxZ = Math.max(maxZ, pts[i + 1]);
   }
-  return { name: b.n, height: b.h, pts, minX, maxX, minZ, maxZ };
+  return { name: b.n, height: b.h, pts, holes: (b.i ?? []).map((h) => Float32Array.from(h, (v) => v / 10)), minX, maxX, minZ, maxZ };
 });
 export const AREAS: Area[] = data.areas.map((a) => ({ kind: a.k as Area['kind'], pts: Float32Array.from(a.p, (v) => v / 10) }));
 export const PLACES: Place[] = data.places.map((p) => ({ name: p.n, kind: p.k as PlaceKind, x: p.x / 10, z: p.z / 10 }));
 
 export const placeByName = (name: string) => PLACES.find((p) => p.name === name);
+
+/** Names students use for places, mapped to the place's map name. */
+export const ALIASES: Record<string, string> = {
+  Vandals: 'Commonwealth Hall',
+  'Vandal City': 'Commonwealth Hall',
+  Pent: 'Pent Hostel Block A',
+  Pentagon: 'Pent Hostel Block A',
+  Balme: 'The Balme Library',
+  Library: 'The Balme Library',
+  Sarbah: 'Mensah Sarbah Hall',
+  Limann: 'Dr. Hilla Limann Hall',
+  Kwapong: 'Alexander Kwapong Hall',
+  JNA: 'Jean Nelson Aka Hall',
+  Sey: 'Elizabeth Frances Sey Hall',
+  Akuafo: 'Akuafo Hall Main',
+  Volta: 'Volta Hall',
+  JQB: 'James Quartey Building, JQB',
+  NNB: 'New N Block, NNB',
+  'Main Gate': 'Legon Main Entrance',
+  'Legon Hospital': 'University of Ghana Hospital',
+  'Law School': 'School of Law',
+  'Law Faculty': 'School of Law',
+  UGBS: 'University of Ghana Business School',
+  Registry: 'University of Ghana Registry',
+};
+
+const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+/** edit distance, capped: stops early once it is past max */
+function within(a: string, b: string, max: number) {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let low = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      low = Math.min(low, cur[j]);
+    }
+    if (low > max) return false;
+    prev = cur;
+  }
+  return prev[b.length] <= max;
+}
+
+export interface PlaceMatch { place: Place; alias?: string }
+const ENTRIES = [
+  ...PLACES.map((place) => ({ key: fold(place.name), place, alias: undefined as string | undefined })),
+  ...Object.entries(ALIASES).flatMap(([alias, name]) => {
+    const place = placeByName(name);
+    return place ? [{ key: fold(alias), place, alias }] : [];
+  }),
+];
+const KIND_RANK: Record<PlaceKind, number> = { landmark: 0, hall: 1, academic: 2, food: 3, health: 3, sport: 4, worship: 4, bank: 5, transport: 6, other: 7 };
+
+/** Places matching what someone typed: exact, then prefix, then word prefix, then contains, then near-misses. */
+export function searchPlaces(query: string, limit = 8): PlaceMatch[] {
+  const q = fold(query);
+  if (!q) return [];
+  const qWords = q.split(' ');
+  const scored: { m: PlaceMatch; score: number }[] = [];
+  for (const e of ENTRIES) {
+    let score: number;
+    if (e.key === q) score = 0;
+    else if (e.key.startsWith(q)) score = 1;
+    else if (qWords.every((w) => e.key.split(' ').some((k) => k.startsWith(w)))) score = 2;
+    else if (e.key.includes(q)) score = 3;
+    else if (q.length >= 4 && qWords.every((w) => e.key.split(' ').some((k) => within(w, k.slice(0, w.length + 1), w.length >= 5 ? 2 : 1)))) score = 4;
+    else continue;
+    scored.push({ m: { place: e.place, alias: e.alias }, score: score + KIND_RANK[e.place.kind] / 10 + (e.alias ? -0.05 : 0) });
+  }
+  scored.sort((a, b) => a.score - b.score || a.m.place.name.length - b.m.place.name.length);
+  const out: PlaceMatch[] = [];
+  for (const { m } of scored) {
+    if (out.some((o) => o.place === m.place)) continue;
+    out.push(m);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** The place someone means: an exact name, a nickname, or the best search match. */
+export const resolvePlace = (query: string): Place | undefined =>
+  placeByName(query.trim()) ?? searchPlaces(query, 1)[0]?.place;
 
 // ---------- buildings lookup ----------
 const BCELL = 50;
@@ -82,13 +167,18 @@ export function buildingAt(x: number, z: number, pad = 0): Building | undefined 
   for (const i of bgrid.get(`${Math.floor(x / BCELL)},${Math.floor(z / BCELL)}`) ?? []) {
     const b = BUILDINGS[i];
     if (x < b.minX - pad || x > b.maxX + pad || z < b.minZ - pad || z > b.maxZ + pad) continue;
-    if (pad > 0 || inside(b.pts, x, z)) return b;
+    if (pad > 0 || (inside(b.pts, x, z) && !b.holes.some((h) => inside(h, x, z)))) return b;
   }
   return undefined;
 }
 
 // ---------- road graph ----------
-const COST: Record<RoadClass, number> = { 0: 1.05, 1: 1, 2: 1, 3: 1.1, 4: 1.35 };
+export type TravelMode = 'cycle' | 'walk';
+/** cost per metre by road class: riders keep to roads, walkers take footpaths and shortcuts */
+const COST: Record<TravelMode, Record<RoadClass, number>> = {
+  cycle: { 0: 1.05, 1: 1, 2: 1, 3: 1.1, 4: 1.35 },
+  walk: { 0: 1.15, 1: 1.05, 2: 1, 3: 1, 4: 0.9 },
+};
 interface Edge { to: number; len: number; road: number }
 const adj: Edge[][] = Array.from({ length: NODE_XZ.length / 2 }, () => []);
 const nx = (i: number) => NODE_XZ[i * 2];
@@ -131,13 +221,13 @@ for (let i = 0; i < adj.length; i++) {
 const bestClass = (i: number) => Math.min(...adj[i].map((e) => ROADS[e.road].cls));
 
 /** Closest node on the connected network; rideable roads win over footpaths unless much farther. */
-export function nearestNode(x: number, z: number) {
+export function nearestNode(x: number, z: number, mode: TravelMode = 'cycle') {
   let found = -1, score = Infinity;
   for (let r = 1; r <= 8 && found < 0; r *= 2) {
     const cx = Math.floor(x / NCELL), cz = Math.floor(z / NCELL);
     for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
       for (const i of ngrid.get(`${cx + dx},${cz + dz}`) ?? []) {
-        const d = Math.hypot(nx(i) - x, nz(i) - z) + (bestClass(i) === 4 ? 25 : 0);
+        const d = Math.hypot(nx(i) - x, nz(i) - z) + (mode === 'cycle' && bestClass(i) === 4 ? 25 : 0);
         if (d < score) { score = d; found = i; }
       }
     }
@@ -154,8 +244,9 @@ export interface PathResult {
 }
 
 /** Shortest way between two points along the road network (A*). */
-export function findPath(from: [number, number], to: [number, number]): PathResult | null {
-  const s = nearestNode(from[0], from[1]), t = nearestNode(to[0], to[1]);
+export function findPath(from: [number, number], to: [number, number], mode: TravelMode = 'cycle'): PathResult | null {
+  const s = nearestNode(from[0], from[1], mode), t = nearestNode(to[0], to[1], mode);
+  const cost = COST[mode];
   if (s < 0 || t < 0) return null;
   const n = adj.length;
   const g = new Float64Array(n).fill(Infinity);
@@ -198,7 +289,7 @@ export function findPath(from: [number, number], to: [number, number]): PathResu
     done[v] = 1;
     if (v === t) break;
     for (const e of adj[v]) {
-      const c = g[v] + e.len * COST[ROADS[e.road].cls];
+      const c = g[v] + e.len * cost[ROADS[e.road].cls];
       if (c < g[e.to]) {
         g[e.to] = c;
         prev[e.to] = v;

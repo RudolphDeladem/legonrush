@@ -37,6 +37,10 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         play: resolve(__dirname, 'play/index.html'),
       },
+      output: {
+        // three.js and the campus map change rarely, so they get their own long-lived files
+        manualChunks: (id: string) => (id.includes('node_modules/three') ? 'three' : id.includes('legon-map.json') ? 'campus-map' : undefined),
+      },
     },
   },
 });

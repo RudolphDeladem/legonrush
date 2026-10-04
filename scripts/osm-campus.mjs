@@ -71,9 +71,9 @@ for (const w of ways.values()) {
 }
 
 // ---------- polygons (buildings and ground areas) ----------
-function ringsFromRelation(rel) {
-  // join outer member ways end to end into closed rings
-  const parts = rel.members.filter((m) => m.type === 'way' && m.role !== 'inner' && ways.has(m.ref)).map((m) => [...ways.get(m.ref).refs]);
+function ringsFromRelation(rel, inner = false) {
+  // join outer (or inner) member ways end to end into closed rings
+  const parts = rel.members.filter((m) => m.type === 'way' && (m.role === 'inner') === inner && ways.has(m.ref)).map((m) => [...ways.get(m.ref).refs]);
   const rings = [];
   while (parts.length) {
     let ring = parts.shift();
@@ -111,7 +111,16 @@ const area = (pts) => Math.abs(pts.reduce((s, [x0, z0], i) => { const [x1, z1] =
 const buildings = [];
 const areas = [];
 const named = []; // candidate places: { name, tags, x, z, from }
-function addBuilding(pts, t) {
+const insideRing = (pts, [x, z]) => {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, zi] = pts[i], [xj, zj] = pts[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c;
+  }
+  return c;
+};
+let courtyards = 0;
+function addBuilding(pts, t, holes = []) {
   if (pts.length < 3) return;
   const levels = parseFloat(t['building:levels']);
   const height = parseFloat(t.height);
@@ -119,6 +128,7 @@ function addBuilding(pts, t) {
   if (height > 0) b.h = Math.round(height);
   else if (levels > 0) b.h = Math.round(levels * 3.4 + 1);
   if (t.name) b.n = t.name;
+  if (holes.length) { b.i = holes.map((hp) => hp.flatMap(([x, z]) => [dm(x), dm(z)])); courtyards += holes.length; }
   buildings.push(b);
   if (t.name) { const [x, z] = centroid(pts); named.push({ name: t.name, t, x, z, from: 'building', size: area(pts) }); }
 }
@@ -139,9 +149,10 @@ for (const w of ways.values()) {
 for (const rel of relations) {
   if (rel.t.type !== 'multipolygon') continue;
   const rings = ringsFromRelation(rel);
+  const inners = ringsFromRelation(rel, true).map(ringCoords);
   for (const r of rings) {
     const pts = ringCoords(r);
-    if (rel.t.building) addBuilding(pts, rel.t);
+    if (rel.t.building) addBuilding(pts, rel.t, inners.filter((h) => insideRing(pts, h[0])));
     else if (AREA_KIND(rel.t)) areas.push({ k: AREA_KIND(rel.t), p: pts.flatMap(([x, z]) => [dm(x), dm(z)]) });
   }
   if (!rel.t.building && rel.t.name && rings.length) { const [x, z] = centroid(ringCoords(rings[0])); named.push({ name: rel.t.name, t: rel.t, x, z, from: 'area', size: area(ringCoords(rings[0])) }); }
@@ -194,6 +205,27 @@ for (const poi of listed) {
   added++;
 }
 
+// same name in several spots (banks, canteens): add the nearest well-known place
+const ANCHOR = new Set(['landmark', 'hall', 'academic', 'sport', 'health']);
+const byName = new Map();
+for (const p of places) byName.set(p.n, [...(byName.get(p.n) ?? []), p]);
+let renamed = 0;
+for (const [name, list] of byName) {
+  if (list.length < 2) continue;
+  for (const p of list) {
+    let best = null, bd = Infinity;
+    for (const q of places) {
+      if (q.n === name || !ANCHOR.has(q.k) || byName.get(q.n).length > 1 || q.n.length > 28) continue;
+      const d = Math.hypot(q.x - p.x, q.z - p.z);
+      if (d < bd) { bd = d; best = q; }
+    }
+    if (best) { p.n = `${name} (near ${best.n.replace(/^The /, '')})`; renamed++; }
+  }
+}
+// still clashing (same anchor): number them
+const seen = new Map();
+for (const p of places) { const c = (seen.get(p.n) ?? 0) + 1; seen.set(p.n, c); if (c > 1) p.n = `${p.n} ${c}`; }
+
 const json = {
   attribution: 'Map data © OpenStreetMap contributors (ODbL). Extra places from the UG Campus Map by enkayyy97.',
   origin: [LAT0, LNG0],
@@ -204,4 +236,5 @@ const json = {
   places: places.map((p) => ({ n: p.n, k: p.k, x: dm(p.x), z: dm(p.z) })),
 };
 writeFileSync(out, JSON.stringify(json));
+console.log(`courtyards ${courtyards}, renamed ${renamed} same-name places`);
 console.log(`roads ${roads.length} (nodes ${roadNodes.length}), buildings ${buildings.length}, areas ${areas.length}, places ${places.length} (+${added} from the UG Campus Map), ${(JSON.stringify(json).length / 1024).toFixed(0)} KB`);

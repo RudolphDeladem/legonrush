@@ -1,5 +1,5 @@
 // Rideable routes over the real campus road network.
-import { PLACES, directions, findPath, nodeXZ, placeByName, ROADS, type Place, type PlaceKind, type RoadClass, type Step } from './campusmap';
+import { PLACES, directions, findPath, nodeXZ, placeByName, ROADS, type Place, type PlaceKind, type RoadClass, type Step, type TravelMode } from './campusmap';
 import { Track } from './track';
 import type { RouteLabel } from './world';
 
@@ -14,6 +14,7 @@ export interface Route {
   id: string;
   name: string;
   kind: RouteKind;
+  mode: TravelMode;
   /** rideable length in metres, start line to finish line */
   length: number;
   difficulty: number;
@@ -34,13 +35,13 @@ const TAIL = 40;
 const LABEL_PRIORITY: Record<PlaceKind, number> = { landmark: 0, hall: 1, academic: 2, food: 3, sport: 3, health: 4, bank: 5, worship: 5, transport: 6, other: 7 };
 
 /** Builds a ride along the shortest real way through the given places, in order. */
-export function routeThrough(stops: Place[], opts: { id: string; name: string; kind: RouteKind; difficulty?: number }): Route | null {
+export function routeThrough(stops: Place[], opts: { id: string; name: string; kind: RouteKind; difficulty?: number; mode?: TravelMode }): Route | null {
   const pts: [number, number][] = [];
   const tags: number[] = [];
   const steps: Step[] = [];
   let offset = 0;
   for (let k = 0; k < stops.length - 1; k++) {
-    const path = findPath([stops[k].x, stops[k].z], [stops[k + 1].x, stops[k + 1].z]);
+    const path = findPath([stops[k].x, stops[k].z], [stops[k + 1].x, stops[k + 1].z], opts.mode);
     if (!path || path.nodes.length < 2) return null;
     const seg = path.nodes.map(nodeXZ);
     if (pts.length) seg.shift(); // shared node between legs
@@ -83,6 +84,7 @@ export function routeThrough(stops: Place[], opts: { id: string; name: string; k
 
   return {
     ...opts,
+    mode: opts.mode ?? 'cycle',
     difficulty: opts.difficulty ?? 2,
     length,
     track,
@@ -97,8 +99,8 @@ export function routeThrough(stops: Place[], opts: { id: string; name: string; k
 }
 
 /** Explore: the real shortest way from one place to another. */
-export const exploreRoute = (from: Place, to: Place) =>
-  routeThrough([from, to], { id: 'explore', name: `${from.name} to ${to.name}`, kind: 'explore', difficulty: 1 });
+export const exploreRoute = (from: Place, to: Place, mode: TravelMode = 'cycle') =>
+  routeThrough([from, to], { id: 'explore', name: `${from.name} to ${to.name}`, kind: 'explore', difficulty: 1, mode });
 
 const must = (name: string) => {
   const p = placeByName(name);

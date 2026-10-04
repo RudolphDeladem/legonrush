@@ -114,6 +114,8 @@ export class Game {
   private orbit = 0;
 
   onHud: (h: HudState) => void = () => {};
+  /** no traffic or obstacles: for learning the way */
+  calm = false;
   onEnd: (r: RideEnd) => void = () => {};
   onAction: (a: Action) => void = () => {};
 
@@ -444,6 +446,11 @@ export class Game {
   }
 
   private spawnRow(d: number) {
+    // calm rides: coins only, nothing to dodge
+    if (this.calm) {
+      this.addCoinLine((Math.random() * 3) | 0, d, 5);
+      return;
+    }
     const progress = d / this.route.length;
     const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
     // no cars or trotros on footpaths

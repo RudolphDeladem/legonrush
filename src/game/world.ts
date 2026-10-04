@@ -113,7 +113,7 @@ function flatGeometry(pos: number[], idx: number[]) {
 
 /** Flat material drawn over the ground without z-fighting. */
 const groundMat = (color: string, layer: number, map?: THREE.Texture) =>
-  new THREE.MeshStandardMaterial({ color, map, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -layer, polygonOffsetUnits: -layer * 2 });
+  new THREE.MeshStandardMaterial({ color, ...(map && { map }), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -layer, polygonOffsetUnits: -layer * 2 });
 
 /**
  * The real campus, built once: ground, ground areas (pitches, parking, water),
@@ -198,18 +198,25 @@ export function buildCampus() {
     area = Math.abs(area) / 2;
     const h = bd.height ?? (area < 60 ? 3.6 : area < 350 ? 7 : rand() < 0.5 ? 7 : 10.5);
     let u = 0;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      const ax = p[i * 2], az = p[i * 2 + 1], bx = p[j * 2], bz = p[j * 2 + 1];
-      const len = Math.hypot(bx - ax, bz - az);
-      wallPos.push(ax, 0, az, bx, 0, bz, bx, h, bz, ax, 0, az, bx, h, bz, ax, h, az);
-      const u0 = u / 8, u1 = (u + len) / 8, v = h / 7;
-      wallUv.push(u0, 0, u1, 0, u1, v, u0, 0, u1, v, u0, v);
-      u += len;
-    }
-    const contour: THREE.Vector2[] = [];
-    for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(p[i * 2], p[i * 2 + 1]));
-    for (const t of THREE.ShapeUtils.triangulateShape(contour, [])) for (const k of t) roofPos.push(contour[k].x, h, contour[k].y);
+    const wall = (r: Float32Array) => {
+      const m = r.length / 2;
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m;
+        const ax = r[i * 2], az = r[i * 2 + 1], bx = r[j * 2], bz = r[j * 2 + 1];
+        const len = Math.hypot(bx - ax, bz - az);
+        wallPos.push(ax, 0, az, bx, 0, bz, bx, h, bz, ax, 0, az, bx, h, bz, ax, h, az);
+        const u0 = u / 8, u1 = (u + len) / 8, v = h / 7;
+        wallUv.push(u0, 0, u1, 0, u1, v, u0, 0, u1, v, u0, v);
+        u += len;
+      }
+    };
+    wall(p);
+    bd.holes.forEach(wall);
+    const vec = (r: Float32Array) => Array.from({ length: r.length / 2 }, (_, i) => new THREE.Vector2(r[i * 2], r[i * 2 + 1]));
+    const contour = vec(p);
+    const holes = bd.holes.map(vec);
+    const all = contour.concat(...holes);
+    for (const t of THREE.ShapeUtils.triangulateShape(contour, holes)) for (const k of t) roofPos.push(all[k].x, h, all[k].y);
   }
   const wallGeo = new THREE.BufferGeometry();
   wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(wallPos, 3));
@@ -413,7 +420,8 @@ export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
     group.add(billboard(bbTex, s, p, yawAt(d)));
   }
 
-  group.add(gate(o.startText, at(o.start, 0), yawAt(o.start)));
+  // a little way past the start line, so it does not sit over the rider and the HUD at the countdown
+  group.add(gate(o.startText, at(o.start + 16, 0), yawAt(o.start + 16)));
   group.add(gate(o.finishText, at(o.finish, 0), yawAt(o.finish), true));
   return group;
 }

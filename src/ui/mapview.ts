@@ -21,15 +21,18 @@ function campusCanvas() {
   const X = (x: number) => (x - x0) / M_PER_PX, Z = (z: number) => (z - z0) / M_PER_PX;
   ctx.fillStyle = '#16233f';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const poly = (pts: Float32Array) => {
-    ctx.beginPath();
+  const ring = (pts: Float32Array) => {
     for (let i = 0; i < pts.length; i += 2) (i ? ctx.lineTo : ctx.moveTo).call(ctx, X(pts[i]), Z(pts[i + 1]));
     ctx.closePath();
+  };
+  const poly = (pts: Float32Array) => {
+    ctx.beginPath();
+    ring(pts);
   };
   const AREA: Record<string, string> = { pitch: '#1f4a3a', track: '#5a2f2f', parking: '#2a3550', water: '#1f4f7a', wood: '#1a3a2c' };
   for (const a of AREAS) { poly(a.pts); ctx.fillStyle = AREA[a.kind]; ctx.fill(); }
   ctx.fillStyle = '#33456e';
-  for (const bd of BUILDINGS) { poly(bd.pts); ctx.fill(); }
+  for (const bd of BUILDINGS) { poly(bd.pts); bd.holes.forEach(ring); ctx.fill('evenodd'); }
   ctx.lineCap = ctx.lineJoin = 'round';
   for (const cls of [4, 3, 2, 1, 0]) {
     ctx.strokeStyle = cls === 4 ? 'rgba(200, 190, 160, 0.55)' : 'rgba(225, 232, 245, 0.9)';
