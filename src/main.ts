@@ -6,7 +6,8 @@ import { applyRide, clearProfile, levelFor, loadProfile, loadSettings, newProfil
 import { setSound, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 
-registerSW({ immediate: true });
+// Service workers are unavailable in some embeds; the game still runs without offline support.
+if ('serviceWorker' in navigator) registerSW({ immediate: true, onRegisterError: () => {} });
 
 const app = document.getElementById('app')!;
 const canvas = document.getElementById('world') as HTMLCanvasElement;
@@ -521,8 +522,13 @@ function home(next: Tab = 'home') {
     await installPrompt?.prompt();
     installPrompt = null;
   });
-  on('#reset', 'click', () => {
-    if (!confirm('Reset all LEGONRUSH progress on this device?')) return;
+  on('#reset', 'click', (_, el) => {
+    // two taps instead of confirm(), which some embedded browsers block
+    if (el.dataset.armed !== '1') {
+      el.dataset.armed = '1';
+      el.textContent = 'Tap again to erase all progress';
+      return;
+    }
     clearProfile();
     profile = null;
     welcome();
