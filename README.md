@@ -62,9 +62,9 @@ index.html           landing page
 play/index.html      game page
 public/brand/        logo, wordmark and social image
 public/icons/        app icons cut from the logo
-public/photos/       landing-page photos cut from DELA's mockup (replace with full-resolution originals, same names)
+public/art/          landing-page illustrations (SVG), drawn by scripts/landing-art.mjs
 public/shots/        in-game screenshots (marketing renders)
-scripts/             brand-assets.mjs (logo -> icons), mockup-photos.mjs (mockup -> photos), marketing-shots.mjs (game renders); all need Playwright
+scripts/             brand-assets.mjs (logo -> icons), landing-art.mjs (landing illustrations), marketing-shots.mjs (game renders); the PNG ones need Playwright
 ```
 
 ## Refining the campus map
