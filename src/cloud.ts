@@ -23,6 +23,9 @@ function sb() {
   ));
 }
 
+/** the shared client, for live channels */
+export const realtimeClient = sb;
+
 const hasStoredSession = () => {
   try {
     return !!localStorage.getItem(AUTH_KEY);
@@ -292,4 +295,66 @@ export async function departmentStandings(): Promise<DeptRow[]> {
   const { data, error } = await (await sb()).rpc('department_standings', { p_since: weekStart().toISOString() });
   if (error) throw error;
   return (data ?? []).map((r: DeptRow) => ({ department: r.department, km: Number(r.km), riders: Number(r.riders) }));
+}
+
+// ---------- riders and invites ----------
+
+export interface RiderCard {
+  id: string;
+  name: string;
+  username: string | null;
+  hall: string;
+  department: string | null;
+  snap: string | null;
+}
+
+/** riders whose username or Snapchat starts with the text */
+export async function findRiders(q: string): Promise<RiderCard[]> {
+  const t = q.replace(/^@/, '').replace(/[^A-Za-z0-9_.-]/g, '');
+  if (t.length < 2) return [];
+  const { data, error } = await (await sb())
+    .from('profiles')
+    .select('id, name, username, hall, department, snap')
+    .or(`username.ilike.${t}%,snap.ilike.${t}%`)
+    .limit(8);
+  if (error) throw error;
+  return (data ?? []).filter((r: RiderCard) => r.id !== account?.id);
+}
+
+export interface Invite {
+  id: number;
+  code: string;
+  from: { id: string; name: string; hall: string };
+  at: string;
+}
+
+/** Leaves an invite for a rider, so they see it next time they open the game. */
+export async function sendInvite(toId: string, code: string) {
+  if (!account) return false;
+  const { error } = await (await sb()).from('invites').insert({ to_id: toId, code });
+  return !error;
+}
+
+/** invites from the last two hours you haven't answered */
+export async function pendingInvites(): Promise<Invite[]> {
+  if (!account) return [];
+  const since = new Date(Date.now() - 2 * 3600e3).toISOString();
+  const { data, error } = await (await sb())
+    .from('invites')
+    .select('id, code, created_at, from:profiles!invites_from_id_fkey(id, name, hall)')
+    .eq('to_id', account.id)
+    .eq('seen', false)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ id: r.id, code: r.code, at: r.created_at, from: r.from }));
+}
+
+export async function answerInvite(id: number) {
+  try {
+    await (await sb()).from('invites').update({ seen: true }).eq('id', id);
+  } catch {
+    /* offline: it expires on its own */
+  }
 }

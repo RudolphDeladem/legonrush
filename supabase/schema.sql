@@ -109,3 +109,21 @@ $$;
 grant execute on function public.leaderboard(text, integer) to anon, authenticated;
 grant execute on function public.department_standings(timestamptz) to anon, authenticated;
 grant execute on function public.hall_standings(timestamptz) to anon, authenticated;
+
+-- Vibe Ride invites for riders who aren't online right now. They see them next time they open the game.
+create table if not exists public.invites (
+  id bigint generated always as identity primary key,
+  from_id uuid not null default auth.uid() references public.profiles on delete cascade,
+  to_id uuid not null references public.profiles on delete cascade,
+  code text not null check (code ~ '^[A-Z0-9]{6}$'),
+  seen boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists invites_to on public.invites (to_id, created_at);
+alter table public.invites enable row level security;
+drop policy if exists "send invites" on public.invites;
+create policy "send invites" on public.invites for insert to authenticated with check (from_id = auth.uid() and to_id <> auth.uid());
+drop policy if exists "see own invites" on public.invites;
+create policy "see own invites" on public.invites for select to authenticated using (to_id = auth.uid() or from_id = auth.uid());
+drop policy if exists "answer own invites" on public.invites;
+create policy "answer own invites" on public.invites for update to authenticated using (to_id = auth.uid()) with check (to_id = auth.uid());

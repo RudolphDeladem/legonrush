@@ -28,6 +28,20 @@ export interface Profile {
   /** show the Snapchat handle to other riders */
   snapPublic: boolean;
   look: Look;
+  /** races finished first against other riders */
+  wins: number;
+  /** today's missions: progress and which rewards were claimed */
+  missions: MissionDay;
+}
+
+export interface MissionDay {
+  day: string;
+  km: number;
+  /** riders you vibe-rode with today */
+  friends: string[];
+  /** places you reached in Explore today */
+  places: string[];
+  claimed: string[];
 }
 
 export type Gender = 'male' | 'female';
@@ -59,6 +73,7 @@ export function newProfile(): Profile {
     bestTimes: {}, tutorialDone: false, lastDaily: '', streak: 0,
     ownedBikes: [], week: { id: '', km: 0, claimed: false },
     gender: 'male', department: '', snap: '', snapPublic: true, look: defaultLook(),
+    wins: 0, missions: { day: '', km: 0, friends: [], places: [], claimed: [] },
   };
 }
 
@@ -68,6 +83,7 @@ export function loadProfile(): Profile | null {
     if (!raw) return null;
     const p = { ...newProfile(), ...JSON.parse(raw) } as Profile;
     p.look = { ...defaultLook(), ...p.look };
+    p.missions = { ...newProfile().missions, ...p.missions };
     return p;
   } catch {
     return null;
@@ -111,10 +127,12 @@ export interface Settings {
   slowDevice: boolean;
   leftHanded: boolean;
   reducedMotion: boolean;
+  /** the campus you ride on */
+  campus: string;
 }
 
 const defaultSettings = (): Settings => ({
-  sound: true, volume: 0.8, musicVolume: 0.5, graphics: 'auto', slowDevice: false, leftHanded: false,
+  sound: true, volume: 0.8, musicVolume: 0.5, graphics: 'auto', slowDevice: false, leftHanded: false, campus: 'ug',
   reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
 });
 
@@ -193,6 +211,38 @@ export function weekId(now = new Date()) {
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // back to Monday
   return d.toLocaleDateString('en-CA');
 }
+// Daily missions: three small goals that reset every day.
+export interface Mission {
+  id: string;
+  icon: string;
+  title: string;
+  goal: number;
+  reward: number;
+  progress: (m: MissionDay) => number;
+  unit?: string;
+}
+export const MISSIONS: Mission[] = [
+  { id: 'km', icon: '🚴', title: 'Ride 5 km', goal: 5, reward: 200, progress: (m) => m.km, unit: 'km' },
+  { id: 'friends', icon: '💛', title: 'Vibe ride with 2 friends', goal: 2, reward: 300, progress: (m) => m.friends.length },
+  { id: 'places', icon: '📍', title: 'Discover 3 new places', goal: 3, reward: 250, progress: (m) => m.places.length },
+];
+
+export function todayMissions(p: Profile) {
+  const day = localDay(new Date());
+  if (p.missions?.day !== day) p.missions = { day, km: 0, friends: [], places: [], claimed: [] };
+  return p.missions;
+}
+
+export function claimMission(p: Profile, id: string) {
+  const m = todayMissions(p);
+  const def = MISSIONS.find((x) => x.id === id);
+  if (!def || m.claimed.includes(id) || def.progress(m) < def.goal) return 0;
+  m.claimed.push(id);
+  p.coins += def.reward;
+  saveProfile(p);
+  return def.reward;
+}
+
 export function currentWeek(p: Profile) {
   const id = weekId();
   if (p.week.id !== id) p.week = { id, km: 0, claimed: false };
@@ -205,6 +255,7 @@ export function applyRide(p: Profile, r: RideResult, reward = 250, boost = 1): R
   const score = Math.round(r.distance + r.coins * 10 + (r.finished ? 500 : 0));
   const coins = (r.coins + finishBonus) * boost;
   currentWeek(p).km += r.distance / 1000;
+  todayMissions(p).km += r.distance / 1000;
   const xp = Math.round(r.distance / 10 + r.coins + (r.finished ? 200 : 0));
   const levelBefore = levelFor(p.xp);
 

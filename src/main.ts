@@ -11,11 +11,13 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, onProfileSave, type Accessory, type Look, type Outfit, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { MISSIONS, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
 import * as cloud from './cloud';
+import * as live from './live';
+import { CAMPUSES, campusById } from './data/campuses';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -59,7 +61,7 @@ const changeSettings = (patch: Partial<typeof settings>) => {
   applySettings();
 };
 
-type Tab = 'home' | 'ride' | 'race' | 'events' | 'you';
+type Tab = 'home' | 'ride' | 'race' | 'events' | 'social' | 'you';
 let tab: Tab = 'home';
 
 let installPrompt: (Event & { prompt: () => Promise<void> }) | null = null;
@@ -124,6 +126,12 @@ function splash() {
   setTimeout(() => {
     // a shared route link opens straight into Explore, even for someone new
     const link = new URLSearchParams(location.search);
+    const v = (link.get('v') ?? '').toUpperCase();
+    if (/^[A-Z0-9]{6}$/.test(v)) {
+      history.replaceState(null, '', location.pathname);
+      ensureProfile();
+      return inviteIntro(v, (link.get('n') ?? '').slice(0, 18));
+    }
     if (link.get('c')) {
       history.replaceState(null, '', location.pathname);
       ensureProfile();
@@ -339,6 +347,14 @@ interface PlayOpts {
   challenge?: Challenge;
   /** a timed event this ride counts for */
   event?: EventDef;
+  /** riding with people right now: a Quick Match race or a Vibe Ride */
+  live?: LiveRide;
+}
+
+interface LiveRide {
+  ch: live.Channel;
+  kind: 'race' | 'vibe';
+  riders: { id: string; name: string; jersey: string }[];
 }
 
 function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}) {
@@ -355,7 +371,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
         <div class="hud-progress">
           <div class="xpbar"><div id="prog" style="width:0%"></div></div>
           <p class="muted">${esc((route.id === 'explore' ? `To ${route.to.name}` : route.name).toUpperCase())}</p>
-          <div class="row" style="gap:6px;justify-content:center"><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
+          <div class="row" style="gap:6px;justify-content:center${opts.live?.kind === 'vibe' ? ';display:none' : ''}"><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
         </div>
         <div class="row">
           <div class="hud-pill">${icons.coin} <span id="coins">0</span></div>
@@ -369,6 +385,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
         ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : ''}
       </div>
       <canvas class="minimap" id="minimap" width="240" height="240" aria-hidden="true"></canvas>
+      ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="rc-log" id="rcLog"></div>${quickActions()}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
     </div>`);
 
   const $ = (id: string) => app.querySelector<HTMLElement>('#' + id)!;
@@ -385,13 +402,54 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
   const ghostGap = $('ghostGap');
   const placeEl = $('place');
   // races: a friend's challenge, Quick Match bots, or else your own best run rides with you
-  const ghost = route.kind === 'race' && !opts.challenge && !opts.rivals ? loadGhost(route.id) : null;
-  const rivals: Rival[] = opts.challenge
+  const lr = opts.live;
+  const ghost = route.kind === 'race' && !opts.challenge && !opts.rivals && !lr ? loadGhost(route.id) : null;
+  const rivals: Rival[] = lr
+    ? lr.riders.map((r) => ({ run: { step: 0.1, d: [], x: [] }, name: r.name, color: r.jersey || '#ffd21f', ghostly: false, live: true }))
+    : opts.challenge
     ? [{ run: opts.challenge.run, name: opts.challenge.name, color: '#ffd21f', ghostly: false }]
     : opts.rivals ?? (ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
   game.setRivals(rivals);
   const gapName = rivals[0]?.name.replace(/ \(bot\)$/, '') ?? '';
   let lastTurn = '';
+
+  // riding with people: stream your position, and place theirs as it arrives
+  let stream = 0;
+  if (lr) {
+    let sent = 0;
+    stream = window.setInterval(() => {
+      const rec = game.recording;
+      if (rec.d.length <= sent) return;
+      lr.ch.send('pos', { k: myId(), i: sent, d: rec.d.slice(sent), x: rec.x.slice(sent) });
+      sent = rec.d.length;
+    }, 300);
+    const sink = (m: PosMsg) => {
+      const run = rivals[lr.riders.findIndex((r) => r.id === m.k)]?.run;
+      if (!run || !Array.isArray(m.d)) return;
+      // a lost update: hold the last position until the next one
+      while (run.d.length < m.i) { run.d.push(run.d[run.d.length - 1] ?? 0); run.x.push(run.x[run.x.length - 1] ?? 0); }
+      m.d.forEach((d, j) => { run.d[m.i + j] = Number(d) || 0; run.x[m.i + j] = Number(m.x[j]) || 0; });
+    };
+    if (lr.kind === 'vibe' && vibe) vibe.onPos = sink;
+    else lr.ch.on('pos', sink);
+  }
+  setStatus('riding');
+  // Vibe Ride: the chat rides with you
+  const rideChat = app.querySelector<HTMLElement>('#rideChat');
+  if (rideChat && vibe) {
+    const log = $('rcLog');
+    const form = app.querySelector<HTMLFormElement>('#rcForm')!;
+    const input = app.querySelector<HTMLInputElement>('#rcSay')!;
+    const draw = () => {
+      log.innerHTML = vibe ? vibe.msgs.slice(-4).map(chatLine).join('') : '';
+    };
+    draw();
+    vibe.redraw = () => draw();
+    bindChat(rideChat, log, input, () => {
+      form.hidden = !form.hidden;
+      if (!form.hidden) input.focus();
+    });
+  }
 
   // tutorial: teach through play, one move at a time
   const steps: { action: Action; text: string }[] = [
@@ -467,6 +525,22 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     const result: RideResult = { routeId: routeKey(route), ...r };
     const run = game.lastRun;
     const event = opts.event && eventStatus(opts.event).live ? opts.event : undefined;
+    const p = profile!;
+    // won: finished ahead of every rider you raced
+    if (route.kind === 'race' && r.finished && rivals.length && !ghost && game.rivalTimes.every((t) => t.time > r.time)) p.wins = (p.wins ?? 0) + 1;
+    const m = todayMissions(p);
+    if (isExplore(route) && r.finished) {
+      for (const n of route.id === 'freshers-tour' ? TOUR_STOPS : [route.to.name]) if (!m.places.includes(n)) m.places.push(n);
+    }
+    if (lr) lr.ch.send('done', { k: myId(), name: p.name, km: r.distance / 1000, finished: r.finished, time: r.time });
+    if (lr?.kind === 'vibe') {
+      for (const f of lr.riders) if (r.distance > 200 && !m.friends.includes(f.id)) m.friends.push(f.id);
+      const rw = applyRide(p, result, finishReward(route));
+      cloud.record({ hall: p.hall, department: p.department, km: r.distance / 1000 });
+      vibe?.msgs.push({ sys: true, text: `${r.finished ? `You reached ${route.to.name}` : 'You stopped'} · ${km(r.distance)} km · +${rw.coins} coins`, at: Date.now() });
+      return vibeRoom();
+    }
+    if (lr) setTimeout(() => lr.ch.leave(), 90e3);
     const rewards = applyRide(profile!, result, finishReward(route), event ? 2 : 1);
     cloud.record({ hall: profile!.hall, department: profile!.department, km: r.distance / 1000, race: route.kind === 'race' && r.finished ? { route: route.id, time: r.time } : undefined });
     if (route.kind === 'race' && r.finished && profile!.bestTimes[result.routeId] === r.time) saveGhost(route.id, { time: r.time, ...run });
@@ -478,6 +552,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
       prize = event.prize;
     }
     results(result, rewards, route, { hadGhost: !!ghost, rivals: game.rivalTimes, run, opts, event, prize });
+    if (lr) liveStandings(lr, result);
   };
 
   // controls
@@ -486,6 +561,11 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', KeyB: 'boost', ShiftLeft: 'boost', ShiftRight: 'boost',
   };
   keyHandler = (e) => {
+    // typing in the ride chat
+    if (e.target instanceof HTMLInputElement) {
+      if (e.code === 'Escape') e.target.blur();
+      return;
+    }
     if (e.code === 'Escape' || e.code === 'KeyP') return togglePause();
     const a = keyMap[e.code];
     if (a) {
@@ -524,7 +604,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
       <div class="panel">
         <h2 class="title">Paused</h2>
         <button class="btn btn-primary" data-p="continue">Continue</button>
-        <button class="btn btn-ghost" data-p="restart">Restart</button>
+        ${lr ? '' : '<button class="btn btn-ghost" data-p="restart">Restart</button>'}
         <button class="btn btn-ghost" data-p="sound">Sound: ${settings.sound ? 'On' : 'Off'}</button>
         <p class="muted small" style="margin:6px 0">${isTouch ? 'Swipe left/right to change lanes, up to jump, tap to boost.' : '← → or A D to steer, ↑ W or Space to jump, B or Shift to boost, Esc to pause.'}</p>
         <button class="btn btn-link" data-p="exit">Exit ride</button>
@@ -548,7 +628,16 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     app.querySelector('#pauseOverlay')?.remove();
     onBack(togglePause);
   };
-  const leave = () => (route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
+  const leave = () => {
+    if (lr) {
+      lr.ch.send('done', { k: myId(), name: profile!.name, km: 0, finished: false, time: 0 });
+      if (lr.kind === 'vibe') return vibeRoom();
+      lr.ch.leave();
+      return home('race');
+    }
+    leaveSolo();
+  };
+  const leaveSolo = () => (route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
   document.addEventListener('visibilitychange', onHidden);
@@ -562,9 +651,11 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     game.onEnd = () => {};
     game.onAction = () => {};
     game.paused = false;
+    clearInterval(stream);
+    if (vibe) { vibe.onPos = null; vibe.redraw = null; }
   }
 
-  game.calm = isExplore(route) && exploreOpts.calm;
+  game.calm = lr?.kind === 'vibe' || (isExplore(route) && exploreOpts.calm);
   // auto graphics: drop to smooth mode once if this phone can't keep up
   game.watchSpeed = settings.graphics === 'auto' && !settings.slowDevice;
   game.onSlow = () => {
@@ -610,14 +701,6 @@ const inText = (d: Date) => {
   const m = Math.max(1, Math.round((d.getTime() - Date.now()) / 60000));
   return m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)} h ${m % 60 ? `${m % 60} min` : ''}`.trim();
 };
-
-/** Quick Match: three bot riders on any race you have unlocked */
-function quickMatch() {
-  const level = levelFor(profile!.xp);
-  const pool = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)];
-  const route = pool[Math.floor(Math.random() * pool.length)];
-  play(false, route, { rivals: botRivals(route) });
-}
 
 function playEvent(e: EventDef) {
   const route = routeById(e.race)!;
@@ -712,6 +795,26 @@ function garageScreen() {
   onBack(() => home('you'));
 }
 
+/** Quick Match: the standings fill in as the other riders finish */
+function liveStandings(lr: LiveRide, r: RideResult) {
+  const times = game.rivalTimes.map((t) => t.time);
+  const left = new Set<number>();
+  const draw = () => {
+    const el = app.querySelector<HTMLElement>('#standings');
+    if (!el) return;
+    const rows = [{ name: 'You', time: r.finished ? r.time : Infinity, me: true, out: false }, ...lr.riders.map((v, i) => ({ name: v.name, time: times[i], me: false, out: left.has(i) }))].sort((a, b) => a.time - b.time);
+    el.innerHTML = rows.map((t, i) => `<div class="reward-row${t.me ? ' me' : ''}"><span>${ordinal(i + 1)} · ${esc(t.name)}</span><b>${Number.isFinite(t.time) ? clock(t.time) : t.out || t.me ? 'DNF' : 'Riding…'}</b></div>`).join('');
+  };
+  lr.ch.on('done', (m: { k: string; finished: boolean; time: number }) => {
+    const i = lr.riders.findIndex((v) => v.id === m.k);
+    if (i < 0) return;
+    if (m.finished) times[i] = Math.min(times[i], Number(m.time));
+    else left.add(i);
+    draw();
+  });
+  draw();
+}
+
 function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) {
   const p = profile!;
   const hadGhost = x.hadGhost;
@@ -745,7 +848,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
         ${levelUp ? `<div class="levelup">🎉 Level up! You're now level ${rw.levelAfter}</div>` : ''}
         ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>🔓 New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
         ${verdict ? `<div class="levelup">${verdict}</div>` : ''}
-        ${table.length > 1 ? `<div class="card standings">${table.map((t, i) => `<div class="reward-row${t.me ? ' me' : ''}"><span>${ordinal(i + 1)} · ${esc(t.name)}</span><b>${Number.isFinite(t.time) ? clock(t.time) : 'DNF'}</b></div>`).join('')}</div>` : ''}
+        ${table.length > 1 ? `<div class="card standings" id="standings">${table.map((t, i) => `<div class="reward-row${t.me ? ' me' : ''}"><span>${ordinal(i + 1)} · ${esc(t.name)}</span><b>${Number.isFinite(t.time) ? clock(t.time) : 'DNF'}</b></div>`).join('')}</div>` : ''}
         ${x.event ? `<p class="muted small">${x.event.icon} ${esc(x.event.name)} is live: coins doubled.</p>` : ''}
         ${prizeBike ? `<div class="levelup">🚲 You won the ${esc(prizeBike.name)}! Equip it in the Garage.</div>` : ''}
         ${route.kind === 'race' && r.finished && !hadGhost && !x.rivals.length ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
@@ -768,7 +871,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
     };
     requestAnimationFrame(tick);
   });
-  on('#again', 'click', () => play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route) } : x.opts));
+  on('#again', 'click', () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route) } : x.opts)));
   on('#challenge', 'click', () => share(`Can you beat my ${clock(r.time)} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, x.run, r.time), app.querySelector('#shareNote')!));
   on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
   on('#home', 'click', () => home());
@@ -785,25 +888,175 @@ const greeting = () => {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 };
 
+type NavId = Tab | 'map' | 'garage';
+/** id, label, icon, shown in the phone's bottom bar */
+const NAV: [NavId, string, string, boolean][] = [
+  ['home', 'Home', icons.home, true], ['ride', 'Ride', icons.ride, true], ['race', 'Race', icons.race, true],
+  ['events', 'Events', icons.events, true], ['social', 'Social', icons.social, true],
+  ['map', 'Map', icons.map, false], ['garage', 'Garage', icons.garage, false], ['you', 'Profile', icons.you, true],
+];
+
 function shell(content: string) {
-  const items: [Tab, string, string][] = [
-    ['home', 'HOME', icons.home], ['ride', 'RIDE', icons.ride], ['race', 'RACE', icons.race], ['events', 'EVENTS', icons.events], ['you', 'YOU', icons.you],
-  ];
+  const c = campusById(settings.campus);
   return `
     <div class="shell">
       <nav class="nav">
         <div class="nav-brand">LEGON<span>RUSH</span></div>
-        ${items.map(([id, label, icon]) => `<button class="nav-item ${tab === id ? 'active' : ''}" data-tab="${id}">${icon}<span>${label}</span></button>`).join('')}
+        ${NAV.map(([id, label, icon, phone]) => `<button class="nav-item${tab === id ? ' active' : ''}${phone ? '' : ' desk-only'}" data-nav="${id}">${icon}<span>${id === 'you' ? '<i class="phone-only">You</i><i class="desk-only">Profile</i>' : label}</span></button>`).join('')}
+        <button class="card selectable nav-campus" data-campus><small class="muted">Riding on</small><b>${esc(c.name)}</b><span class="small" style="color:var(--gold)">Change campus ›</span></button>
       </nav>
-      <main class="content scrim fade-in">${content}</main>
+      <main class="content scrim fade-in tab-${tab}">${topBar()}${content}</main>
     </div>`;
+}
+
+function topBar() {
+  const p = profile!;
+  const c = campusById(settings.campus);
+  return `<header class="topbar">
+    <button class="campus-btn" data-campus aria-label="Choose campus">${icons.pin}<span><small>Campus</small>${esc(c.id === 'ug' ? 'UG · Legon' : c.short)}</span><em>▾</em></button>
+    <span class="grow"></span>
+    <span class="weather" id="weather" hidden></span>
+    <span class="chip">${icons.coin} ${fmt(p.coins)}</span>
+    <button class="icon-btn" id="bell" aria-label="Invites">${icons.bell}${notices.length ? `<i class="dot-badge">${notices.length}</i>` : ''}</button>
+    <button class="me-btn" data-nav="you" aria-label="Your profile"><span class="avatar sm" style="background:${hallById(p.hall).color}">${esc(p.name.slice(0, 1).toUpperCase())}</span><span class="lv">Lv ${levelFor(p.xp)}</span></button>
+    <button class="icon-btn desk-only" id="settingsTop" aria-label="Settings">${icons.gear}</button>
+  </header>`;
+}
+
+/** Legon's weather now, for the top bar; quietly absent when offline */
+let weather: { text: string; at: number } | null = null;
+const WEATHER: [number, string, string][] = [[0, '☀️', 'Sunny'], [2, '⛅', 'Partly cloudy'], [3, '☁️', 'Cloudy'], [48, '🌫️', 'Hazy'], [67, '🌧️', 'Rain'], [82, '🌦️', 'Showers'], [99, '⛈️', 'Storm']];
+async function fillWeather() {
+  const show = () => {
+    const el = app.querySelector<HTMLElement>('#weather');
+    if (el && weather) { el.textContent = weather.text; el.hidden = false; }
+  };
+  if (weather && Date.now() - weather.at < 30 * 60e3) return show();
+  try {
+    const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=5.6505&longitude=-0.1869&current=temperature_2m,weather_code&timezone=Africa%2FAccra');
+    const j = await r.json();
+    const code = Number(j.current.weather_code);
+    const [, icon, word] = WEATHER.find(([max]) => code <= max) ?? WEATHER[0];
+    const night = new Date().getHours() >= 19 || new Date().getHours() < 6;
+    weather = { text: `${night && code <= 2 ? '🌙' : icon} ${Math.round(j.current.temperature_2m)}°C ${night && code <= 2 ? 'Clear' : word}`, at: Date.now() };
+    show();
+  } catch {
+    /* offline: no weather */
+  }
+}
+
+/** Choose a campus. Legon is open; the rest are coming soon. */
+function campusSheet(after: () => void) {
+  const ov = document.createElement('div');
+  ov.className = 'overlay sheet-overlay fade-in';
+  ov.innerHTML = `
+    <div class="sheet" role="dialog" aria-label="Choose campus">
+      <div class="row"><h2 class="title" style="font-size:22px">Choose campus</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
+      <p class="muted small">We're starting with the University of Ghana. More campuses are on the way.</p>
+      <p class="small campus-note" id="campusNote" hidden></p>
+      <div class="campus-list">${CAMPUSES.map((c) => `<button class="campus-row${c.id === settings.campus ? ' on' : ''}${c.open ? '' : ' soon'}" data-c="${c.id}">
+        <span class="campus-mark">${esc(c.id === 'ug' ? 'UG' : c.short.toUpperCase())}</span>
+        <span class="grow"><b>${esc(c.name)}</b><small class="muted">${esc(c.short)} · ${esc(c.city)}</small></span>
+        ${c.open ? (c.id === settings.campus ? '<span class="badge gold">Riding here</span>' : '<span class="badge gold">Open</span>') : '<span class="badge">Coming soon</span>'}
+      </button>`).join('')}</div>
+    </div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); after(); };
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('[data-close]')!.addEventListener('click', close);
+  ov.querySelectorAll<HTMLElement>('[data-c]').forEach((b) => b.addEventListener('click', () => {
+    const c = CAMPUSES.find((x) => x.id === b.dataset.c)!;
+    if (!c.open) {
+      const note = ov.querySelector<HTMLElement>('#campusNote')!;
+      note.hidden = false;
+      note.innerHTML = `<b>${esc(c.short)}</b> is coming soon. For now, ride Legon and tell your friends at ${esc(c.short)} to look out for it.`;
+      return;
+    }
+    changeSettings({ campus: c.id });
+    close();
+  }));
+}
+
+const MODES = [
+  { id: 'explore', icon: '🗺️', title: 'Explore', text: 'Discover the campus your way. Ride freely, find hidden routes and shortcuts, and visit iconic landmarks.', img: '/photos/lm-aerial.webp' },
+  { id: 'match', icon: '🏁', title: 'Quick Match', text: 'Race against riders online. Get matched and jump straight into a live race.', img: '/photos/sc-night.webp' },
+  { id: 'challenge', icon: '⚡', title: 'Challenge', text: 'Create or join a personal challenge. Beat their time and claim the top spot.', img: '/photos/sc-sunset.webp' },
+  { id: 'vibe', icon: '💛', title: 'Vibe Ride', text: 'Find someone and enjoy the ride together. No racing, just ride and connect.', img: '/photos/together.webp' },
+];
+
+function quickRideCard() {
+  const c = campusById(settings.campus);
+  const best = profile!.bestTimes[CAMPUS_LOOP.id];
+  return `<div class="quick-ride">
+    <button class="qr-main" id="ride">
+      <span class="qr-tag">🚴 Quick Ride</span>
+      <span class="qr-route">${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</span>
+      <span class="qr-sub">Just ride. No competition. Ride at your own pace, dodge obstacles, collect rewards${best ? ` and beat your best of ${clock(best)}` : ' and set your personal best'}.</span>
+      <span class="qr-go">Ride now ${icons.arrow}</span>
+    </button>
+    <button class="qr-campus" data-campus><span>${icons.pin}</span><span class="grow"><small>Campus</small>${esc(c.name)}${c.id === 'ug' ? ', Legon' : ''}</span><em>▾</em></button>
+  </div>`;
+}
+
+function missionsCard() {
+  const m = todayMissions(profile!);
+  return `<div class="card stack missions" style="gap:10px">
+    <div class="row"><b>Daily missions</b><span class="grow"></span><span class="muted small">Resets at midnight</span></div>
+    ${MISSIONS.map((x) => {
+      const got = Math.min(x.goal, x.progress(m));
+      const done = got >= x.goal;
+      const claimed = m.claimed.includes(x.id);
+      return `<div class="mission${claimed ? ' claimed' : ''}">
+        <span class="m-icon">${x.icon}</span>
+        <div class="grow"><div class="row small"><b>${esc(x.title)}</b><span class="grow"></span><span class="muted">${x.unit ? got.toFixed(1) : got}/${x.goal}</span></div><div class="xpbar"><div style="width:${(got / x.goal) * 100}%"></div></div></div>
+        ${claimed ? '<span class="badge">Done ✓</span>' : done ? `<button class="btn btn-primary btn-sm" data-mission="${x.id}">+${x.reward}</button>` : `<span class="badge gold">${x.reward} ${icons.coin}</span>`}
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function liveEventCard() {
+  const live = EVENTS.find((e) => eventStatus(e).live);
+  const e = live ?? [...EVENTS].sort((a, b) => eventStatus(a).next!.getTime() - eventStatus(b).next!.getTime())[0];
+  const st = eventStatus(e);
+  return `<div class="card stack event-mini${live ? ' live' : ''}" style="gap:8px">
+    <div class="row"><span class="badge${live ? ' gold live-badge' : ''}">${live ? '● Live event' : 'Next event'}</span><span class="grow"></span><span class="muted small">${live ? `ends ${hourText(st.ends!)}` : `starts ${hourText(st.next)}`}</span></div>
+    <h3 style="font-weight:800">${e.icon} ${esc(e.name.toUpperCase())}</h3>
+    <p class="muted small">${live ? '2× coins' : esc(e.blurb)} · win the ${esc(bikeById(e.prize).name)}</p>
+    <div class="row"><button class="btn ${live ? 'btn-primary' : 'btn-ghost'} btn-sm" data-event="${e.id}">${live ? 'Join now' : 'Practise'}</button><button class="btn btn-link" data-nav="events">All events ›</button></div>
+  </div>`;
+}
+
+function onlineCard() {
+  return `<div class="card stack online-card" style="gap:8px">
+    <div class="row"><b>Riders online</b><span class="grow"></span><span class="badge gold" id="onlineCount">${lobbyState === 'on' ? `● ${online.length + 1} online` : lobbyState === 'off' ? 'Offline' : 'Connecting…'}</span></div>
+    <div id="onlineList" class="online-list">${onlineRows()}</div>
+  </div>`;
+}
+
+function onlineRows() {
+  if (lobbyState === 'off') return '<p class="muted small">Live riders show here when you are online.</p>';
+  if (!online.length) return `<p class="muted small">${lobbyState === 'on' ? "You're the only one riding right now. Invite a friend to Vibe Ride." : 'Looking for riders…'}</p>`;
+  const STATUS: Record<string, string> = { menu: 'Online', riding: 'Riding', vibe: 'Looking for a vibe ride', match: 'Looking for a race', room: 'In a vibe ride' };
+  return online.slice(0, 8).map((r) => `<div class="online-row">
+    <span class="avatar xs" style="background:${hallById(r.state.hall).color}">${esc(r.state.name.slice(0, 1).toUpperCase())}</span>
+    <span class="grow"><b>${esc(r.state.name)}</b><small class="muted">${esc(hallById(r.state.hall).short)} · ${STATUS[r.state.status] ?? 'Online'}</small></span>
+    <button class="btn btn-ghost btn-sm" data-invite="${esc(r.key)}">Invite</button>
+  </div>`).join('') + (online.length > 8 ? `<p class="muted small">and ${online.length - 8} more</p>` : '');
 }
 
 function home(next: Tab = 'home') {
   if (!profile) return welcome();
+  if (pendingVibe && !profile.guest) {
+    const v = pendingVibe;
+    pendingVibe = null;
+    return void joinVibe(v.code, false, v.name);
+  }
+  stopSearching();
   tab = next;
   game.showcase();
   applyLook();
+  setStatus('menu');
   const p = profile;
   const level = levelFor(p.xp);
   const lo = xpForLevel(level);
@@ -822,7 +1075,6 @@ function home(next: Tab = 'home') {
     return `<button class="card selectable" data-race="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">${(route.length / 1000).toFixed(1)} km · Difficulty ${stars(r.difficulty)}${b ? ` · Best ${clock(b)} 👻` : ''}</p></button>`;
   };
   const week = currentWeek(p);
-  const liveEvent = EVENTS.find((e) => eventStatus(e).live);
   const eventCard = (e: EventDef) => {
     const st = eventStatus(e);
     const route = routeById(e.race)!;
@@ -836,46 +1088,43 @@ function home(next: Tab = 'home') {
       <button class="btn ${st.live ? 'btn-primary' : 'btn-ghost'}" data-event="${e.id}">${st.live ? 'Ride now' : 'Practise the route'}</button>
     </div>`;
   };
-  const sendable = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)].filter((r) => p.bestTimes[r.id] && loadGhost(r.id));
-  const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">${icons.ride} EXPLORE CAMPUS</h3><span class="grow"></span><span class="badge gold">New</span></div><p class="muted small" style="margin-top:4px">New on campus? Pick where you are and where you need to be, then ride the real way there with directions.</p></button>
+  const unlocked = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)];
+  const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">🗺️ EXPLORE</h3><span class="grow"></span><span class="badge gold">Directions</span></div><p class="muted small" style="margin-top:4px">Discover the campus your way. Ride freely through familiar places, find hidden routes and shortcuts, and visit iconic landmarks.</p></button>
     <button class="card selectable explore-card" id="quizBtn"><div class="row"><h3 style="font-weight:800">📍 WHERE IS IT?</h3><span class="grow"></span><span class="badge gold">Earn ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">Five campus places. Tap the map where you think each one is.</p></button>`;
+  const firstName = p.name.split(' ')[0];
 
   const views: Record<Tab, string> = {
     home: `
-      <div class="hub">
-        <div class="hub-top">
-          <div>
-            <p class="kicker">${greeting()}</p>
-            <h1 class="title">${esc(p.name)}</h1>
+      <div class="dash">
+        <section class="hello">
+          <p class="kicker">${greeting()}</p>
+          <h1 class="title">${esc(firstName)} 👋</h1>
+          <p class="muted">Ready to ride ${esc(campusById(settings.campus).short)} today?</p>
+        </section>
+        <div class="stat-row">
+          <div><b>${level}</b><span>Level</span></div>
+          <div><b>${p.rides}</b><span>Rides</span></div>
+          <div><b>${(p.totalDistance / 1000).toFixed(1)}</b><span>Km ridden</span></div>
+          <div><b>${p.wins}</b><span>Races won</span></div>
+        </div>
+        ${daily ? `<button class="card selectable daily-card" id="daily"><div class="row"><span class="daily-icon">🎁</span><div class="grow"><b>Daily reward · Day ${daily.day}</b><p class="muted small">${daily.day > 1 ? `${daily.day} days in a row. ` : ''}Come back tomorrow for more.</p></div><span class="badge gold">+${daily.coins} ${icons.coin}</span></div></button>` : ''}
+        <div class="dash-grid">
+          <div class="dash-main">
+            ${quickRideCard()}
+            <div class="modes">${MODES.map((m) => `<button class="mode-card" data-mode="${m.id}" style="--img:url('${m.img}')"><span class="mode-title">${m.icon} ${esc(m.title.toUpperCase())}</span><span class="mode-text">${esc(m.text)}</span><span class="mode-go">${icons.arrow}</span></button>`).join('')}</div>
           </div>
-          <div class="chips"><span class="chip">${icons.coin} ${fmt(p.coins)}</span></div>
+          <aside class="dash-side">
+            ${missionsCard()}
+            ${liveEventCard()}
+            ${onlineCard()}
+          </aside>
         </div>
-        <div class="card stack" style="gap:8px">
-          <div class="row"><b>Level ${level}</b><span class="grow"></span><span class="muted small">${fmt(p.xp - lo)} / ${fmt(hi - lo)} XP</span></div>
-          <div class="xpbar"><div style="width:${((p.xp - lo) / (hi - lo)) * 100}%"></div></div>
-          <div class="row small muted"><span class="hall-swatch" style="background:${hall.color}"></span>${esc(hall.name)}</div>
-        </div>
-        ${daily ? `<button class="card selectable daily-card" id="daily"><div class="row"><span class="daily-icon">🎁</span><div class="grow"><b>Daily reward · Day ${daily.day}</b><p class="muted small">${daily.day > 1 ? `${daily.day} days in a row. ` : ''}Come back tomorrow for more.</p></div><span class="badge gold">+${daily.coins} ${icons.coin}</span></div></button>` : p.streak > 1 ? `<p class="muted small">🔥 ${p.streak}-day streak. Your next reward unlocks tomorrow.</p>` : ''}
-        ${liveEvent ? `<button class="card selectable event-banner" data-event="${liveEvent.id}"><div class="row"><span class="daily-icon">${liveEvent.icon}</span><div class="grow"><b>${esc(liveEvent.name)} is live</b><p class="muted small">2× coins and the ${esc(bikeById(liveEvent.prize).name)} until ${hourText(eventStatus(liveEvent).ends!)}</p></div>${icons.arrow}</div></button>` : ''}
-        <div class="spacer"></div>
-        <button class="ride-cta" id="ride">
-          <div><div class="big">RIDE</div><div class="sub">Quick Ride · ${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</div></div>
-          ${icons.arrow}
-        </button>
-        ${exploreCard}
-        <div class="two">
-          <button class="card mini" id="quick" style="text-align:left"><h3>Quick Match</h3><p class="muted small">Race three riders now</p><span class="badge gold" style="margin-top:8px">${icons.race} Race</span></button>
-          <button class="card mini" style="text-align:left" data-tab="race"><h3>Challenge</h3><p class="muted small">Send a friend your best run</p><span class="badge" style="margin-top:8px">By link</span></button>
-        </div>
-        ${best ? `<div class="card row"><span class="muted small">Your best on ${esc(CAMPUS_LOOP.name)}</span><span class="grow"></span><b>${clock(best)}</b></div>` : ''}
       </div>`,
     ride: `
       <div class="hub">
         <p class="kicker">Ride</p>
         <h1 class="title">Where to?</h1>
-        <button class="ride-cta" id="ride">
-          <div><div class="big" style="font-size:26px">QUICK RIDE</div><div class="sub">Start immediately</div></div>${icons.arrow}
-        </button>
+        ${quickRideCard()}
         ${exploreCard}
         <p class="kicker" style="margin-top:8px">Races</p>
         <p class="muted small">Beat your best time: a ghost of your best run rides with you.</p>
@@ -890,15 +1139,23 @@ function home(next: Tab = 'home') {
         <p class="kicker">Race</p>
         <h1 class="title">Race someone</h1>
         <button class="ride-cta" id="quick">
-          <div><div class="big" style="font-size:26px">QUICK MATCH</div><div class="sub">Three riders · a random route you've unlocked</div></div>${icons.arrow}
+          <div><div class="big" style="font-size:26px">🏁 QUICK MATCH</div><div class="sub">Race against riders online. Get matched with available riders and jump straight into a live race.</div></div>${icons.arrow}
         </button>
-        <p class="kicker" style="margin-top:8px">Challenge a friend</p>
-        <p class="muted small">Send your best run as a link. Your friend races your exact ride, then can send theirs back.</p>
-        ${sendable.length ? sendable.map((r) => `<button class="card selectable" data-send="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">${clock(p.bestTimes[r.id])}</span></div><p class="muted small" style="margin-top:4px">Send this run to a friend →</p></button>`).join('') : '<div class="card"><p class="muted small">Finish any race first. Your best run on it can then be sent from here.</p></div>'}
-        <p class="muted small" id="sendNote" hidden></p>
-        <p class="kicker" style="margin-top:8px">Got a challenge link?</p>
+        <p class="kicker" style="margin-top:8px">⚡ Challenge</p>
+        <p class="muted small">Create a route challenge and invite others, or join one someone shared with you. Beat their time and claim the top spot.</p>
+        <div class="card stack" style="gap:8px">
+          <b>Create a challenge</b>
+          <p class="muted small">Pick a route. Ride it, then send your run. Your friends race your exact ride.</p>
+          ${unlocked.map((r) => {
+            const b = p.bestTimes[r.id];
+            const ghost = b && loadGhost(r.id);
+            return `<div class="row challenge-row"><span class="grow"><b>${esc(r.name)}</b><small class="muted">${(r.length / 1000).toFixed(1)} km${b ? ` · your best ${clock(b)}` : ''}</small></span>${ghost ? `<button class="btn btn-primary btn-sm" data-send="${r.id}">Send</button>` : `<button class="btn btn-ghost btn-sm" data-set="${r.id}">Set a time</button>`}</div>`;
+          }).join('')}
+          <p class="muted small" id="sendNote" hidden></p>
+        </div>
         <div class="card stack">
-          <div class="field"><label for="cLink">Paste the link a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="legonrush.netlify.app/play/?c=..."></div>
+          <b>Join a challenge</b>
+          <div class="field"><label for="cLink">Paste the link or code a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="legonrush.netlify.app/play/?c=..."></div>
           <button class="btn btn-ghost" id="cOpen">Open challenge</button>
         </div>
         <button class="card selectable" id="boards" style="text-align:left"><div class="row"><h3 style="font-weight:800">🏆 LEADERBOARDS</h3><span class="grow"></span><span class="badge gold">Live</span></div><p class="muted small" style="margin-top:4px">The fastest riders on every route, and this week's hall standings.${cloud.account ? '' : ' Sign in to post your times.'}</p></button>
@@ -919,6 +1176,7 @@ function home(next: Tab = 'home') {
           ${cloud.account ? '' : '<p class="muted small">Sign in so your kilometres count for your hall.</p>'}
         </div>
       </div>`,
+    social: socialView(),
     you: `
       <div class="hub">
         <div class="row" style="gap:14px">
@@ -931,13 +1189,17 @@ function home(next: Tab = 'home') {
             ${p.snap ? `<p class="muted small">👻 @${esc(p.snap)}${p.snapPublic ? '' : ' · hidden'}</p>` : ''}
           </div>
         </div>
+        <div class="card stack" style="gap:8px">
+          <div class="row"><b>Level ${level}</b><span class="grow"></span><span class="muted small">${fmt(p.xp - lo)} / ${fmt(hi - lo)} XP</span></div>
+          <div class="xpbar"><div style="width:${((p.xp - lo) / (hi - lo)) * 100}%"></div></div>
+        </div>
         <div class="stats">
           <div class="stat"><b>${km(p.totalDistance)}</b><span>KM ridden</span></div>
           <div class="stat"><b>${p.rides}</b><span>Rides</span></div>
+          <div class="stat"><b>${p.wins}</b><span>Races won</span></div>
           <div class="stat"><b>${p.finishes}</b><span>Finishes</span></div>
-          <div class="stat"><b>${fmt(p.bestScore)}</b><span>Best score</span></div>
           <div class="stat"><b>${fmt(p.coins)}</b><span>Rush coins</span></div>
-          <div class="stat"><b>${fmt(p.xp)}</b><span>XP</span></div>
+          <div class="stat"><b>${fmt(p.bestScore)}</b><span>Best score</span></div>
         </div>
         <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
         <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit details'}</button></div>
@@ -952,7 +1214,30 @@ function home(next: Tab = 'home') {
   };
 
   render(shell(views[tab]));
-  on('[data-tab]', 'click', (_, el) => home(el.dataset.tab as Tab));
+  void fillWeather();
+  // who's online loads a moment later, so the menu itself is never held up
+  setTimeout(connectLobby, 1500);
+  on('[data-nav]', 'click', (_, el) => {
+    const id = el.dataset.nav as NavId;
+    if (id === 'map') return explorePicker();
+    if (id === 'garage') return garageScreen();
+    home(id);
+  });
+  on('[data-campus]', 'click', () => campusSheet(() => home(tab)));
+  on('#bell', 'click', () => noticesSheet());
+  on('#settingsTop', 'click', () => settingsScreen());
+  on('[data-mode]', 'click', (_, el) => {
+    const m = el.dataset.mode;
+    if (m === 'explore') explorePicker();
+    if (m === 'match') quickMatch();
+    if (m === 'challenge') home('race');
+    if (m === 'vibe') home('social');
+  });
+  on('[data-mission]', 'click', (_, el) => {
+    if (claimMission(p, el.dataset.mission!)) sfx.finish();
+    home(tab);
+  });
+  on('[data-invite]', 'click', (_, el) => inviteOnline(el.dataset.invite!));
   on('#ride', 'click', () => play(false));
   on('#routeCard', 'click', () => play(false));
   on('#exploreBtn', 'click', () => explorePicker());
@@ -969,6 +1254,7 @@ function home(next: Tab = 'home') {
     clearProfile();
     clearGhosts();
     profile = null;
+    resetLobby();
     welcome();
   });
   on('#garage', 'click', () => garageScreen());
@@ -977,6 +1263,7 @@ function home(next: Tab = 'home') {
     const route = routeById(el.dataset.send!)!;
     share(`Can you beat my ${clock(p.bestTimes[route.id])} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, loadGhost(route.id)!, p.bestTimes[route.id]), app.querySelector('#sendNote')!);
   });
+  on('[data-set]', 'click', (_, el) => play(false, routeById(el.dataset.set!)!));
   on('#cOpen', 'click', () => {
     const raw = (app.querySelector('#cLink') as HTMLInputElement).value.trim();
     let code = raw;
@@ -997,6 +1284,7 @@ function home(next: Tab = 'home') {
     if (claimDaily(p)) sfx.finish();
     home('home');
   });
+  bindSocial();
   showUpdate('menu');
   // back from another tab goes to Home; from Home it leaves the app
   onBack(tab === 'home' ? null : () => home());
@@ -1021,10 +1309,785 @@ function home(next: Tab = 'home') {
   });
 }
 
+// ---------- riding with people: who is online, invites, Quick Match, Vibe Ride ----------
+
+const DEVICE_KEY = 'legonrush.device.v1';
+const deviceId = (() => {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) localStorage.setItem(DEVICE_KEY, (id = `d-${crypto.randomUUID()}`));
+    return id;
+  } catch {
+    return `d-${Math.random().toString(36).slice(2)}`;
+  }
+})();
+/** who you are to other riders: your account, or this device for guests */
+const myId = () => cloud.account?.id ?? deviceId;
+
+type Status = 'menu' | 'riding' | 'vibe' | 'match' | 'room';
+interface RiderState {
+  id: string;
+  name: string;
+  hall: string;
+  department: string;
+  jersey: string;
+  level: number;
+  status: Status;
+  /** what a rider looking for a vibe ride wants: anyone, their hall or their department */
+  want?: VibeWant;
+  at: number;
+}
+type VibeWant = 'anyone' | 'hall' | 'dept';
+
+const riderState = (status: Status, extra: Partial<RiderState> = {}): RiderState => ({
+  id: myId(), name: profile?.name ?? 'Rider', hall: profile?.hall ?? 'none', department: profile?.department ?? '',
+  jersey: profile ? riderLook(profile).jersey : '#f5c518', level: levelFor(profile?.xp ?? 0), status, at: Date.now(), ...extra,
+});
+
+let lobby: Promise<live.Channel | null> | null = null;
+let lobbyCh: live.Channel | null = null;
+let lobbyState: 'connecting' | 'on' | 'off' = 'connecting';
+let online: live.Peer<RiderState>[] = [];
+let myStatus: RiderState = riderState('menu');
+/** set while searching, to hear a pairing or match meant for you */
+let onPair: ((m: { code: string; from: RiderState }) => void) | null = null;
+let onMatch: ((m: MatchMsg) => void) | null = null;
+
+/** Joins this campus's lobby once, in the background: who is online, and invites meant for you. */
+function connectLobby() {
+  if (lobby || !profile) return lobby;
+  lobbyState = 'connecting';
+  lobby = live.join(`lobby:${settings.campus}`, myId(), { ...myStatus }).then((ch) => {
+    lobbyCh = ch;
+    lobbyState = ch ? 'on' : 'off';
+    if (!ch) {
+      lobby = null;
+      refreshOnline();
+      return null;
+    }
+    ch.onPeers((peers) => {
+      online = peers.filter((p) => p.state?.name).sort((a, b) => (a.state.status === 'riding' ? 1 : 0) - (b.state.status === 'riding' ? 1 : 0));
+      refreshOnline();
+    });
+    ch.on('invite', (m: { to: string; code: string; from: RiderState }) => {
+      if (m.to === myId()) gotInvite({ id: `l-${m.code}`, code: m.code, from: m.from, at: Date.now() });
+    });
+    ch.on('pair', (m: { to: string; code: string; from: RiderState }) => {
+      if (m.to === myId()) onPair?.(m);
+    });
+    ch.on('match', (m: MatchMsg) => {
+      if (m.riders.some((r) => r.id === myId())) onMatch?.(m);
+    });
+    return ch;
+  });
+  return lobby;
+}
+
+function resetLobby() {
+  lobbyCh?.leave();
+  lobbyCh = null;
+  lobby = null;
+  online = [];
+}
+
+function setStatus(status: Status, extra: Partial<RiderState> = {}) {
+  myStatus = riderState(status, extra);
+  lobbyCh?.track({ ...myStatus });
+}
+
+function refreshOnline() {
+  const list = app.querySelector<HTMLElement>('#onlineList');
+  const count = app.querySelector<HTMLElement>('#onlineCount');
+  if (count) count.textContent = lobbyState === 'on' ? `● ${online.length + 1} online` : lobbyState === 'off' ? 'Offline' : 'Connecting…';
+  if (list) {
+    list.innerHTML = onlineRows();
+    list.querySelectorAll<HTMLElement>('[data-invite]').forEach((b) => b.addEventListener('click', () => inviteOnline(b.dataset.invite!)));
+  }
+  searchTick?.();
+}
+
+// ---------- notifications ----------
+
+interface Notice {
+  id: string;
+  code: string;
+  from: { id: string; name: string; hall: string };
+  at: number;
+  dbId?: number;
+}
+let notices: Notice[] = [];
+
+const toastBox = document.createElement('div');
+toastBox.className = 'toasts';
+document.body.appendChild(toastBox);
+
+/** A message at the top of the screen, with up to two buttons. */
+function toast(html: string, actions: [string, () => void, boolean?][] = [], ms = 12000) {
+  const t = document.createElement('div');
+  t.className = 'toast fade-in';
+  t.innerHTML = `<div class="grow">${html}</div>${actions.map(([label, , primary], i) => `<button class="btn btn-sm ${primary ? 'btn-primary' : 'btn-ghost'}" data-i="${i}">${esc(label)}</button>`).join('')}`;
+  const close = () => t.remove();
+  t.querySelectorAll<HTMLElement>('[data-i]').forEach((b) => b.addEventListener('click', () => { close(); actions[Number(b.dataset.i)][1](); }));
+  toastBox.appendChild(t);
+  setTimeout(close, ms);
+  while (toastBox.children.length > 3) toastBox.firstElementChild!.remove();
+}
+
+const inviteText = (name: string) => `${name} is inviting you to ride with them`;
+
+function gotInvite(n: Notice) {
+  if (notices.some((x) => x.code === n.code) || vibe?.code === n.code) return;
+  notices.unshift(n);
+  notices = notices.slice(0, 10);
+  sfx.coin?.();
+  const bell = app.querySelector('#bell');
+  if (bell) bell.innerHTML = `${icons.bell}<i class="dot-badge">${notices.length}</i>`;
+  toast(`💛 <b>${esc(n.from.name)}</b> is inviting you to ride with them`, [['Accept', () => acceptNotice(n), true], ['Not now', () => {}]], 20000);
+  // the game is open in the background: tell the phone too
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification('LEGONRUSH', { body: inviteText(n.from.name), icon: '/icons/icon-192.png', tag: n.code });
+    } catch { /* some phones only allow this from a service worker */ }
+  }
+}
+
+function dropNotice(n: Notice) {
+  notices = notices.filter((x) => x !== n);
+  if (n.dbId) void cloud.answerInvite(n.dbId);
+}
+
+function acceptNotice(n: Notice) {
+  dropNotice(n);
+  if (game.isRiding) return toast('Finish this ride first, then accept from the 🔔.');
+  void joinVibe(n.code, false);
+}
+
+function noticesSheet() {
+  const ov = document.createElement('div');
+  ov.className = 'overlay sheet-overlay fade-in';
+  ov.innerHTML = `<div class="sheet">
+    <div class="row"><h2 class="title" style="font-size:22px">Invites</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
+    ${notices.length ? notices.map((n, i) => `<div class="online-row"><span class="avatar xs" style="background:${hallById(n.from.hall).color}">${esc(n.from.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(inviteText(n.from.name))}</b><small class="muted">Vibe Ride · code ${esc(n.code)}</small></span><button class="btn btn-primary btn-sm" data-yes="${i}">Accept</button><button class="btn btn-link" data-no="${i}">✕</button></div>`).join('') : '<p class="muted">No invites right now. When someone invites you to a Vibe Ride, it shows up here.</p>'}
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); if (!game.isRiding && app.querySelector('.shell')) home(tab); };
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('[data-close]')!.addEventListener('click', close);
+  ov.querySelectorAll<HTMLElement>('[data-yes]').forEach((b) => b.addEventListener('click', () => { ov.remove(); acceptNotice(notices[Number(b.dataset.yes)]); }));
+  ov.querySelectorAll<HTMLElement>('[data-no]').forEach((b) => b.addEventListener('click', () => { dropNotice(notices[Number(b.dataset.no)]); ov.remove(); noticesSheet(); }));
+}
+
+/** invites left while you were away */
+async function loadInvites() {
+  try {
+    for (const i of (await cloud.pendingInvites()).reverse()) gotInvite({ id: `db-${i.id}`, dbId: i.id, code: i.code, from: i.from, at: Date.parse(i.at) });
+  } catch {
+    /* offline, or the invites table isn't set up yet */
+  }
+}
+
+// ---------- Social tab ----------
+
+function socialView() {
+  const canAlert = 'Notification' in window && Notification.permission === 'default';
+  return `
+    <div class="hub">
+      <p class="kicker">💛 Vibe Ride</p>
+      <h1 class="title">Ride together</h1>
+      <p class="muted">Find someone and enjoy the ride together. Get paired with an online rider, or create a private ride and invite someone with a link or code. No racing: just ride, connect and enjoy the campus.</p>
+      <div class="card stack" style="gap:10px">
+        <b>Find a rider</b>
+        <p class="muted small">We pair you with someone online who wants a ride too.</p>
+        <div class="seg wide" id="want">${(['anyone', 'hall', 'dept'] as VibeWant[]).map((w) => `<button data-v="${w}" class="${w === vibeWant ? 'on' : ''}">${w === 'anyone' ? 'Anyone' : w === 'hall' ? 'My hall' : 'My department'}</button>`).join('')}</div>
+        <button class="btn btn-primary" id="vibeFind">Find a rider</button>
+      </div>
+      <div class="card stack" style="gap:10px">
+        <b>Private ride</b>
+        <p class="muted small">Create a ride and share the invite on Snapchat, WhatsApp or anywhere. Your friend gets "${esc(profile!.name)} is inviting you to ride with them".</p>
+        <button class="btn btn-ghost" id="vibeNew">Create a private ride</button>
+        <div class="row"><input class="code-in" id="vibeCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Got a code?"><button class="btn btn-ghost btn-sm" id="vibeJoin">Join</button></div>
+      </div>
+      ${canAlert ? '<button class="btn btn-link" id="alerts">🔔 Turn on invite alerts</button>' : ''}
+      ${onlineCard()}
+      <div class="two"><button class="btn btn-ghost" id="hallStand">Hall standings</button><button class="btn btn-ghost" id="deptStand">Departments</button></div>
+    </div>`;
+}
+
+let vibeWant: VibeWant = 'anyone';
+
+function bindSocial() {
+  on('#want button', 'click', (_, el) => {
+    vibeWant = el.dataset.v as VibeWant;
+    app.querySelectorAll('#want button').forEach((b) => b.classList.toggle('on', b === el));
+  });
+  on('#vibeFind', 'click', () => vibeFind());
+  on('#vibeNew', 'click', () => void joinVibe(live.newCode(), true));
+  on('#vibeJoin', 'click', () => {
+    const code = (app.querySelector<HTMLInputElement>('#vibeCode')!.value || '').trim().toUpperCase();
+    if (/^[A-Z0-9]{6}$/.test(code)) void joinVibe(code, false);
+  });
+  on('#alerts', 'click', async (_, el) => {
+    try { await Notification.requestPermission(); } catch { /* not supported */ }
+    el.remove();
+  });
+  on('#hallStand', 'click', () => boardScreen('halls', () => home('social')));
+  on('#deptStand', 'click', () => boardScreen('depts', () => home('social')));
+}
+
+/** Vibe Ride needs a name others can see, so guests make a rider first. */
+function needsRider() {
+  if (!profile!.guest) return false;
+  toast('Create your rider first, so people know who they are riding with.', [['Create rider', () => createRider({ ...profile!, name: '' }, false), true]]);
+  return true;
+}
+
+/** a rider from Riders Online: start a private ride and invite them to it */
+async function inviteOnline(key: string) {
+  if (needsRider()) return;
+  const peer = online.find((p) => p.key === key);
+  if (!peer) return;
+  const code = vibe?.code ?? live.newCode();
+  lobbyCh?.send('invite', { to: key, code, from: riderState('room') });
+  if (!vibe) await joinVibe(code, true);
+  vibe?.msgs.push({ sys: true, text: `Invite sent to ${peer.state.name}.`, at: Date.now() });
+  vibe?.redraw?.('chat');
+}
+
+// ---------- searching (Vibe Ride pairing and Quick Match) ----------
+
+let searchTick: (() => void) | null = null;
+let searchTimer = 0;
+function stopSearching() {
+  searchTick = null;
+  onPair = null;
+  onMatch = null;
+  clearInterval(searchTimer);
+}
+
+function searchScreen(kicker: string, title: string, text: string, fallback: string) {
+  render(`
+    <div class="screen scrim fade-in">
+      <div class="grow"></div>
+      <div class="wrap stack center-text">
+        <p class="kicker">${kicker}</p>
+        <div class="pulse-ring"><span>${icons.ride}</span></div>
+        <h1 class="title">${title}</h1>
+        <p class="muted" id="searchText">${text}</p>
+        <button class="btn btn-ghost" id="fallback">${fallback}</button>
+        <button class="btn btn-link" id="cancel">Cancel</button>
+      </div>
+    </div>`);
+}
+
+/** Pairs you with someone online who also wants a Vibe Ride. */
+async function vibeFind() {
+  if (needsRider()) return;
+  stopSearching();
+  searchScreen('💛 Vibe Ride', 'Finding a rider', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
+  on('#fallback', 'click', () => { stopSearching(); void joinVibe(live.newCode(), true); });
+  on('#cancel', 'click', () => home('social'));
+  onBack(() => home('social'));
+  const ch = await connectLobby();
+  if (!ch) return searchFailed('You need to be online to find a rider.');
+  const want = vibeWant;
+  setStatus('vibe', { want });
+  const p = profile!;
+  const fits = (s: RiderState) => {
+    const ok = (w: VibeWant | undefined, a: RiderState | Profile, b: { hall: string; department: string }) =>
+      !w || w === 'anyone' || (w === 'hall' && a.hall === b.hall) || (w === 'dept' && !!a.department && a.department === b.department);
+    return s.status === 'vibe' && ok(want, p, s) && ok(s.want, s, p);
+  };
+  const started = Date.now();
+  let done = false;
+  onPair = (m) => {
+    if (done) return;
+    done = true;
+    stopSearching();
+    void joinVibe(m.code, false, m.from.name);
+  };
+  searchTick = () => {
+    if (done) return;
+    const match = online.find((o) => fits(o.state));
+    const text = app.querySelector('#searchText');
+    if (text) text.textContent = match ? `Found ${match.state.name}. Connecting…` : Date.now() - started > 60e3 ? "Nobody is free right now. Invite a friend, or keep waiting." : `Looking for someone online who wants to ride… ${online.length ? `(${online.length} online)` : ''}`;
+    // the rider whose id sorts first sets up the ride, so both don't
+    if (match && myId() < match.key) {
+      done = true;
+      const code = live.newCode();
+      ch.send('pair', { to: match.key, code, from: riderState('room') });
+      stopSearching();
+      void joinVibe(code, true, match.state.name);
+    }
+  };
+  searchTimer = window.setInterval(() => searchTick?.(), 1000);
+  searchTick();
+}
+
+function searchFailed(text: string) {
+  stopSearching();
+  const t = app.querySelector('#searchText');
+  if (t) t.textContent = text;
+}
+
+// ---------- Quick Match ----------
+
+interface MatchMsg {
+  code: string;
+  route: string;
+  riders: { id: string; name: string; jersey: string }[];
+}
+
+/** Race against riders online; bots fill in when nobody else is looking. */
+async function quickMatch() {
+  if (!profile) return;
+  stopSearching();
+  const level = levelFor(profile.xp);
+  const bots = (note = '') => {
+    stopSearching();
+    const pool = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)];
+    const route = pool[Math.floor(Math.random() * pool.length)];
+    if (note) toast(note, [], 5000);
+    play(false, route, { rivals: botRivals(route) });
+  };
+  searchScreen('🏁 Quick Match', 'Finding riders', 'Looking for riders online…', 'Race bots now');
+  on('#fallback', 'click', () => bots());
+  on('#cancel', 'click', () => home('race'));
+  onBack(() => home('race'));
+  const ch = await connectLobby();
+  if (!ch) return bots("You're offline, so you're racing bots this time.");
+  setStatus('match');
+  const started = Date.now();
+  let done = false;
+  const go = (m: MatchMsg) => {
+    if (done) return;
+    done = true;
+    stopSearching();
+    void startLiveRace(m);
+  };
+  onMatch = go;
+  searchTick = () => {
+    if (done) return;
+    const others = online.filter((o) => o.state.status === 'match');
+    const waited = Date.now() - started;
+    const text = app.querySelector('#searchText');
+    if (text) text.textContent = others.length ? `${others.length + 1} riders ready. Starting soon…` : `Looking for riders online… ${online.length ? `(${online.length} online)` : ''}`;
+    const group = [myStatus, ...others.map((o) => o.state)].sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, 4);
+    // the rider whose id sorts first picks the route, after a moment for more riders to join
+    if (group.length > 1 && group[0].id === myId() && (group.length === 4 || waited > 5000)) {
+      const minLevel = Math.min(...group.map((g) => g.level ?? 1));
+      const pool = [CAMPUS_LOOP, ...RACES.filter((r) => minLevel >= r.level).map(raceRoute)];
+      const m: MatchMsg = { code: live.newCode(), route: pool[Math.floor(Math.random() * pool.length)].id, riders: group.map((g) => ({ id: g.id, name: g.name, jersey: g.jersey })) };
+      ch.send('match', m as unknown as Record<string, unknown>);
+      go(m);
+      return;
+    }
+    if (waited > 15000 && !others.length) bots("Nobody else is looking for a race right now, so you're racing bots.");
+  };
+  searchTimer = window.setInterval(() => searchTick?.(), 1000);
+  searchTick();
+}
+
+async function startLiveRace(m: MatchMsg) {
+  const route = routeById(m.route) ?? CAMPUS_LOOP;
+  const ch = await live.join(`race:${m.code}`, myId(), { name: profile!.name });
+  const others = m.riders.filter((r) => r.id !== myId());
+  if (!ch) return play(false, route, { rivals: botRivals(route) });
+  // start together: once everyone is in, or after a few seconds
+  let started = false;
+  const start = () => {
+    if (started) return;
+    started = true;
+    play(false, route, { live: { ch, kind: 'race', riders: others } });
+  };
+  ch.on('go', start);
+  ch.onPeers((peers) => {
+    if (peers.length >= others.length && m.riders[0].id === myId()) {
+      setTimeout(() => { ch.send('go', {}); start(); }, 600);
+    }
+  });
+  setTimeout(() => {
+    if (started || m.riders[0].id !== myId()) return;
+    ch.send('go', {});
+    start();
+  }, 4000);
+  setTimeout(() => { if (!started) { ch.leave(); play(false, route, { rivals: botRivals(route) }); } }, 9000);
+}
+
+// ---------- Vibe Ride ----------
+
+interface ChatMsg {
+  from?: string;
+  name?: string;
+  text?: string;
+  react?: string;
+  place?: string;
+  sys?: boolean;
+  at: number;
+}
+
+interface VibeSession {
+  code: string;
+  host: boolean;
+  ch: live.Channel;
+  partner: live.Peer<RiderState> | null;
+  msgs: ChatMsg[];
+  from: string;
+  to: string;
+  /** redraws whatever screen shows the ride: the room or the ride HUD */
+  redraw: ((what: 'all' | 'chat') => void) | null;
+  /** positions from your partner, while riding */
+  onPos: ((m: PosMsg) => void) | null;
+  joinedAt: number;
+}
+
+interface PosMsg {
+  k: string;
+  i: number;
+  d: number[];
+  x: number[];
+}
+
+let vibe: VibeSession | null = null;
+/** an invite accepted before making a rider: joined once the rider exists */
+let pendingVibe: { code: string; name: string } | null = null;
+
+const REACTS: [string, string, string][] = [['wave', '👋', 'waved'], ['heart', '❤️', 'sent a heart'], ['laugh', '😂', 'is laughing'], ['like', '👍', 'liked that']];
+const VIBE_PLACES = () => [...new Set([...Object.values(HALL_PLACE), ...POPULAR, ...TOUR_STOPS, 'Akuafo Hall', 'Commonwealth Hall'])].filter((n) => placeByName(n)).sort();
+
+function leaveVibe() {
+  vibe?.ch.send('bye', { name: profile?.name });
+  vibe?.ch.leave();
+  vibe = null;
+}
+
+/** Opens a Vibe Ride room: as its host (you made it) or as a guest (invite, code or pairing). */
+async function joinVibe(code: string, host: boolean, partnerName = '') {
+  if (!profile || needsRider()) return;
+  if (vibe?.code === code) return vibeRoom();
+  leaveVibe();
+  stopSearching();
+  render(`<div class="screen scrim center fade-in"><div class="wrap stack"><p class="kicker">💛 Vibe Ride</p><h1 class="title">${partnerName ? `Joining ${esc(partnerName)}` : 'Opening the ride'}…</h1></div></div>`);
+  const me = riderState('room');
+  const ch = await live.join(`vibe:${code}`, myId(), { ...me });
+  if (!ch) {
+    toast("Couldn't connect. Check your data or Wi-Fi and try again.");
+    return home('social');
+  }
+  setStatus('room');
+  const p = profile;
+  const s: VibeSession = {
+    code, host, ch, partner: null, msgs: [], redraw: null, onPos: null, joinedAt: me.at,
+    from: HALL_PLACE[p.hall] && placeByName(HALL_PLACE[p.hall]) ? HALL_PLACE[p.hall] : 'Legon Main Entrance', to: 'The Balme Library',
+  };
+  vibe = s;
+  let goneTimer = 0;
+  const say = (m: ChatMsg) => { s.msgs.push(m); s.msgs = s.msgs.slice(-80); s.redraw?.('chat'); };
+  ch.onPeers((peers) => {
+    if (vibe !== s) return;
+    // two riders per ride: anyone who joined after the first two waits outside
+    const earlier = peers.filter((x) => x.state.at < s.joinedAt);
+    if (earlier.length >= 2) {
+      leaveVibe();
+      toast('That ride already has two riders.');
+      return home('social');
+    }
+    const partner = peers.sort((a, b) => a.state.at - b.state.at)[0] ?? null;
+    // a weak connection drops for a moment: only say they left if they stay gone
+    if (!partner && s.partner) {
+      clearTimeout(goneTimer);
+      goneTimer = window.setTimeout(() => {
+        if (vibe !== s || !s.partner || s.ch.peers().length) return;
+        say({ sys: true, text: `${s.partner.state.name} left the ride.`, at: Date.now() });
+        s.partner = null;
+        s.redraw?.('all');
+      }, 8000);
+      return;
+    }
+    clearTimeout(goneTimer);
+    if (partner && !s.partner) {
+      say({ sys: true, text: `${partner.state.name} joined the ride 🎉`, at: Date.now() });
+      sfx.finish();
+    }
+    const changed = (partner?.key ?? '') !== (s.partner?.key ?? '');
+    s.partner = partner;
+    // the host shares the route with whoever joins
+    if (changed && partner && s.host) ch.send('route', { from: s.from, to: s.to });
+    if (changed) s.redraw?.('all');
+  });
+  ch.on('chat', (m: { name: string; text: string }) => say({ from: 'them', name: m.name, text: String(m.text).slice(0, 160), at: Date.now() }));
+  ch.on('react', (m: { name: string; kind: string }) => {
+    say({ from: 'them', name: m.name, react: m.kind, at: Date.now() });
+    floatEmoji(REACTS.find((r) => r[0] === m.kind)?.[1] ?? '💛');
+  });
+  ch.on('suggest', (m: { name: string; place: string }) => say({ from: 'them', name: m.name, place: m.place, at: Date.now() }));
+  ch.on('route', (m: { from: string; to: string }) => {
+    if (placeByName(m.from)) s.from = m.from;
+    if (placeByName(m.to)) s.to = m.to;
+    s.redraw?.('all');
+  });
+  ch.on('start', (m: { from: string; to: string }) => {
+    s.from = m.from;
+    s.to = m.to;
+    if (vibe === s && !game.isRiding) vibeGo();
+  });
+  ch.on('pos', (m: PosMsg) => s.onPos?.(m));
+  ch.on('done', (m: { name: string; km: number; finished: boolean }) => say({ sys: true, text: m.finished ? `${m.name} arrived 🏁` : `${m.name} stopped riding.`, at: Date.now() }));
+  ch.on('bye', (m: { name: string }) => {
+    say({ sys: true, text: `${m.name} left the ride.`, at: Date.now() });
+    s.partner = null;
+    s.redraw?.('all');
+  });
+  if (host) say({ sys: true, text: 'Your ride is open. Invite someone to join you.', at: Date.now() });
+  vibeRoom();
+}
+
+function sendChat(text: string) {
+  const t = text.trim().slice(0, 160);
+  if (!t || !vibe) return;
+  vibe.ch.send('chat', { name: profile!.name, text: t });
+  vibe.msgs.push({ from: 'me', name: profile!.name, text: t, at: Date.now() });
+  vibe.redraw?.('chat');
+}
+
+function sendReact(kind: string) {
+  if (!vibe) return;
+  vibe.ch.send('react', { name: profile!.name, kind });
+  vibe.msgs.push({ from: 'me', name: profile!.name, react: kind, at: Date.now() });
+  floatEmoji(REACTS.find((r) => r[0] === kind)?.[1] ?? '💛');
+  vibe.redraw?.('chat');
+}
+
+function sendSuggest(place: string) {
+  if (!vibe) return;
+  vibe.ch.send('suggest', { name: profile!.name, place });
+  vibe.msgs.push({ from: 'me', name: profile!.name, place, at: Date.now() });
+  vibe.redraw?.('chat');
+}
+
+function floatEmoji(e: string) {
+  const el = document.createElement('div');
+  el.className = 'float-emoji';
+  el.textContent = e;
+  el.style.left = `${30 + Math.random() * 40}%`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1800);
+}
+
+function chatLine(m: ChatMsg) {
+  if (m.sys) return `<div class="msg sys">${esc(m.text ?? '')}</div>`;
+  const mine = m.from === 'me';
+  const who = mine ? 'You' : esc(m.name ?? '');
+  if (m.react) {
+    const r = REACTS.find((x) => x[0] === m.react);
+    return `<div class="msg react${mine ? ' me' : ''}"><span class="big-emoji">${r?.[1] ?? '💛'}</span> ${who} ${r?.[2] ?? ''}</div>`;
+  }
+  if (m.place) {
+    const canGo = vibe?.host && !game.isRiding;
+    return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>📍 Let's go to ${esc(m.place)}</span>${canGo ? `<button class="btn btn-ghost btn-sm" data-goto="${esc(m.place)}">Go there</button>` : ''}</div>`;
+  }
+  return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>${esc(m.text ?? '')}</span></div>`;
+}
+
+/** the quick actions under the chat: 👋 ❤️ 😂 👍 📍 💬 */
+const quickActions = () => `<div class="quick-acts">${REACTS.map(([k, e]) => `<button data-react="${k}" aria-label="${k}">${e}</button>`).join('')}<button data-suggest aria-label="Suggest a place">📍</button><button data-chat aria-label="Chat">💬</button></div>`;
+
+function placeMenu(onPick: (place: string) => void) {
+  const ov = document.createElement('div');
+  ov.className = 'overlay sheet-overlay fade-in';
+  ov.innerHTML = `<div class="sheet"><div class="row"><h2 class="title" style="font-size:20px">Suggest a place</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
+    <div class="place-list">${VIBE_PLACES().map((n) => `<button class="chip" data-p="${esc(n)}">${esc(n)}</button>`).join('')}</div></div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('[data-close]')!.addEventListener('click', close);
+  ov.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => b.addEventListener('click', () => { close(); onPick(b.dataset.p!); }));
+}
+
+/** wires the chat box and quick actions inside root */
+function bindChat(root: HTMLElement, log: HTMLElement, input: HTMLInputElement, onChatBtn: () => void) {
+  root.querySelectorAll<HTMLElement>('[data-react]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); sendReact(b.dataset.react!); }));
+  root.querySelector('[data-suggest]')?.addEventListener('click', (e) => { e.stopPropagation(); placeMenu(sendSuggest); });
+  root.querySelector('[data-chat]')?.addEventListener('click', (e) => { e.stopPropagation(); onChatBtn(); });
+  const form = input.form!;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendChat(input.value);
+    input.value = '';
+  });
+  log.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-goto]');
+    if (b && vibe?.host) setVibeRoute(vibe.from, b.dataset.goto!);
+  });
+}
+
+function setVibeRoute(from: string, to: string) {
+  if (!vibe || !placeByName(from) || !placeByName(to)) return;
+  vibe.from = from;
+  vibe.to = to === from ? vibe.to : to;
+  vibe.ch.send('route', { from: vibe.from, to: vibe.to });
+  vibe.redraw?.('all');
+}
+
+function vibeLink(code: string) {
+  return `${location.origin}/play/?v=${code}&n=${encodeURIComponent(profile!.name)}`;
+}
+
+/** the room: who you're riding with, where you're going, the invite and the chat */
+function vibeRoom() {
+  const s = vibe;
+  if (!s || !profile) return home('social');
+  game.showcase();
+  applyLook();
+  const partner = s.partner?.state;
+  const places = VIBE_PLACES();
+  const select = (id: string, value: string) => `<div class="select-wrap"><select id="${id}" ${s.host ? '' : 'disabled'}>${places.map((n) => `<option ${n === value ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>`;
+  const link = vibeLink(s.code);
+  const msg = `${inviteText(profile.name)} on LEGONRUSH 🚴💛 Tap to join: ${link}`;
+  render(`
+    <div class="screen solid vibe-room fade-in">
+      <div class="wrap stack">
+        <div class="row"><button class="btn btn-link back" id="leave">← Leave ride</button><span class="grow"></span><span class="badge gold">Code ${esc(s.code)}</span></div>
+        <p class="kicker">💛 Vibe Ride</p>
+        <h1 class="title">${partner ? `Riding with ${esc(partner.name)}` : 'Waiting for your friend'}</h1>
+        ${partner
+          ? `<div class="card row partner"><span class="avatar sm" style="background:${hallById(partner.hall).color}">${esc(partner.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(partner.name)}</b><small class="muted">${esc(hallById(partner.hall).name)}${partner.department ? ` · ${esc(partner.department)}` : ''}</small></span><span class="badge gold">● Here</span></div>`
+          : `<div class="card stack invite-card" style="gap:10px">
+              <b>Invite someone</b>
+              <p class="muted small">They'll see "<b>${esc(inviteText(profile.name))}</b>". Share it on Snapchat, WhatsApp or anywhere, or give them the code <b>${esc(s.code)}</b>.</p>
+              <button class="btn btn-primary" id="shareInvite">Share invite</button>
+              <div class="two"><a class="btn btn-ghost" id="wa" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">WhatsApp</a><button class="btn btn-ghost" id="copy">Copy link</button></div>
+              <p class="muted small" id="inviteNote" hidden></p>
+              ${cloud.account ? `<div class="field picker"><label for="who">Invite by username or Snapchat</label><input id="who" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="@username"><ul class="suggest" id="whoList" hidden></ul></div>` : '<p class="muted small">Sign in to invite riders by their username.</p>'}
+            </div>
+            <div class="card stack" style="gap:8px"><div class="row"><b>Riders online</b><span class="grow"></span><span class="badge gold" id="onlineCount"></span></div><div id="onlineList" class="online-list">${onlineRows()}</div></div>`}
+        <div class="card stack" style="gap:8px">
+          <b>Where to?</b>
+          <div class="field"><label for="vFrom">From</label>${select('vFrom', s.from)}</div>
+          <div class="field"><label for="vTo">To</label>${select('vTo', s.to)}</div>
+          ${s.host
+            ? `<button class="btn btn-primary" id="vGo" ${partner ? '' : 'disabled'}>${partner ? 'Start the ride' : 'Waiting for your friend'}</button>`
+            : `<p class="muted small">${partner ? `${esc(partner.name)} picks the route and starts the ride. Suggest a place with 📍.` : 'Waiting for the host…'}</p>`}
+          ${s.host && !partner ? '<button class="btn btn-link" id="vSolo">Ride it alone for now</button>' : ''}
+        </div>
+        <div class="card stack chat-card">
+          <div class="row"><b>💬 Chat</b><span class="grow"></span><span class="muted small">Be kind. Leave anytime.</span></div>
+          <div class="chat-log" id="log"></div>
+          ${quickActions()}
+          <form class="chat-form"><input id="say" maxlength="160" autocomplete="off" placeholder="${partner ? `Message ${esc(partner.name)}…` : 'Say something…'}"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form>
+        </div>
+      </div>
+    </div>`);
+  const log = app.querySelector<HTMLElement>('#log')!;
+  const input = app.querySelector<HTMLInputElement>('#say')!;
+  const drawLog = () => {
+    log.innerHTML = s.msgs.map(chatLine).join('') || '<p class="muted small">No messages yet. Say hi 👋</p>';
+    log.scrollTop = log.scrollHeight;
+  };
+  drawLog();
+  bindChat(app.querySelector('.chat-card')!, log, input, () => input.focus());
+  s.redraw = (what) => {
+    if (vibe !== s) return;
+    if (what === 'chat') return drawLog();
+    // keep a half-typed message across a redraw
+    const typed = input.value;
+    vibeRoom();
+    app.querySelector<HTMLInputElement>('#say')!.value = typed;
+  };
+  refreshOnline();
+  on('[data-invite]', 'click', (_, el) => inviteOnline(el.dataset.invite!));
+  on('#leave', 'click', () => { leaveVibe(); home('social'); });
+  onBack(() => { leaveVibe(); home('social'); });
+  on('#vFrom', 'change', (_, el) => setVibeRoute((el as HTMLSelectElement).value, s.to));
+  on('#vTo', 'change', (_, el) => setVibeRoute(s.from, (el as HTMLSelectElement).value));
+  on('#vGo', 'click', () => {
+    if (!s.partner) return;
+    s.ch.send('start', { from: s.from, to: s.to });
+    vibeGo();
+  });
+  on('#vSolo', 'click', () => vibeGo());
+  const note = app.querySelector<HTMLElement>('#inviteNote');
+  on('#shareInvite', 'click', () => note && share(`${inviteText(profile!.name)} on LEGONRUSH 🚴💛`, link, note));
+  on('#copy', 'click', async () => {
+    try {
+      await navigator.clipboard.writeText(msg);
+      if (note) { note.hidden = false; note.textContent = 'Copied. Paste it in Snapchat, WhatsApp or anywhere.'; }
+    } catch {
+      if (note) { note.hidden = false; note.textContent = link; }
+    }
+  });
+  // find riders by username and leave them an invite
+  const who = app.querySelector<HTMLInputElement>('#who');
+  const whoList = app.querySelector<HTMLElement>('#whoList');
+  if (who && whoList) {
+    let timer = 0;
+    who.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(async () => {
+        let found: cloud.RiderCard[] = [];
+        try { found = await cloud.findRiders(who.value); } catch { /* offline */ }
+        whoList.hidden = !found.length;
+        whoList.innerHTML = found.map((r, i) => `<li data-i="${i}"><span class="kind">${online.some((o) => o.key === r.id) ? '🟢' : '⚪'}</span><span class="grow"><b>${esc(r.name)}</b> <small class="muted">${r.username ? `@${esc(r.username)}` : ''}${r.snap ? ` · 👻 ${esc(r.snap)}` : ''}</small></span><small class="muted">${esc(hallById(r.hall).short)}</small></li>`).join('');
+        whoList.querySelectorAll<HTMLElement>('li').forEach((li) => li.addEventListener('click', async () => {
+          const r = found[Number(li.dataset.i)];
+          whoList.hidden = true;
+          who.value = '';
+          // online now: they get it straight away; either way it waits for them in their 🔔
+          lobbyCh?.send('invite', { to: r.id, code: s.code, from: riderState('room') });
+          const saved = await cloud.sendInvite(r.id, s.code);
+          s.msgs.push({ sys: true, text: online.some((o) => o.key === r.id) || saved ? `Invite sent to ${r.name}.` : `Couldn't reach ${r.name}. Share the link instead.`, at: Date.now() });
+          drawLog();
+        }));
+      }, 250);
+    });
+  }
+  showUpdate('menu');
+}
+
+/** both riders ride the chosen route; the partner rides beside you live */
+function vibeGo() {
+  const s = vibe;
+  if (!s) return;
+  const from = placeByName(s.from);
+  const to = placeByName(s.to);
+  if (!from || !to || from === to) return toast('Pick two different places.');
+  const route = exploreRoute(from, to, 'cycle');
+  if (!route) return toast("Couldn't find a way between those places. Pick another.");
+  const partner = s.partner?.state;
+  play(false, route, { live: { ch: s.ch, kind: 'vibe', riders: partner ? [{ id: partner.id, name: partner.name, jersey: partner.jersey }] : [] } });
+}
+
+/** someone opened a Vibe Ride invite link */
+function inviteIntro(code: string, name: string) {
+  game.showcase();
+  applyLook();
+  render(`
+    <div class="screen scrim fade-in">
+      <div class="grow"></div>
+      <div class="wrap stack">
+        <p class="kicker">💛 Vibe Ride</p>
+        <h1 class="title">${esc(name || 'A friend')} is inviting you to ride with them</h1>
+        <p class="muted">Ride the campus together, chat as you go. No racing.</p>
+        <button class="btn btn-primary" id="yes">Accept</button>
+        <button class="btn btn-ghost" id="no">Not now</button>
+      </div>
+    </div>`);
+  on('#yes', 'click', () => {
+    if (!profile!.guest) return void joinVibe(code, false, name);
+    // new here: make a rider first, then straight into the ride
+    pendingVibe = { code, name };
+    createRider({ ...profile!, name: '' }, false);
+  });
+  on('#no', 'click', () => home());
+  onBack(() => home());
+}
+
 // ---------- accounts ----------
 
 /** After signing in: bring down the account's progress, or make a rider for a new account. */
 async function afterSignIn() {
+  // you are your account now, to other riders too
+  resetLobby();
+  void loadInvites();
   const remote = await cloud.pull().catch(() => null);
   if (remote) {
     profile = profile ? cloud.merge(profile, remote) : { ...newProfile(), ...remote };
@@ -1319,8 +2382,9 @@ function explorePicker(fromName?: string, toName = '') {
     <div class="screen scrim fade-in">
       <div class="wrap stack explore">
         <button class="btn btn-link back" id="back">← Back</button>
-        <p class="kicker">Explore campus</p>
+        <p class="kicker">🗺️ Explore</p>
         <h1 class="title">Find your way</h1>
+        <button class="qr-campus solo" data-campus><span>${icons.pin}</span><span class="grow"><small>Campus</small>${esc(campusById(settings.campus).name)}${settings.campus === 'ug' ? ', Legon' : ''}</span><em>▾</em></button>
         <button class="card selectable tour-card" id="tour"><div class="row"><h3 style="font-weight:800">⭐ FRESHERS' TOUR</h3><span class="grow"></span><span class="badge gold">${TOUR_STOPS.length} places · 3.5 km</span></div><p class="muted small" style="margin-top:4px">One ride past the places you need in week one: ${TOUR_STOPS.map((n) => esc(n.replace(/^The |, .*$/g, ''))).join(', ')}.</p></button>
         <p class="kicker" style="margin-top:6px">Or plan your own way</p>
         <p class="muted">Pick where you are and where you need to be. Type a name or what students call it, like Vandals, Pent or JQB.</p>
@@ -1439,6 +2503,7 @@ function explorePicker(fromName?: string, toName = '') {
   on('#back', 'click', () => home());
   onBack(() => home());
   on('#tour', 'click', () => play(false, freshersTour()));
+  on('[data-campus]', 'click', () => campusSheet(() => explorePicker(fromName, toName)));
   update();
 }
 
@@ -1552,5 +2617,8 @@ cloud.restore(() => {
   if (cloud.account) void syncDown();
 }).then(() => {
   if (resetting && cloud.account) return authScreen('newpass', () => home('you'));
-  if (cloud.account) void syncDown();
+  if (cloud.account) {
+    void syncDown();
+    void loadInvites();
+  }
 });

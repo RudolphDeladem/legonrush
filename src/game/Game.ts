@@ -45,7 +45,12 @@ export interface Rival {
   color: string;
   /** see-through, for your own best run */
   ghostly: boolean;
+  /** someone riding right now: their run grows as their position arrives over the network */
+  live?: boolean;
 }
+
+/** how far behind real time live riders are drawn, so their position can be smoothed between updates */
+const LIVE_LAG = 0.8;
 
 interface RivalState extends Rival {
   rig: RiderRig;
@@ -305,7 +310,7 @@ export class Game {
   /** Riders replayed beside you; the first one is the gap shown in the HUD. */
   setRivals(list: Rival[]) {
     for (const p of this.rigPool) p.rig.root.visible = false;
-    this.rivals = list.filter((r) => r.run.d.length > 1).map((r, i) => {
+    this.rivals = list.filter((r) => r.live || r.run.d.length > 1).map((r, i) => {
       let p = this.rigPool[i];
       if (!p) {
         const rig = buildRider('#ffffff', '#ffffff');
@@ -336,6 +341,16 @@ export class Game {
     return Infinity;
   }
 
+  /** a rival's ride time: live riders are drawn slightly in the past */
+  private rivalT(r: Rival) {
+    return r.live ? Math.max(0, this.time - LIVE_LAG) : this.time;
+  }
+
+  /** Your ride so far, growing as you ride, to stream to the people riding with you. */
+  get recording(): GhostRun {
+    return this.rec;
+  }
+
   /** Finish times of the rivals in this ride, in order. */
   get rivalTimes() {
     return this.rivals.map((r) => ({ name: r.name, time: r.finish }));
@@ -348,6 +363,7 @@ export class Game {
 
   /** A recorded run's distance and offset at ride time t. */
   private runAt(g: GhostRun, t: number): [number, number] {
+    if (!g.d.length) return [0, 0];
     const f = t / g.step;
     const i = Math.min(Math.floor(f), g.d.length - 1);
     const j = Math.min(i + 1, g.d.length - 1);
@@ -632,11 +648,13 @@ export class Game {
   private updateGhost(dt: number) {
     for (const r of this.rivals) {
       const rig = r.rig;
-      const [gd, gx] = this.runAt(r.run, this.time);
+      if (r.live && r.finish === Infinity && r.run.d.length && r.run.d[r.run.d.length - 1] >= this.route.length) r.finish = this.finishTime(r.run);
+      const t = this.rivalT(r);
+      const [gd, gx] = this.runAt(r.run, t);
       const p = this.pose(gd, gx);
       rig.root.position.set(p.x, 0, p.z);
       rig.root.rotation.y = p.yaw;
-      const [pd] = this.runAt(r.run, Math.max(0, this.time - 0.2));
+      const [pd] = this.runAt(r.run, Math.max(0, t - 0.2));
       const v = (gd - pd) / 0.2;
       r.crank += dt * v * 0.9;
       for (const w of rig.wheels) w.rotation.x -= (v / 0.38) * dt;
@@ -651,7 +669,7 @@ export class Game {
   private ghostGap(): number | null {
     const r = this.rivals[0];
     if (!r || this.phase === 'countdown') return null;
-    const [gd] = this.runAt(r.run, this.time);
+    const [gd] = this.runAt(r.run, this.rivalT(r));
     // the rival has finished: the gap is how long ago it crossed the line
     if (gd >= this.route.length) return this.time - r.finish;
     return (gd - this.d) / Math.max(this.speed, 8);
@@ -661,7 +679,7 @@ export class Game {
     if (this.rivals.length < 2) return null;
     const ahead = this.rivals.filter((r) => {
       if (this.d >= this.route.length) return r.finish < this.time;
-      return this.runAt(r.run, this.time)[0] > this.d;
+      return this.runAt(r.run, this.rivalT(r))[0] > this.d;
     }).length;
     return { pos: ahead + 1, of: this.rivals.length + 1 };
   }
