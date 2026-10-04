@@ -161,7 +161,7 @@ export interface ObstacleSpec {
 
 export const OBSTACLES: Record<ObstacleKind, ObstacleSpec> = {
   car: { kind: 'car', width: 1.8, length: 4.2, clearHeight: Infinity, hazard: false },
-  trotro: { kind: 'trotro', width: 2.0, length: 5.2, clearHeight: Infinity, hazard: false },
+  trotro: { kind: 'trotro', width: 2.0, length: 5.4, clearHeight: Infinity, hazard: false },
   pedestrian: { kind: 'pedestrian', width: 0.6, length: 0.5, clearHeight: Infinity, hazard: false },
   barrier: { kind: 'barrier', width: 2.0, length: 0.4, clearHeight: 0.55, hazard: false },
   pothole: { kind: 'pothole', width: 1.4, length: 1.2, clearHeight: 0.12, hazard: true },
@@ -210,20 +210,114 @@ function vehicle(len: number, width: number, bodyH: number, cabinH: number, colo
   return g;
 }
 
+const TAXI_BODY = ['#d9dadc', '#f2f2f0', '#8c1c24', '#1d2f5c', '#5b5f66'];
+const taxiYellow = std('#f5b700', { roughness: 0.4, metalness: 0.3 });
+
+/** A taxi as seen in Accra: any body colour, with all four corners painted yellow. */
+function taxi() {
+  const len = 4.2, width = 1.8, bodyH = 0.7;
+  const g = vehicle(len, width, bodyH, 0.55, pick(TAXI_BODY), 2.1, 0.2);
+  for (const z of [-1, 1]) {
+    const corner = new THREE.Mesh(new THREE.BoxGeometry(width + 0.02, bodyH + 0.02, 0.85), taxiYellow);
+    corner.position.set(0, 0.3 + bodyH / 2, z * (len / 2 - 0.42));
+    g.add(corner);
+  }
+  return g;
+}
+
+// Slogans painted on the back of trotros
+const SLOGANS = ['GOD IS KING', 'NO TIME TO CHECK TIME', 'SIKA MPE DEDE', 'PSALM 23', 'ONYAME BEKYERE', 'NO KING AS GOD', 'EVERYTHING BY GRACE', 'FEAR WOMEN', 'JESUS NEVER FAILS', 'ADOM WURA'];
+const sloganMats = new Map<string, THREE.MeshStandardMaterial>();
+function sloganMat(text: string) {
+  let m = sloganMats.get(text);
+  if (m) return m;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 96;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#1b2430';
+  g.fillRect(0, 0, 256, 96);
+  g.fillStyle = '#ffffff';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  let size = 34;
+  do { g.font = `800 ${size}px Sora, sans-serif`; size -= 2; } while (g.measureText(text).width > 236 && size > 12);
+  g.fillText(text, 128, 50);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.2, metalness: 0.3 });
+  sloganMats.set(text, m);
+  return m;
+}
+
+const TROTRO_BODY = ['#eceae4', '#d3d6da', '#f1efe8', '#c9cdd2'];
+const TROTRO_STRIPE = ['#c0392b', '#1e5aa8', '#27ae60', '#f1c40f', '#6c3483'];
+
+/** A trotro: a high-roof minibus with a slogan across the back window and luggage on the roof. */
+function trotro() {
+  const g = new THREE.Group();
+  const len = 5.4, width = 2.0, h = 1.95;
+  const paint = std(pick(TROTRO_BODY), { roughness: 0.4, metalness: 0.3 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(width, h, len - 0.7), paint);
+  body.position.set(0, 0.32 + h / 2, 0.35);
+  g.add(body);
+  // short bonnet at the front (front faces -z)
+  const bonnet = new THREE.Mesh(new THREE.BoxGeometry(width * 0.96, 0.75, 0.8), paint);
+  bonnet.position.set(0, 0.32 + 0.375, -len / 2 + 0.4);
+  g.add(bonnet);
+  const windscreen = new THREE.Mesh(new THREE.BoxGeometry(width * 0.9, 0.8, 0.05), shared.glass);
+  windscreen.position.set(0, 0.32 + 1.3, -len / 2 + 0.68);
+  windscreen.rotation.x = -0.25;
+  g.add(windscreen);
+  // side windows and a coloured stripe
+  for (const sx of [-1, 1]) {
+    const win = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, len - 1.4), shared.glass);
+    win.position.set(sx * (width / 2 + 0.005), 0.32 + 1.4, 0.4);
+    g.add(win);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, len - 0.8), std(pick(TROTRO_STRIPE)));
+    stripe.position.set(sx * (width / 2 + 0.006), 0.32 + 0.85, 0.35);
+    g.add(stripe);
+  }
+  // the back faces the rider: slogan on the rear window
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(width * 0.86, 0.62), sloganMat(pick(SLOGANS)));
+  back.position.set(0, 0.32 + 1.45, len / 2 + 0.006);
+  g.add(back);
+  for (const x of [-width / 2 + 0.06, width / 2 - 0.06]) {
+    for (const z of [-len / 2 + 0.85, len / 2 - 0.8]) {
+      const w = new THREE.Mesh(shared.wheel, shared.tyre);
+      w.position.set(x, 0.33, z);
+      g.add(w);
+    }
+  }
+  for (const x of [-width / 2 + 0.2, width / 2 - 0.2]) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.3, 0.04), shared.tail);
+    t.position.set(x, 0.32 + 0.6, len / 2 + 0.01);
+    g.add(t);
+    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.04), shared.light);
+    hl.position.set(x, 0.32 + 0.5, -len / 2 - 0.01);
+    g.add(hl);
+  }
+  if (Math.random() < 0.5) {
+    // roof rack with luggage
+    const rack = new THREE.Mesh(new THREE.BoxGeometry(width * 0.8, 0.05, 2.4), std('#2b2b2b', { metalness: 0.6 }));
+    rack.position.set(0, 0.32 + h + 0.08, 0.6);
+    const bags = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.38, 1.7), std(pick(['#6e2c00', '#1f618d', '#7d3c98', '#196f3d'])));
+    bags.position.set(0, 0.32 + h + 0.3, 0.7);
+    g.add(rack, bags);
+  }
+  return g;
+}
+
 export function buildObstacle(kind: ObstacleKind): THREE.Object3D {
   let o: THREE.Object3D;
   switch (kind) {
     case 'car':
-      o = vehicle(4.2, 1.8, 0.7, 0.55, pick(CAR_COLORS), 2.1, 0.2);
+      // Accra taxis have yellow-painted corners; other cars are plain
+      o = Math.random() < 0.55 ? taxi() : vehicle(4.2, 1.8, 0.7, 0.55, pick(CAR_COLORS), 2.1, 0.2);
       break;
-    case 'trotro': {
-      o = vehicle(5.2, 2.0, 1.25, 0.7, pick(['#f1c40f', '#e8e8e8', '#d35400', '#2e86c1']), 4.4, 0.2);
-      // luggage on the roof rack
-      const bags = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.35, 1.6), std(pick(['#6e2c00', '#1f618d', '#7d3c98'])));
-      bags.position.set(0, 0.3 + 1.25 + 0.7 + 0.22, 0.6);
-      o.add(bags);
+    case 'trotro':
+      o = trotro();
       break;
-    }
     case 'pedestrian': {
       o = new THREE.Group();
       const shirt = std(pick(PEOPLE_COLORS));

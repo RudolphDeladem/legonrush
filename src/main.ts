@@ -707,6 +707,9 @@ function home(next: Tab = 'home') {
 
 // ---------- settings ----------
 
+/** first-visit download, measured from the build (see vite.config.ts) */
+const INSTALL_KB = 470;
+
 function settingsScreen() {
   const seg = (id: string, options: [string, string][], value: string) =>
     `<div class="seg" id="${id}">${options.map(([v, label]) => `<button data-v="${v}" class="${v === value ? 'on' : ''}">${label}</button>`).join('')}</div>`;
@@ -735,6 +738,10 @@ function settingsScreen() {
         <div class="card stack">
           <div class="set-row"><b>Motion</b>${seg('motion', [['0', 'Full'], ['1', 'Reduced']], settings.reducedMotion ? '1' : '0')}</div>
           <p class="muted small">Reduced turns off camera shake, speed zoom and screen animations.</p>
+        </div>
+        <div class="card stack">
+          <b>Data</b>
+          <p class="muted small">LEGONRUSH uses no data while you ride. The first visit downloads about ${INSTALL_KB} KB, then the game works offline. Updates download only the parts that changed.</p>
         </div>
       </div>
     </div>`);

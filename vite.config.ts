@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'prompt',
+      includeManifestIcons: false,
       includeAssets: ['icons/favicon.png', 'icons/apple-touch-icon.png'],
       manifest: {
         name: 'LEGONRUSH',
@@ -25,7 +26,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,jpg,webp,woff2}'],
-        globIgnores: ['photos/**', 'art/**', 'shots/**', 'brand/**'],
+        // keep the offline install small for students on data bundles: no landing-page images,
+        // no large install icons, and only the Latin font files the game uses
+        globIgnores: ['photos/**', 'art/**', 'shots/**', 'brand/**', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'assets/*-latin-ext-*', 'assets/*-vietnamese-*'],
         navigateFallback: null,
       },
     }),
