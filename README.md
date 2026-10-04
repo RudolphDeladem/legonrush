@@ -13,9 +13,9 @@ A browser-based 3D cycling game set on the University of Ghana, Legon campus, de
 
 - Splash → Welcome → Create Rider (name, username, hall) → Choose Starter Bike → tutorial first ride → Results → Home
 - Guest play (skip sign-up, create a rider later)
-- **Quick Ride on the Campus Loop (3.3 km)**: 3-lane arcade runner with cars, trotros, pedestrians, barriers and potholes, Rush Coins, a boost meter, score, distance, finish line and results
-- A curving road through the real campus, from Valco Trust and Mensah Sarbah past Legon Hall, Commonwealth Hall and the Great Hall, then east past Volta Hall, Balme Library and JQB to the School of Law, with a heading-up mini map
-- 24 real buildings as labelled boxes at their real positions, plus unlabelled blocks for the rest of the campus
+- **The real campus from OpenStreetMap**: every road and footpath, 1,600 building footprints at their real positions and sizes, pitches, parking and water, and 400+ named places
+- **Explore**: pick where you are and where you need to be (for example Limann Hall to the School of Law or Pent), see the real shortest way on a map with distance, walking and cycling time and turn-by-turn directions, then ride it with a direction banner, place labels and a heading-up mini map. Built so freshers can learn their way around.
+- **Quick Ride, Limann to Great Hall (2.6 km)**: 3-lane arcade runner on the real roads with cars, trotros, pedestrians, barriers and potholes, Rush Coins, a boost meter, score, distance, finish line and results
 - Real halls of residence to represent; jersey colour follows your hall
 - Home hub, Ride, Race (coming soon), Events (coming soon) and You (profile + stats)
 - Progress, coins, XP and levels saved on the device
@@ -53,9 +53,14 @@ src/
   style.css          design language: navy/black, gold accent, bold geometric type
   state.ts           profile, levels, rewards (localStorage)
   audio.ts           tiny WebAudio sound effects
-  data/campus.ts     halls, route, landmarks, bikes  <- edit here to refine the map
+  data/campus.ts     halls, bikes, upcoming routes
+  data/legon-map.json  campus roads, buildings, areas and places (generated from OpenStreetMap)
+  game/campusmap.ts  loads the map, road graph, shortest path (A*), turn-by-turn directions
+  game/routes.ts     rides along real roads (Quick Ride, Explore)
+  game/track.ts      smooths a route into a rideable road; position by distance along it
   game/Game.ts       game loop, rider physics, spawning, collisions, camera
-  game/world.ts      road, trees, lamps, buildings, landmarks, billboards
+  game/world.ts      the 3D campus (roads, buildings, areas, trees) and the route layer (labels, gates, lamps)
+  ui/mapview.ts      2D mini map and route preview
   game/models.ts     rider, bike, vehicles, obstacles, coins
   game/textures.ts   procedural textures (no image downloads)
   landing/            landing page script and styles
@@ -71,7 +76,7 @@ scripts/             brand-assets.mjs (logo -> icons), landing-photos.mjs (photo
 
 ## The campus map
 
-Building positions come from the [UG Campus Map](https://enkayyy97.github.io/ug-campus-map/) by enkayyy97 and live in `src/data/ugmap.ts` (latitude and longitude, projected to metres around Balme Library). The route is a list of waypoints between those buildings (`CAMPUS_LOOP_PATH`); `src/game/track.ts` smooths it into a road and everything in the world is placed by distance along it. That map has no road data, so the road between buildings is approximate. Next step: trace the real roads from OpenStreetMap and swap the waypoints.
+The campus comes from an OpenStreetMap export of Legon (`data/legon.osm`, © OpenStreetMap contributors, ODbL). `node scripts/osm-campus.mjs` turns it into `src/data/legon-map.json`: roads by class, building footprints and heights, areas, and named places, projected to metres around Balme Library. 38 extra place names come from the [UG Campus Map](https://enkayyy97.github.io/ug-campus-map/) by enkayyy97 (`data/ug-campus-map-pois.json`). To refresh the map, export the same area again from openstreetmap.org, replace `data/legon.osm` and rerun the script. Missing or misplaced buildings are best fixed on OpenStreetMap itself, which also helps everyone else.
 
 ## Roadmap (from the product spec)
 

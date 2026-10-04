@@ -1,19 +1,27 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { LEAD, type Route } from '../data/campus';
-import { OTHER_BUILDINGS, toLocal, type Place, type PlaceKind } from '../data/ugmap';
+import { AREAS, BUILDINGS, NODE_XZ, ROADS, buildingAt, mapBounds, type Place, type PlaceKind } from './campusmap';
 import type { Track } from './track';
 import { asphaltTexture, billboardTexture, concreteTexture, grassTexture, labelTexture, wallTexture } from './textures';
 
 export const LANES = [-2.4, 0, 2.4];
 export const ROAD_HALF = 3.8;
 
-const KIND_ACCENT: Record<string, string> = {
+export const KIND_ACCENT: Record<PlaceKind, string> = {
   hall: '#f5c518',
   academic: '#5ec8ff',
   landmark: '#ff7a59',
-  service: '#9be27a',
+  food: '#ff9f43',
+  bank: '#2ecc71',
+  transport: '#a29bfe',
+  worship: '#dfe6e9',
+  sport: '#55efc4',
+  health: '#ff6b81',
+  other: '#b2bec3',
 };
+
+/** real road widths by class: main, through, residential, service lane, footpath */
+const ROAD_WIDTH = [9, 7.4, 6.2, 4.6, 2.6];
 
 /** Seeded random so the campus looks the same every ride. */
 function rng(seed: number) {
@@ -69,41 +77,233 @@ function ribbon(track: Track, a: number, ya: number, b: number, yb: number, from
   return geo;
 }
 
-const PRIORITY: Record<PlaceKind, number> = { landmark: 0, hall: 1, academic: 2, service: 3 };
+/** Flat strip along a polyline with mitred joints, appended to pos/idx. */
+function polyStrip(pts: [number, number][], half: number, pos: number[], idx: number[]) {
+  const n = pts.length;
+  const base = pos.length / 3;
+  for (let i = 0; i < n; i++) {
+    const [x, z] = pts[i];
+    let tx = 0, tz = 0;
+    if (i > 0) { const dx = x - pts[i - 1][0], dz = z - pts[i - 1][1], l = Math.hypot(dx, dz) || 1; tx += dx / l; tz += dz / l; }
+    if (i < n - 1) { const dx = pts[i + 1][0] - x, dz = pts[i + 1][1] - z, l = Math.hypot(dx, dz) || 1; tx += dx / l; tz += dz / l; }
+    const l = Math.hypot(tx, tz) || 1;
+    tx /= l; tz /= l;
+    // stretch the joint so the strip keeps its width round bends
+    let k = 1;
+    if (i > 0 && i < n - 1) {
+      const dx = x - pts[i - 1][0], dz = z - pts[i - 1][1], sl = Math.hypot(dx, dz) || 1;
+      k = Math.min(2.5, 1 / Math.max(0.4, (tx * dx + tz * dz) / sl));
+    }
+    const nx = -tz * half * k, nz = tx * half * k;
+    pos.push(x - nx, 0, z - nz, x + nx, 0, z + nz);
+  }
+  for (let i = 0; i < n - 1; i++) {
+    const v = base + i * 2;
+    idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
+  }
+}
 
-export interface PlacedLandmark {
+function flatGeometry(pos: number[], idx: number[]) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** Flat material drawn over the ground without z-fighting. */
+const groundMat = (color: string, layer: number, map?: THREE.Texture) =>
+  new THREE.MeshStandardMaterial({ color, map, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -layer, polygonOffsetUnits: -layer * 2 });
+
+/**
+ * The real campus, built once: ground, ground areas (pitches, parking, water),
+ * every road and footpath at its real width, and every building footprint.
+ */
+export function buildCampus() {
+  const group = new THREE.Group();
+  const rand = rng(11);
+
+  // ground: 200 m tiles merged into one mesh, each with its own UV origin, because
+  // one huge texture repeat loses UV precision on some mobile GPUs
+  const b = mapBounds();
+  const PAD = 300, TILE = 200;
+  const x0 = Math.floor((b.minX - PAD) / TILE) * TILE, z0 = Math.floor((b.minZ - PAD) / TILE) * TILE;
+  const tx = Math.ceil((b.maxX + PAD - x0) / TILE), tz = Math.ceil((b.maxZ + PAD - z0) / TILE);
+  const tiles: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < tx; i++) for (let j = 0; j < tz; j++) tiles.push(new THREE.PlaneGeometry(TILE, TILE).rotateX(-Math.PI / 2).translate(x0 + i * TILE + TILE / 2, 0, z0 + j * TILE + TILE / 2));
+  const grassTex = grassTexture();
+  grassTex.repeat.set(TILE / 8, TILE / 8);
+  const ground = new THREE.Mesh(mergeGeometries(tiles), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
+  ground.receiveShadow = true;
+  group.add(ground);
+
+  // pitches, tracks, car parks, water and woods
+  const AREA_COLOR: Record<string, string> = { pitch: '#4f9a3a', track: '#b4533a', parking: '#8d9096', water: '#4f8fbf', wood: '#2f6b2a' };
+  const areaBuf = new Map<string, { pos: number[]; idx: number[] }>();
+  for (const a of AREAS) {
+    const contour: THREE.Vector2[] = [];
+    for (let i = 0; i < a.pts.length; i += 2) contour.push(new THREE.Vector2(a.pts[i], a.pts[i + 1]));
+    const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+    let buf = areaBuf.get(a.kind);
+    if (!buf) areaBuf.set(a.kind, (buf = { pos: [], idx: [] }));
+    const base = buf.pos.length / 3;
+    for (const v of contour) buf.pos.push(v.x, 0, v.y);
+    for (const t of tris) buf.idx.push(base + t[0], base + t[1], base + t[2]);
+  }
+  for (const [kind, buf] of areaBuf) {
+    const m = new THREE.Mesh(flatGeometry(buf.pos, buf.idx), groundMat(AREA_COLOR[kind], 1));
+    m.receiveShadow = true;
+    group.add(m);
+  }
+
+  // every road and footpath, with round caps where roads meet
+  const roadBuf = { pos: [] as number[], idx: [] as number[] };
+  const pathBuf = { pos: [] as number[], idx: [] as number[] };
+  const caps: THREE.BufferGeometry[] = [];
+  const pathCaps: THREE.BufferGeometry[] = [];
+  for (const r of ROADS) {
+    const pts = r.nodes.map((i) => [NODE_XZ[i * 2], NODE_XZ[i * 2 + 1]] as [number, number]);
+    const half = ROAD_WIDTH[r.cls] / 2;
+    const footpath = r.cls === 4;
+    const buf = footpath ? pathBuf : roadBuf;
+    polyStrip(pts, half, buf.pos, buf.idx);
+    for (const [x, z] of [pts[0], pts[pts.length - 1]]) (footpath ? pathCaps : caps).push(new THREE.CircleGeometry(half, 10).rotateX(-Math.PI / 2).translate(x, 0, z));
+  }
+  const asphalt = groundMat('#5d6169', 3);
+  const path = groundMat('#cbbd9b', 2);
+  const merged = (main: THREE.BufferGeometry, extra: THREE.BufferGeometry[]) => {
+    const parts = [main, ...extra].map((g) => {
+      const flat = g.index ? g.toNonIndexed() : g;
+      for (const k of Object.keys(flat.attributes)) if (k !== 'position') flat.deleteAttribute(k);
+      return flat;
+    });
+    const geo = mergeGeometries(parts);
+    geo.computeVertexNormals();
+    return geo;
+  };
+  const roads = new THREE.Mesh(merged(flatGeometry(roadBuf.pos, roadBuf.idx), caps), asphalt);
+  roads.receiveShadow = true;
+  const paths = new THREE.Mesh(merged(flatGeometry(pathBuf.pos, pathBuf.idx), pathCaps), path);
+  paths.receiveShadow = true;
+  group.add(paths, roads);
+
+  // every building: whitewashed walls with windows and a flat terracotta roof
+  const wallPos: number[] = [], wallUv: number[] = [], roofPos: number[] = [];
+  for (const bd of BUILDINGS) {
+    const p = bd.pts;
+    const n = p.length / 2;
+    if (n < 3) continue;
+    let area = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) area += p[j * 2] * p[i * 2 + 1] - p[i * 2] * p[j * 2 + 1];
+    area = Math.abs(area) / 2;
+    const h = bd.height ?? (area < 60 ? 3.6 : area < 350 ? 7 : rand() < 0.5 ? 7 : 10.5);
+    let u = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = p[i * 2], az = p[i * 2 + 1], bx = p[j * 2], bz = p[j * 2 + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      wallPos.push(ax, 0, az, bx, 0, bz, bx, h, bz, ax, 0, az, bx, h, bz, ax, h, az);
+      const u0 = u / 8, u1 = (u + len) / 8, v = h / 7;
+      wallUv.push(u0, 0, u1, 0, u1, v, u0, 0, u1, v, u0, v);
+      u += len;
+    }
+    const contour: THREE.Vector2[] = [];
+    for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(p[i * 2], p[i * 2 + 1]));
+    for (const t of THREE.ShapeUtils.triangulateShape(contour, [])) for (const k of t) roofPos.push(contour[k].x, h, contour[k].y);
+  }
+  const wallGeo = new THREE.BufferGeometry();
+  wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(wallPos, 3));
+  wallGeo.setAttribute('uv', new THREE.Float32BufferAttribute(wallUv, 2));
+  wallGeo.computeVertexNormals();
+  const walls = new THREE.Mesh(wallGeo, new THREE.MeshStandardMaterial({ map: wallTexture(), roughness: 0.9, side: THREE.DoubleSide }));
+  walls.castShadow = walls.receiveShadow = true;
+  const roofGeo = new THREE.BufferGeometry();
+  roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(roofPos, 3));
+  roofGeo.computeVertexNormals();
+  const roofs = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: '#a24b2e', roughness: 0.85, side: THREE.DoubleSide }));
+  roofs.castShadow = true;
+  group.add(walls, roofs);
+
+  // street trees along the main campus roads
+  const broad: THREE.Matrix4[] = [], palms: THREE.Matrix4[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  for (const r of ROADS) {
+    if (r.cls > 2) continue;
+    const half = ROAD_WIDTH[r.cls] / 2;
+    let carry = rand() * 20;
+    for (let k = 0; k < r.nodes.length - 1; k++) {
+      const a = r.nodes[k], c = r.nodes[k + 1];
+      const ax = NODE_XZ[a * 2], az = NODE_XZ[a * 2 + 1], cx = NODE_XZ[c * 2], cz = NODE_XZ[c * 2 + 1];
+      const len = Math.hypot(cx - ax, cz - az);
+      const nx = -(cz - az) / len, nz = (cx - ax) / len;
+      for (let t = carry; t < len; t += 24) {
+        for (const s of [-1, 1]) {
+          const off = half + 3 + rand() * 4;
+          const x = ax + ((cx - ax) * t) / len + nx * s * off, z = az + ((cz - az) * t) / len + nz * s * off;
+          if (buildingAt(x, z, 2)) continue;
+          const sc = 0.8 + rand() * 0.6;
+          (rand() < 0.35 ? palms : broad).push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(up, rand() * 6.28), new THREE.Vector3(sc, sc, sc)));
+        }
+        carry = t + 24 - len;
+      }
+    }
+  }
+  addTrees(group, broad, palms, rand);
+  return group;
+}
+
+const treeGeo = {
+  trunk: new THREE.CylinderGeometry(0.16, 0.24, 2.6, 7).translate(0, 1.3, 0),
+  crown: new THREE.IcosahedronGeometry(1.9, 1).scale(1, 0.8, 1).translate(0, 3.6, 0),
+  palmTrunk: new THREE.CylinderGeometry(0.14, 0.2, 7, 7).translate(0, 3.5, 0),
+  palmCrown: palmCrown(),
+};
+const treeMat = {
+  trunk: new THREE.MeshStandardMaterial({ color: '#5b4330', roughness: 1 }),
+  leaf: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 }),
+  palmTrunk: new THREE.MeshStandardMaterial({ color: '#8a7a66', roughness: 1 }),
+};
+function addInstanced(group: THREE.Group, geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[], rand: () => number, colors?: string[]) {
+  if (!list.length) return;
+  const im = new THREE.InstancedMesh(geo, mat, list.length);
+  list.forEach((mm, k) => {
+    im.setMatrixAt(k, mm);
+    if (colors) im.setColorAt(k, new THREE.Color(colors[k % colors.length]).offsetHSL(0, 0, (rand() - 0.5) * 0.08));
+  });
+  im.castShadow = true;
+  im.receiveShadow = true;
+  im.userData.shared = true;
+  group.add(im);
+}
+function addTrees(group: THREE.Group, broad: THREE.Matrix4[], palms: THREE.Matrix4[], rand: () => number) {
+  addInstanced(group, treeGeo.trunk, treeMat.trunk, broad, rand);
+  addInstanced(group, treeGeo.crown, treeMat.leaf, broad, rand, ['#3f7d2c', '#4a8a33', '#356b25', '#5a9440']);
+  addInstanced(group, treeGeo.palmTrunk, treeMat.palmTrunk, palms, rand);
+  addInstanced(group, treeGeo.palmCrown, treeMat.leaf, palms, rand, ['#4f8f2f', '#5c9a36']);
+}
+
+export interface RouteLabel {
   place: Place;
+  /** distance along the track */
   d: number;
-  side: 1 | -1;
-  x: number;
-  z: number;
+}
+
+export interface RouteLayerOptions {
+  /** track distance of the start line and the finish line */
+  start: number;
+  finish: number;
+  startText: string;
+  finishText: string;
+  labels: RouteLabel[];
+  destination?: Place;
 }
 
 /**
- * Puts each real building beside the road nearest to it. Buildings keep their real
- * spot along the route; the gap to the road is clamped so none sits on the road or
- * disappears into the distance, and lower-priority ones give way when two overlap.
+ * The ridden route on top of the campus: a three-lane road with kerbs and lane
+ * markings along the real road line, street trees and lamps, labels for the
+ * places it passes, start and finish arches, and a beacon over the destination.
  */
-export function placeLandmarks(track: Track, places: Place[]): PlacedLandmark[] {
-  const out: (PlacedLandmark & { w: number })[] = [];
-  const sorted = [...places].sort((p, q) => PRIORITY[p.kind] - PRIORITY[q.kind]);
-  for (const place of sorted) {
-    const [px, pz] = toLocal(place.lat, place.lng);
-    const pr = track.project(px, pz);
-    if (pr.dist > 150 || pr.d < 20 || pr.d > track.length - 20) continue;
-    const [w, , depth] = place.size;
-    const side: 1 | -1 = pr.lateral >= 0 ? 1 : -1;
-    const off = THREE.MathUtils.clamp(Math.abs(pr.lateral), ROAD_HALF + 12 + depth / 2, 70);
-    if (out.some((o) => o.side === side && Math.abs(o.d - pr.d) < (o.w + w) / 2 + 6)) continue;
-    const p = track.pose(pr.d, side * off);
-    if (track.distanceToRoad(p.x, p.z) < ROAD_HALF + 8 + depth / 2) continue;
-    out.push({ place, d: pr.d, side, x: p.x, z: p.z, w });
-  }
-  return out.sort((a, b) => a.d - b.d);
-}
-
-export function buildWorld(route: Route) {
-  const track = route.track!;
+export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
   const group = new THREE.Group();
   const rand = rng(7);
   const L = track.length;
@@ -113,41 +313,23 @@ export function buildWorld(route: Route) {
   };
   const yawAt = (d: number) => track.pose(d).yaw;
 
-  // Ground: one mesh of 200 m tiles, each with its own UV origin, because a single
-  // huge texture repeat loses UV precision on some mobile GPUs.
-  const b = track.bounds();
-  const PAD = 400, TILE = 200;
-  const x0 = Math.floor((b.minX - PAD) / TILE) * TILE, z0 = Math.floor((b.minZ - PAD) / TILE) * TILE;
-  const nx = Math.ceil((b.maxX + PAD - x0) / TILE), nz = Math.ceil((b.maxZ + PAD - z0) / TILE);
-  const tiles: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
-    tiles.push(new THREE.PlaneGeometry(TILE, TILE).rotateX(-Math.PI / 2).translate(x0 + i * TILE + TILE / 2, -0.02, z0 + j * TILE + TILE / 2));
-  }
-  const grassTex = grassTexture();
-  grassTex.repeat.set(TILE / 8, TILE / 8);
-  const ground = new THREE.Mesh(mergeGeometries(tiles), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
-  ground.receiveShadow = true;
-  group.add(ground);
-
-  // road, edge lines and kerbs follow the centreline
   const roadTex = asphaltTexture();
   roadTex.repeat.set(2, 1);
-  const road = new THREE.Mesh(ribbon(track, -ROAD_HALF, 0, ROAD_HALF, 0, 0, L), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92 }));
+  const road = new THREE.Mesh(ribbon(track, -ROAD_HALF, 0, ROAD_HALF, 0, 0, L), groundMat('#ffffff', 5, roadTex));
   road.receiveShadow = true;
   group.add(road);
-  const white = new THREE.MeshStandardMaterial({ color: '#e9e6dc', roughness: 0.8 });
+  const white = groundMat('#e9e6dc', 6);
   for (const s of [-1, 1]) {
     const [a, c] = [s * (ROAD_HALF - 0.27), s * (ROAD_HALF - 0.13)].sort((u, v) => u - v);
-    group.add(new THREE.Mesh(ribbon(track, a, 0.005, c, 0.005, 0, L, 8, 4), white));
+    group.add(new THREE.Mesh(ribbon(track, a, 0, c, 0, 0, L, 8, 4), white));
   }
   const conc = concreteTexture();
   conc.repeat.set(1, 4);
-  const walkMat = new THREE.MeshStandardMaterial({ map: conc, roughness: 0.95 });
+  const walkMat = new THREE.MeshStandardMaterial({ map: conc, roughness: 0.95, side: THREE.DoubleSide });
   for (const s of [-1, 1]) {
-    const a = s * ROAD_HALF, c = s * (ROAD_HALF + 2);
-    // order the edges so faces point up on both sides
-    const top = s > 0 ? ribbon(track, a, 0.14, c, 0.14, 0, L) : ribbon(track, c, 0.14, a, 0.14, 0, L);
-    const curb = s > 0 ? ribbon(track, a, 0, a, 0.14, 0, L) : ribbon(track, a, 0.14, a, 0, 0, L);
+    const a = s * ROAD_HALF, c = s * (ROAD_HALF + 1.6);
+    const top = s > 0 ? ribbon(track, a, 0.12, c, 0.12, 0, L) : ribbon(track, c, 0.12, a, 0.12, 0, L);
+    const curb = s > 0 ? ribbon(track, a, 0, a, 0.12, 0, L) : ribbon(track, a, 0.12, a, 0, 0, L);
     const walk = new THREE.Mesh(top, walkMat);
     walk.receiveShadow = true;
     group.add(walk, new THREE.Mesh(curb, walkMat));
@@ -162,119 +344,92 @@ export function buildWorld(route: Route) {
   for (const x of [-1.2, 1.2]) {
     for (let k = 0; k < dashCount; k++) {
       const d = k * 9 + 4;
-      m.compose(at(d, x, 0.006), q.setFromAxisAngle(up, yawAt(d)), one);
+      m.compose(at(d, x, 0.01), q.setFromAxisAngle(up, yawAt(d)), one);
       dashes.setMatrixAt(i++, m);
     }
   }
   group.add(dashes);
 
-  // real buildings beside the road, plus every other building from the map as filler
-  const landmarks = placeLandmarks(track, route.places ?? []);
-  const blocked: { x: number; z: number; r: number }[] = landmarks.map((l) => ({ x: l.x, z: l.z, r: Math.max(l.place.size[0], l.place.size[2]) / 2 + 3 }));
-  const clear = (p: THREE.Vector3, r: number, road = ROAD_HALF + 2.5) =>
-    track.distanceToRoad(p.x, p.z) > road + r && !blocked.some((o) => Math.hypot(o.x - p.x, o.z - p.z) < o.r + r);
-
-  const wallTex = wallTexture();
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9 });
-  const roofMat = new THREE.MeshStandardMaterial({ color: '#a8482c', roughness: 0.85 });
-  for (const l of landmarks) {
-    const [w, h, depth] = l.place.size;
-    const block = campusBlock(w, h, depth, wallMat, roofMat, l.place.kind === 'landmark' ? '#c8a24a' : undefined);
-    block.position.set(l.x, 0, l.z);
-    block.rotation.y = yawAt(l.d);
-    group.add(block);
-    const off = Math.hypot(l.x - track.pose(l.d).x, l.z - track.pose(l.d).z);
-    const { tex, aspect } = labelTexture(l.place.name.toUpperCase(), KIND_ACCENT[l.place.kind]);
-    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, fog: true }));
-    const lh = 2.6;
-    label.scale.set(lh * aspect, lh, 1);
-    label.position.copy(at(l.d, l.side * (off - depth / 2 - 1), h + 2.4));
-    group.add(label);
-  }
-  for (const [lat, lng] of OTHER_BUILDINGS) {
-    const [x, z] = toLocal(lat, lng);
-    const w = 20 + rand() * 20, h = 6 + Math.floor(rand() * 3) * 3.5, depth = 12 + rand() * 10;
-    const p = new THREE.Vector3(x, 0, z);
-    if (!clear(p, Math.max(w, depth) / 2 + 4, ROAD_HALF + 6)) continue;
-    const blk = campusBlock(w, h, depth, wallMat, roofMat);
-    blk.position.copy(p);
-    blk.rotation.y = yawAt(track.project(x, z).d);
-    group.add(blk);
-    blocked.push({ x, z, r: Math.max(w, depth) / 2 + 3 });
-  }
-  // generic blocks fill the gaps along the road
-  for (let d = 30; d < L; d += 45 + rand() * 40) {
+  // trees and lamps along the route, kept off buildings and off the road on tight bends
+  const clear = (p: THREE.Vector3, r: number) => track.distanceToRoad(p.x, p.z) > ROAD_HALF + 1.8 + r && !buildingAt(p.x, p.z, r + 0.5);
+  const broad: THREE.Matrix4[] = [], palms: THREE.Matrix4[] = [];
+  for (let d = 0; d < L; d += 13) {
     for (const s of [-1, 1]) {
-      if (rand() < 0.35) continue;
-      const w = 18 + rand() * 22, h = 6 + Math.floor(rand() * 3) * 3.5, depth = 10 + rand() * 10;
-      const p = at(d, s * (ROAD_HALF + 18 + rand() * 14 + depth / 2));
-      if (!clear(p, Math.max(w, depth) / 2 + 2, ROAD_HALF + 12)) continue;
-      const blk = campusBlock(w, h, depth, wallMat, roofMat);
-      blk.position.copy(p);
-      blk.rotation.y = yawAt(d);
-      group.add(blk);
-      blocked.push({ x: p.x, z: p.z, r: Math.max(w, depth) / 2 + 3 });
-    }
-  }
-
-  // trees: broadleaf and palms, instanced
-  const broad: THREE.Matrix4[] = [];
-  const palms: THREE.Matrix4[] = [];
-  for (let d = 0; d < L; d += 11) {
-    for (const s of [-1, 1]) {
-      const p = at(d + (rand() - 0.5) * 6, s * (ROAD_HALF + 4 + rand() * 6));
-      const sc = 0.8 + rand() * 0.6;
-      const spin = rand() * Math.PI * 2;
-      const palm = rand() < 0.35;
-      if (!clear(p, 1.5)) continue;
+      const p = at(d + (rand() - 0.5) * 6, s * (ROAD_HALF + 4 + rand() * 5));
+      const sc = 0.8 + rand() * 0.6, spin = rand() * 6.28, palm = rand() < 0.4;
+      if (!clear(p, 1.2)) continue;
       (palm ? palms : broad).push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromAxisAngle(up, spin), new THREE.Vector3(sc, sc, sc)));
     }
   }
-  const trunkMat = new THREE.MeshStandardMaterial({ color: '#5b4330', roughness: 1 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 });
-  const addInstanced = (geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[], colors?: string[]) => {
-    const im = new THREE.InstancedMesh(geo, mat, list.length);
-    list.forEach((mm, k) => {
-      im.setMatrixAt(k, mm);
-      if (colors) im.setColorAt(k, new THREE.Color(colors[k % colors.length]).offsetHSL(0, 0, (rand() - 0.5) * 0.08));
-    });
-    im.castShadow = true;
-    im.receiveShadow = true;
-    group.add(im);
-  };
-  addInstanced(new THREE.CylinderGeometry(0.16, 0.24, 2.6, 7).translate(0, 1.3, 0), trunkMat, broad);
-  addInstanced(new THREE.IcosahedronGeometry(1.9, 1).scale(1, 0.8, 1).translate(0, 3.6, 0), leafMat, broad, ['#3f7d2c', '#4a8a33', '#356b25', '#5a9440']);
-  addInstanced(new THREE.CylinderGeometry(0.14, 0.2, 7, 7).translate(0, 3.5, 0), new THREE.MeshStandardMaterial({ color: '#8a7a66', roughness: 1 }), palms);
-  addInstanced(palmCrown(), leafMat, palms, ['#4f8f2f', '#5c9a36']);
-
-  // street lamps, arm reaching over the road
+  addTrees(group, broad, palms, rand);
   const lamps: THREE.Matrix4[] = [];
   for (let d = 0; d < L; d += 36) {
     for (const s of [-1, 1]) {
       const dd = d + (s > 0 ? 18 : 0);
-      const p = at(dd, s * (ROAD_HALF + 1.6));
-      if (track.distanceToRoad(p.x, p.z) < ROAD_HALF + 1.2) continue;
+      const p = at(dd, s * (ROAD_HALF + 1.2));
+      if (track.distanceToRoad(p.x, p.z) < ROAD_HALF + 1 || buildingAt(p.x, p.z, 0.5)) continue;
       lamps.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromAxisAngle(up, yawAt(dd) + (s > 0 ? Math.PI : 0)), one));
     }
   }
   const lampMat = new THREE.MeshStandardMaterial({ color: '#4a4f57', metalness: 0.6, roughness: 0.4 });
-  addInstanced(new THREE.CylinderGeometry(0.06, 0.09, 6, 6).translate(0, 3, 0), lampMat, lamps);
-  addInstanced(new THREE.BoxGeometry(0.9, 0.12, 0.25).translate(0.45, 6, 0), lampMat, lamps);
+  const lampPole = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.09, 6, 6).translate(0, 3, 0), lampMat, Math.max(1, lamps.length));
+  const lampArm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.12, 0.25).translate(0.45, 6, 0), lampMat, Math.max(1, lamps.length));
+  lamps.forEach((mm, k) => { lampPole.setMatrixAt(k, mm); lampArm.setMatrixAt(k, mm); });
+  lampPole.count = lampArm.count = lamps.length;
+  lampPole.castShadow = true;
+  group.add(lampPole, lampArm);
+
+  // labels over the places the route passes
+  for (const l of o.labels) {
+    const { tex, aspect } = labelTexture(l.place.name.toUpperCase(), KIND_ACCENT[l.place.kind]);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, fog: true }));
+    const lh = 2.6;
+    label.scale.set(lh * aspect, lh, 1);
+    const bd = buildingAt(l.place.x, l.place.z);
+    label.position.set(l.place.x, (bd?.height ?? (bd ? 8 : 4)) + 3, l.place.z);
+    group.add(label);
+  }
+
+  // beacon over the destination
+  if (o.destination) {
+    const { x, z } = o.destination;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 70, 16, 1, true).translate(0, 35, 0), new THREE.MeshBasicMaterial({ color: '#ffd21f', transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    beam.position.set(x, 0, z);
+    group.add(beam);
+    const { tex, aspect } = labelTexture(o.destination.name.toUpperCase(), '#ffd21f');
+    const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, depthTest: false, fog: false }));
+    sign.scale.set(4.5 * aspect, 4.5, 1);
+    sign.position.set(x, 26, z);
+    sign.renderOrder = 10;
+    group.add(sign);
+  }
 
   // in-world billboards (future ad slots)
   const bbTex = billboardTexture();
-  for (let d = LEAD + 600, k = 0; d < L - LEAD - 100; d += 700, k++) {
+  for (let d = o.start + 600, k = 0; d < o.finish - 100; d += 700, k++) {
     const s = k % 2 ? -1 : 1;
     const p = at(d, s * (ROAD_HALF + 8));
-    if (!clear(p, 4, ROAD_HALF + 3)) continue;
+    if (!clear(p, 4)) continue;
     group.add(billboard(bbTex, s, p, yawAt(d)));
   }
 
-  // start and finish arches
-  group.add(gate('Campus Loop', at(LEAD, 0), yawAt(LEAD)));
-  group.add(gate('FINISH', at(L - LEAD, 0), yawAt(L - LEAD), true));
+  group.add(gate(o.startText, at(o.start, 0), yawAt(o.start)));
+  group.add(gate(o.finishText, at(o.finish, 0), yawAt(o.finish), true));
+  return group;
+}
 
-  return { group, landmarks };
+/** Frees a route layer's GPU memory (shared tree meshes are kept). */
+export function disposeLayer(group: THREE.Object3D) {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.userData.shared) return;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
+    for (const mat of mats) {
+      for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.dispose();
+      mat.dispose();
+    }
+  });
 }
 
 function palmCrown() {
@@ -287,30 +442,6 @@ function palmCrown() {
     fronds.push(f.translate(0, 7, 0));
   }
   return mergeGeometries(fronds);
-}
-
-function campusBlock(w: number, h: number, d: number, wallMat: THREE.Material, roofMat: THREE.Material, roofColor?: string) {
-  const g = new THREE.Group();
-  const geo = new THREE.BoxGeometry(d, h, w);
-  // scale wall UVs so windows stay a sensible size
-  const uv = geo.attributes.uv as THREE.BufferAttribute;
-  const faceDims = [[w, h], [w, h], [d, w], [d, w], [d, h], [d, h]];
-  for (let f = 0; f < 6; f++) {
-    const [fu, fv] = faceDims[f];
-    for (let k = 0; k < 4; k++) {
-      const idx = f * 4 + k;
-      uv.setXY(idx, uv.getX(idx) * (fu / 8), uv.getY(idx) * (fv / 7));
-    }
-  }
-  const body = new THREE.Mesh(geo, wallMat);
-  body.position.y = h / 2;
-  body.castShadow = body.receiveShadow = true;
-  g.add(body);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(d + 1.2, 0.6, w + 1.2), roofColor ? new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.8 }) : roofMat);
-  roof.position.y = h + 0.3;
-  roof.castShadow = true;
-  g.add(roof);
-  return g;
 }
 
 function gate(text: string, pos: THREE.Vector3, yaw: number, finish = false) {

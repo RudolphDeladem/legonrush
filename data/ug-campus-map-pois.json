@@ -1,0 +1,477 @@
+[
+{
+"name": "Balme Library",
+"lat": 5.6518,
+"lng": -0.1871
+},
+{
+"name": "Great Hall",
+"lat": 5.6507,
+"lng": -0.196
+},
+{
+"name": "College of Humanities",
+"lat": 5.6537,
+"lng": -0.1822
+},
+{
+"name": "Computer Science Department",
+"lat": 5.6545,
+"lng": -0.1838
+},
+{
+"name": "Business School",
+"lat": 5.6587,
+"lng": -0.1777
+},
+{
+"name": "Geography & Resource Development",
+"lat": 5.651,
+"lng": -0.1832
+},
+{
+"name": "School of Law",
+"lat": 5.654,
+"lng": -0.1832
+},
+{
+"name": "Department of Chemistry",
+"lat": 5.6528,
+"lng": -0.1853
+},
+{
+"name": "Department of Home Science",
+"lat": 5.6527,
+"lng": -0.1845
+},
+{
+"name": "Department of Political Science",
+"lat": 5.6547,
+"lng": -0.1864
+},
+{
+"name": "Department of Psychology",
+"lat": 5.6551,
+"lng": -0.1866
+},
+{
+"name": "Department of Information Studies",
+"lat": 5.6552,
+"lng": -0.1871
+},
+{
+"name": "Department of Animal Biology",
+"lat": 5.6534,
+"lng": -0.1875
+},
+{
+"name": "Department of Marine and Fisheries Sciences",
+"lat": 5.6537,
+"lng": -0.1884
+},
+{
+"name": "Department of Educational Studies and Leadership (DESL)",
+"lat": 5.6528,
+"lng": -0.1812
+},
+{
+"name": "Department of Teacher Education",
+"lat": 5.6526,
+"lng": -0.181
+},
+{
+"name": "International Programmes office",
+"lat": 5.6536,
+"lng": -0.1819
+},
+{
+"name": "JQB Lecture Hall",
+"lat": 5.6523,
+"lng": -0.1819
+},
+{
+"name": "Institute of Africa Studies",
+"lat": 5.6511,
+"lng": -0.1819
+},
+{
+"name": "Department of Adult Education",
+"lat": 5.6515,
+"lng": -0.1811
+},
+{
+"name": "Department of Archaeology",
+"lat": 5.6518,
+"lng": -0.1813
+},
+{
+"name": "School of Continuing and Distance Education",
+"lat": 5.6508,
+"lng": -0.1811
+},
+{
+"name": "Department of Geology",
+"lat": 5.6512,
+"lng": -0.1845
+},
+{
+"name": "Centre for International Affairs",
+"lat": 5.6521,
+"lng": -0.1841
+},
+{
+"name": "Department of Physics",
+"lat": 5.6512,
+"lng": -0.1856
+},
+{
+"name": "Department of Plant and Environmental Biology",
+"lat": 5.6539,
+"lng": -0.1862
+},
+{
+"name": "School of Pharmacy",
+"lat": 5.6538,
+"lng": -0.1893
+},
+{
+"name": "Department of Biochemistry",
+"lat": 5.6547,
+"lng": -0.1894
+},
+{
+"name": "School of Nursing and Midwifery",
+"lat": 5.6538,
+"lng": -0.1902
+},
+{
+"name": "French Department",
+"lat": 5.6509,
+"lng": -0.1887
+},
+{
+"name": "Institute of Statistical, Social and Economic Research(ISSER",
+"lat": 5.6545,
+"lng": -0.1844
+},
+{
+"name": "Department Of Animal Science",
+"lat": 5.6499,
+"lng": -0.1832
+},
+{
+"name": "Department of Agriculture Economics and Agribusiness",
+"lat": 5.6497,
+"lng": -0.1834
+},
+{
+"name": "Faculty of Agriculture",
+"lat": 5.6502,
+"lng": -0.1838
+},
+{
+"name": "Biotechnology Laboratory",
+"lat": 5.6488,
+"lng": -0.1837
+},
+{
+"name": "CEGENSA - College",
+"lat": 5.6491,
+"lng": -0.1837
+},
+{
+"name": "Department Of Crop Science",
+"lat": 5.6501,
+"lng": -0.1848
+},
+{
+"name": "Department of Music",
+"lat": 5.6492,
+"lng": -0.1808
+},
+{
+"name": "RS/GIS Lab - Research institute",
+"lat": 5.6513,
+"lng": -0.1828
+},
+{
+"name": "Department Of Economics",
+"lat": 5.651,
+"lng": -0.1874
+},
+{
+"name": "Research and Innovation Office Complex",
+"lat": 5.6537,
+"lng": -0.1928
+},
+{
+"name": "Biomedical Engineering Department",
+"lat": 5.6556,
+"lng": -0.1831
+},
+{
+"name": "New N Block",
+"lat": 5.656,
+"lng": -0.1879
+},
+{
+"name": "Centre for Climate Change and Sustainability Studies-C3SS",
+"lat": 5.6566,
+"lng": -0.1879
+},
+{
+"name": "GCB Lecture Building",
+"lat": 5.655,
+"lng": -0.1883
+},
+{
+"name": "Sociology Department",
+"lat": 5.6503,
+"lng": -0.1897
+},
+{
+"name": "School of Graduate studies",
+"lat": 5.6531,
+"lng": -0.1907
+},
+{
+"name": "Department of Modern Languages",
+"lat": 5.6494,
+"lng": -0.1877
+},
+{
+"name": "Department Of History",
+"lat": 5.6501,
+"lng": -0.1894
+},
+{
+"name": "Merian Institute for Advanced Studies in Africa (MIASA) - Re",
+"lat": 5.6479,
+"lng": -0.1912
+},
+{
+"name": "Maison Fran\u00e7aise Legon - Educational institution",
+"lat": 5.6493,
+"lng": -0.1877
+},
+{
+"name": "Department of Soil Science",
+"lat": 5.6503,
+"lng": -0.1848
+},
+{
+"name": "Department Of Family And Consumer Science",
+"lat": 5.6503,
+"lng": -0.1841
+},
+{
+"name": "UG Creche and Kindergarten School",
+"lat": 5.6497,
+"lng": -0.1839
+},
+{
+"name": "Mfodwo Complex/ N Block - Training center",
+"lat": 5.6546,
+"lng": -0.187
+},
+{
+"name": "School of Social Sciences",
+"lat": 5.6551,
+"lng": -0.1873
+},
+{
+"name": "CSPS - Centre for Social Policy Studies",
+"lat": 5.6549,
+"lng": -0.1876
+},
+{
+"name": "Department for the Study of Religions - Research Institute",
+"lat": 5.6509,
+"lng": -0.1883
+},
+{
+"name": "Department Of Philosophy and Classics - Research Institute",
+"lat": 5.6509,
+"lng": -0.1881
+},
+{
+"name": "Economic Policy Management Programme Office - Research Insti",
+"lat": 5.6512,
+"lng": -0.188
+},
+{
+"name": "School of Public Health",
+"lat": 5.6366,
+"lng": -0.1827
+},
+{
+"name": "Department of Mathematics",
+"lat": 5.6538,
+"lng": -0.1841
+},
+{
+"name": "Department of Statistics",
+"lat": 5.6538,
+"lng": -0.1838
+},
+{
+"name": "West African Genetic Medicine Centre - WAGMC",
+"lat": 5.6348,
+"lng": -0.1847
+},
+{
+"name": "School of Engineering Sciences",
+"lat": 5.6553,
+"lng": -0.183
+},
+{
+"name": "School of Performing Arts",
+"lat": 5.6501,
+"lng": -0.1819
+},
+{
+"name": "Legon Hall",
+"lat": 5.6502,
+"lng": -0.1884
+},
+{
+"name": "Commonwealth Hall",
+"lat": 5.6506,
+"lng": -0.1925
+},
+{
+"name": "Volta Hall",
+"lat": 5.6518,
+"lng": -0.1898
+},
+{
+"name": "Akuafo Hall",
+"lat": 5.6503,
+"lng": -0.1857
+},
+{
+"name": "Akuafo Hall Annex",
+"lat": 5.6476,
+"lng": -0.1856
+},
+{
+"name": "Mensah Sarbah Hall",
+"lat": 5.6462,
+"lng": -0.1871
+},
+{
+"name": "Vikings Hostel",
+"lat": 5.6442,
+"lng": -0.1856
+},
+{
+"name": "Legon Hall Annex",
+"lat": 5.6474,
+"lng": -0.1881
+},
+{
+"name": "Mensah Sarbah Annex",
+"lat": 5.6454,
+"lng": -0.1854
+},
+{
+"name": "Valco Trust Hostel",
+"lat": 5.6443,
+"lng": -0.1869
+},
+{
+"name": "Old Pentagon Blocks",
+"lat": 5.6567,
+"lng": -0.1814
+},
+{
+"name": "Pent Hostel Block A",
+"lat": 5.6572,
+"lng": -0.182
+},
+{
+"name": "Pent Hostel Block B",
+"lat": 5.6585,
+"lng": -0.1819
+},
+{
+"name": "Pent Hostel Block C",
+"lat": 5.6584,
+"lng": -0.1813
+},
+{
+"name": "Evandy Hostel",
+"lat": 5.6629,
+"lng": -0.1817
+},
+{
+"name": "Bani Hostel",
+"lat": 5.663,
+"lng": -0.1797
+},
+{
+"name": "TF Hostel",
+"lat": 5.6662,
+"lng": -0.1821
+},
+{
+"name": "Jubilee Hall",
+"lat": 5.6405,
+"lng": -0.186
+},
+{
+"name": "International Student Hostel",
+"lat": 5.6399,
+"lng": -0.1852
+},
+{
+"name": "Dr. Hilla Limann Hall",
+"lat": 5.6373,
+"lng": -0.1848
+},
+{
+"name": "Alexander Kwapong Hall",
+"lat": 5.637,
+"lng": -0.1855
+},
+{
+"name": "Elizabeth Sey Hall",
+"lat": 5.6358,
+"lng": -0.1877
+},
+{
+"name": "Jean Nelson Akah Hall",
+"lat": 5.6355,
+"lng": -0.1882
+},
+{
+"name": "Central Cafeteria",
+"lat": 5.6468,
+"lng": -0.1868
+},
+{
+"name": "Legon Hospital",
+"lat": 5.6511,
+"lng": -0.1779
+},
+{
+"name": "Sports Complex",
+"lat": 5.6393,
+"lng": -0.1811
+},
+{
+"name": "University Banking Square",
+"lat": 5.6427,
+"lng": -0.1856
+},
+{
+"name": "ECOWAS Coastal & Marine Resources Management Centre",
+"lat": 5.6527,
+"lng": -0.1839
+},
+{
+"name": "Ghana Korea Information Access Centre",
+"lat": 5.652,
+"lng": -0.1877
+}
+]

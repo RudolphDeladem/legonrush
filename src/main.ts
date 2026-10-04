@@ -5,7 +5,10 @@ import '@fontsource/sora/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
-import { BIKES, CAMPUS_LOOP, HALLS, ROUTES, bikeById, hallById } from './data/campus';
+import { BIKES, HALLS, HALL_PLACE, UPCOMING_ROUTES, bikeById, hallById } from './data/campus';
+import { CAMPUS_LOOP, exploreRoute, type Route } from './game/routes';
+import { ATTRIBUTION, PLACES, placeByName, type Turn } from './game/campusmap';
+import { miniMap, routeMap } from './ui/mapview';
 import { applyRide, clearProfile, levelFor, loadProfile, loadSettings, newProfile, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { setSound, unlockAudio } from './audio';
 import { icons } from './ui/icons';
@@ -181,59 +184,20 @@ function chooseBike(draft: Profile) {
 
 // ---------- gameplay ----------
 
-/** Heading-up mini map of the real campus road around the rider. */
-function miniMap(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext('2d')!;
-  const { outline, landmarks, finish } = game.map;
-  const R = canvas.width / 2;
-  const k = R / 260; // shows about 260 m around the rider
-  return (pos: [number, number], yaw: number) => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(R, R, R - 2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(11, 21, 48, 0.72)';
-    ctx.fill();
-    ctx.clip();
-    ctx.translate(R, R + R * 0.25);
-    ctx.rotate(yaw);
-    ctx.scale(k, k);
-    ctx.translate(-pos[0], -pos[1]);
-    ctx.lineJoin = ctx.lineCap = 'round';
-    ctx.beginPath();
-    outline.forEach(([x, z], i) => (i ? ctx.lineTo(x, z) : ctx.moveTo(x, z)));
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.lineWidth = 7 / k;
-    ctx.stroke();
-    for (const l of landmarks) {
-      ctx.beginPath();
-      ctx.arc(l.x, l.z, (l.place.kind === 'hall' || l.place.kind === 'landmark' ? 7 : 4.5) / k, 0, Math.PI * 2);
-      ctx.fillStyle = l.place.kind === 'hall' ? '#f5c518' : l.place.kind === 'landmark' ? '#ff7a59' : '#5ec8ff';
-      ctx.fill();
-    }
-    ctx.beginPath();
-    ctx.arc(finish.x, finish.z, 9 / k, 0, Math.PI * 2);
-    ctx.fillStyle = '#22c55e';
-    ctx.fill();
-    ctx.restore();
-    // rider arrow, always pointing up
-    ctx.save();
-    ctx.translate(R, R + R * 0.25);
-    ctx.beginPath();
-    ctx.moveTo(0, -14); ctx.lineTo(10, 10); ctx.lineTo(0, 4); ctx.lineTo(-10, 10); ctx.closePath();
-    ctx.fillStyle = '#f5c518';
-    ctx.strokeStyle = '#0b1530';
-    ctx.lineWidth = 3;
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  };
-}
+const ARROW: Record<Turn, string> = {
+  start: '↑', straight: '↑', 'slight-left': '↖', 'slight-right': '↗', left: '←', right: '→', 'sharp-left': '↙', 'sharp-right': '↘', arrive: '◎',
+};
+const dm = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.max(10, Math.round(m / 10) * 10)} m`);
+const mins = (s: number) => `${Math.max(1, Math.round(s / 60))} min`;
+const isExplore = (r: Route) => r.kind === 'explore';
+const routeKey = (r: Route) => (isExplore(r) ? `explore:${r.from.name}>${r.to.name}` : r.id);
+const finishReward = (r: Route) => (isExplore(r) ? 50 + Math.round(r.length / 20) : 250);
 
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
-function play(tutorial: boolean) {
+function play(tutorial: boolean, route: Route = CAMPUS_LOOP) {
   if (!profile) return;
+  if (game.currentRoute !== route) game.setRoute(route);
   applyLook();
   const bike = bikeById(profile.bike);
   render(`
@@ -244,13 +208,14 @@ function play(tutorial: boolean) {
         <div class="hud-pill"><small>DISTANCE</small><span id="dist">0.00</span> KM</div>
         <div class="hud-progress">
           <div class="xpbar"><div id="prog" style="width:0%"></div></div>
-          <p class="muted">${esc(CAMPUS_LOOP.name.toUpperCase())}</p>
+          <p class="muted">${esc((isExplore(route) ? `To ${route.to.name}` : route.name).toUpperCase())}</p>
         </div>
         <div class="row">
           <div class="hud-pill">${icons.coin} <span id="coins">0</span></div>
           <button class="pause-btn" id="pause" aria-label="Pause">${icons.pause}</button>
         </div>
       </div>
+      <div class="turn-banner" id="turn" hidden><span class="turn-arrow" id="turnArrow"></span><div><b id="turnDist"></b><span id="turnText"></span></div></div>
       <div class="prompt" id="prompt"></div>
       <div class="hud-bottom" style="position:relative">
         <div class="boost" id="boostWrap"><label>BOOST${isTouch ? '' : ' · B / SHIFT'}</label><div class="xpbar"><div id="boost" style="width:0%"></div></div></div>
@@ -268,7 +233,9 @@ function play(tutorial: boolean) {
   const prompt = $('prompt');
   const vignette = $('vignette');
   const boostBtn = app.querySelector<HTMLButtonElement>('#boostBtn');
-  const drawMap = miniMap(app.querySelector<HTMLCanvasElement>('#minimap')!);
+  const drawMap = miniMap(app.querySelector<HTMLCanvasElement>('#minimap')!, route);
+  const turn = $('turn'), turnArrow = $('turnArrow'), turnDist = $('turnDist'), turnText = $('turnText');
+  let lastTurn = '';
 
   // tutorial: teach through play, one move at a time
   const steps: { action: Action; text: string }[] = [
@@ -302,6 +269,18 @@ function play(tutorial: boolean) {
   game.onHud = (h: HudState) => {
     dist.textContent = km(h.distance);
     drawMap(h.pos, h.yaw);
+    turn.hidden = !h.next || !!h.countdown;
+    if (h.next) {
+      const key = h.next.turn + h.next.text;
+      if (key !== lastTurn) {
+        lastTurn = key;
+        turnArrow.textContent = ARROW[h.next.turn as Turn] ?? '↑';
+        turnText.textContent = h.next.text;
+        turn.classList.toggle('arrive', h.next.turn === 'arrive');
+      }
+      turnDist.textContent = h.next.dist < 25 ? 'Now' : dm(h.next.dist);
+      turn.classList.toggle('soon', h.next.dist < 60);
+    }
     prog.style.width = `${(h.distance / h.routeLength) * 100}%`;
     coins.textContent = String(h.coins);
     boost.style.width = `${h.boost * 100}%`;
@@ -321,9 +300,9 @@ function play(tutorial: boolean) {
 
   game.onEnd = (r) => {
     cleanup();
-    const result: RideResult = { routeId: CAMPUS_LOOP.id, ...r };
-    const rewards = applyRide(profile!, result);
-    results(result, rewards);
+    const result: RideResult = { routeId: routeKey(route), ...r };
+    const rewards = applyRide(profile!, result, finishReward(route));
+    results(result, rewards, route);
   };
 
   // controls
@@ -378,7 +357,7 @@ function play(tutorial: boolean) {
     ov.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => b.addEventListener('click', () => {
       const p = b.dataset.p;
       if (p === 'continue') resume();
-      if (p === 'restart') { cleanup(); play(false); }
+      if (p === 'restart') { cleanup(); play(false, route); }
       if (p === 'sound') {
         settings.sound = !settings.sound;
         setSound(settings.sound);
@@ -411,16 +390,18 @@ function play(tutorial: boolean) {
 
 // ---------- results ----------
 
-function results(r: RideResult, rw: RideRewards) {
+function results(r: RideResult, rw: RideRewards, route: Route) {
   const p = profile!;
   const levelUp = rw.levelAfter > rw.levelBefore;
-  const headline = r.finished ? 'Finish!' : 'Wiped out';
+  const explore = isExplore(route);
+  const headline = r.finished ? (explore ? 'You made it' : 'Finish!') : 'Wiped out';
   render(`
     <div class="screen scrim fade-in">
       <div class="grow"></div>
       <div class="wrap stack">
-        <p class="kicker">${esc(CAMPUS_LOOP.name)}</p>
+        <p class="kicker">${esc(route.name)}</p>
         <h1 class="title">${headline}</h1>
+        ${explore && r.finished ? `<p class="muted">You found your way to <b>${esc(route.to.name)}</b>. Here is the way you rode:</p>${stepsList(route)}` : ''}
         ${rw.newBestTime ? '<span class="badge gold">New personal best 🔥</span>' : rw.newBestScore ? '<span class="badge gold">New high score 🔥</span>' : ''}
         <div class="result-big">${km(r.distance)} <span style="font-size:0.4em">KM</span></div>
         ${r.finished ? `<p class="muted">Time ${clock(r.time)}</p>` : ''}
@@ -432,6 +413,7 @@ function results(r: RideResult, rw: RideRewards) {
         ${levelUp ? `<div class="levelup">🎉 Level up! You're now level ${rw.levelAfter}</div>` : ''}
         ${p.guest ? `<div class="card stack"><p><b>Save your progress</b></p><p class="muted small">Create your rider to pick your hall and keep your stats.</p><button class="btn btn-ghost" id="create">Create rider</button></div>` : ''}
         <button class="btn btn-primary" id="again">Ride again</button>
+        ${explore ? '<button class="btn btn-ghost" id="explore">Go somewhere else</button>' : ''}
         <button class="btn btn-ghost" id="home">Home</button>
       </div>
     </div>`);
@@ -446,7 +428,8 @@ function results(r: RideResult, rw: RideRewards) {
     };
     requestAnimationFrame(tick);
   });
-  on('#again', 'click', () => play(false));
+  on('#again', 'click', () => play(false, route));
+  on('#explore', 'click', () => explorePicker(route.to.name));
   on('#home', 'click', () => home());
   on('#create', 'click', () => createRider({ ...p, name: '' }, false));
 }
@@ -483,6 +466,7 @@ function home(next: Tab = 'home') {
   const hi = xpForLevel(level + 1);
   const hall = hallById(p.hall);
   const best = p.bestTimes[CAMPUS_LOOP.id];
+  const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">${icons.ride} EXPLORE CAMPUS</h3><span class="grow"></span><span class="badge gold">New</span></div><p class="muted small" style="margin-top:4px">New on campus? Pick where you are and where you need to be, then ride the real way there with directions.</p></button>`;
 
   const views: Record<Tab, string> = {
     home: `
@@ -504,6 +488,7 @@ function home(next: Tab = 'home') {
           <div><div class="big">RIDE</div><div class="sub">Quick Ride · ${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</div></div>
           ${icons.arrow}
         </button>
+        ${exploreCard}
         <div class="two">
           <button class="card mini" data-tab="race" style="text-align:left"><h3>Race</h3><p class="muted small">Compete with others</p><span class="badge" style="margin-top:8px">Soon</span></button>
           <button class="card mini" style="text-align:left" data-tab="events"><h3>Together</h3><p class="muted small">Ride with someone</p><span class="badge" style="margin-top:8px">Soon</span></button>
@@ -517,12 +502,16 @@ function home(next: Tab = 'home') {
         <button class="ride-cta" id="ride">
           <div><div class="big" style="font-size:26px">QUICK RIDE</div><div class="sub">Start immediately</div></div>${icons.arrow}
         </button>
-        <div class="card locked"><div class="row"><h3 style="font-weight:800">FREE RIDE</h3><span class="grow"></span><span class="badge">Phase 2</span></div><p class="muted small">Explore the campus with no score pressure.</p></div>
+        ${exploreCard}
         <p class="kicker" style="margin-top:8px">Routes</p>
-        ${ROUTES.map((r) => `
-          <div class="card ${r.available ? 'selectable' : 'locked'}" ${r.available ? 'id="routeCard"' : ''}>
-            <div class="row"><h3 style="font-weight:800">${esc(r.name.toUpperCase())}</h3><span class="grow"></span>${r.available ? `<span class="badge gold">${r.reward} ${icons.coin}</span>` : '<span class="badge">Phase 2</span>'}</div>
-            <p class="muted small" style="margin-top:4px">${(r.length / 1000).toFixed(1)} km · Difficulty ${'★'.repeat(r.difficulty)}${'☆'.repeat(5 - r.difficulty)}${r.available && p.bestTimes[r.id] ? ` · Best ${clock(p.bestTimes[r.id])}` : ''}</p>
+        <div class="card selectable" id="routeCard">
+          <div class="row"><h3 style="font-weight:800">${esc(CAMPUS_LOOP.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div>
+          <p class="muted small" style="margin-top:4px">${(CAMPUS_LOOP.length / 1000).toFixed(1)} km · Difficulty ${'★'.repeat(CAMPUS_LOOP.difficulty)}${'☆'.repeat(5 - CAMPUS_LOOP.difficulty)}${best ? ` · Best ${clock(best)}` : ''}</p>
+        </div>
+        ${UPCOMING_ROUTES.map((r) => `
+          <div class="card locked">
+            <div class="row"><h3 style="font-weight:800">${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge">Phase 2</span></div>
+            <p class="muted small" style="margin-top:4px">${(r.length / 1000).toFixed(1)} km · Difficulty ${'★'.repeat(r.difficulty)}${'☆'.repeat(5 - r.difficulty)}</p>
           </div>`).join('')}
       </div>`,
     race: `
@@ -575,6 +564,7 @@ function home(next: Tab = 'home') {
   on('[data-tab]', 'click', (_, el) => home(el.dataset.tab as Tab));
   on('#ride', 'click', () => play(false));
   on('#routeCard', 'click', () => play(false));
+  on('#exploreBtn', 'click', () => explorePicker());
   on('#edit', 'click', () => createRider({ ...p }, !p.guest));
   on('#install', 'click', async () => {
     await installPrompt?.prompt();
@@ -591,6 +581,77 @@ function home(next: Tab = 'home') {
     profile = null;
     welcome();
   });
+}
+
+// ---------- explore ----------
+
+const PLACE_NAMES = [...new Set(PLACES.map((p) => p.name))].sort((a, b) => a.localeCompare(b));
+const POPULAR = ['School of Law', 'Pent Hostel Block A', 'The Balme Library', 'Great Hall', 'Night Market', 'James Quartey Building, JQB', 'University of Ghana Hospital', 'Legon Main Entrance'];
+
+function stepsList(route: Route) {
+  return `<ol class="steps">${route.steps.map((s, i) => `
+    <li class="${s.turn === 'arrive' ? 'arrive' : ''}"><span class="turn-arrow">${ARROW[s.turn]}</span><span class="grow">${esc(s.text)}</span>${i < route.steps.length - 1 ? `<small class="muted">${dm(route.steps[i + 1].d - s.d)}</small>` : ''}</li>`).join('')}</ol>`;
+}
+
+function explorePicker(fromName?: string, toName = '') {
+  if (!profile) return welcome();
+  const p = profile;
+  fromName ??= HALL_PLACE[p.hall] ?? 'Legon Main Entrance';
+  render(`
+    <div class="screen scrim fade-in">
+      <div class="wrap stack explore">
+        <button class="btn btn-link back" id="back">← Back</button>
+        <p class="kicker">Explore campus</p>
+        <h1 class="title">Find your way</h1>
+        <p class="muted">Pick where you are and where you need to be. You'll ride the real shortest way on campus roads, with directions as you go.</p>
+        <datalist id="places">${PLACE_NAMES.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+        <div class="field"><label for="from">From</label><input id="from" list="places" autocomplete="off" value="${esc(fromName)}" placeholder="Your hall, a faculty, a landmark…"></div>
+        <button class="btn btn-link swap" id="swap" aria-label="Swap from and to">⇅ Swap</button>
+        <div class="field"><label for="to">To</label><input id="to" list="places" autocomplete="off" value="${esc(toName)}" placeholder="Where do you need to be?"></div>
+        <div class="chips">${POPULAR.filter((n) => placeByName(n)).map((n) => `<button class="chip" data-to="${esc(n)}">${esc(n)}</button>`).join('')}</div>
+        <div id="preview" class="stack"></div>
+        <p class="muted small">${esc(ATTRIBUTION)}</p>
+      </div>
+    </div>`);
+  const from = app.querySelector<HTMLInputElement>('#from')!;
+  const to = app.querySelector<HTMLInputElement>('#to')!;
+  const preview = app.querySelector<HTMLElement>('#preview')!;
+  let route: Route | null = null;
+  const update = () => {
+    const a = placeByName(from.value.trim()), b = placeByName(to.value.trim());
+    route = null;
+    if (!a || !b) {
+      preview.innerHTML = to.value.trim() || from.value.trim() !== fromName ? `<p class="muted small">Choose both places from the list.</p>` : '';
+      return;
+    }
+    if (a === b) {
+      preview.innerHTML = `<p class="muted small">You're already there. Pick a different destination.</p>`;
+      return;
+    }
+    route = exploreRoute(a, b);
+    if (!route) {
+      preview.innerHTML = `<p class="muted small">No road connects those two places on the map yet.</p>`;
+      return;
+    }
+    preview.innerHTML = `
+      <canvas class="route-map" width="720" height="440" aria-label="Map of the way from ${esc(a.name)} to ${esc(b.name)}"></canvas>
+      <div class="stats three">
+        <div class="stat"><b>${dm(route.length)}</b><span>Distance</span></div>
+        <div class="stat"><b>${mins(route.length / 1.3)}</b><span>Walking</span></div>
+        <div class="stat"><b>${mins(route.length / 4.5)}</b><span>Cycling</span></div>
+      </div>
+      <button class="btn btn-primary" id="go">Ride there</button>
+      <p class="kicker" style="margin-top:6px">Directions</p>
+      ${stepsList(route)}`;
+    routeMap(preview.querySelector('canvas')!, route);
+    preview.querySelector('#go')!.addEventListener('click', () => route && play(false, route));
+  };
+  from.addEventListener('input', update);
+  to.addEventListener('input', update);
+  on('[data-to]', 'click', (_, el) => { to.value = el.dataset.to!; update(); });
+  on('#swap', 'click', () => { [from.value, to.value] = [to.value, from.value]; update(); });
+  on('#back', 'click', () => home());
+  update();
 }
 
 splash();

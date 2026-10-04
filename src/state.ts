@@ -1,5 +1,3 @@
-import { CAMPUS_LOOP } from './data/campus';
-
 export interface Profile {
   name: string;
   username: string;
@@ -101,8 +99,9 @@ export interface RideRewards {
   levelAfter: number;
 }
 
-export function applyRide(p: Profile, r: RideResult): RideRewards {
-  const finishBonus = r.finished ? CAMPUS_LOOP.reward : 0;
+/** reward is the coin bonus for reaching the finish */
+export function applyRide(p: Profile, r: RideResult, reward = 250): RideRewards {
+  const finishBonus = r.finished ? reward : 0;
   const score = Math.round(r.distance + r.coins * 10 + (r.finished ? 500 : 0));
   const coins = r.coins + finishBonus;
   const xp = Math.round(r.distance / 10 + r.coins + (r.finished ? 200 : 0));

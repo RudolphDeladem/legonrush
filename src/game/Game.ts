@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { CAMPUS_LOOP, LEAD, type BikeSpec, type Route } from '../data/campus';
+import type { BikeSpec } from '../data/campus';
+import { CAMPUS_LOOP, type Route, type RideStep } from './routes';
 import { sfx } from '../audio';
 import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderRig } from './models';
 import type { Track } from './track';
-import { buildSky, buildWorld, LANES, type PlacedLandmark } from './world';
+import { buildCampus, buildRouteLayer, buildSky, disposeLayer, LANES } from './world';
 
 export type Action = 'left' | 'right' | 'jump' | 'boost';
 
@@ -19,6 +20,8 @@ export interface HudState {
   /** rider position on the map (metres, +x east, -z north) and heading */
   pos: [number, number];
   yaw: number;
+  /** explore rides: the next direction and how far away it is */
+  next: { text: string; turn: string; dist: number } | null;
 }
 
 export interface RideEnd {
@@ -75,8 +78,8 @@ export class Game {
   private cine = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
   private rider: RiderRig;
   private route: Route = CAMPUS_LOOP;
-  private track: Track = CAMPUS_LOOP.track!;
-  readonly landmarks: PlacedLandmark[];
+  private track: Track = CAMPUS_LOOP.track;
+  private routeLayer: THREE.Group | null = null;
   private timer = new THREE.Timer();
 
   private phase: Phase = 'showcase';
@@ -143,9 +146,8 @@ export class Game {
     this.sun.shadow.bias = -0.0005;
     this.scene.add(this.sun, this.sun.target);
 
-    const world = buildWorld(this.route);
-    this.scene.add(world.group);
-    this.landmarks = world.landmarks;
+    this.scene.add(buildCampus());
+    this.setRoute(CAMPUS_LOOP);
     this.scene.add(this.dynamic);
 
     this.rider = buildRider('#d64545', '#f2c230');
@@ -156,9 +158,37 @@ export class Game {
     this.renderer.setAnimationLoop(() => this.frame());
   }
 
-  /** Road outline and labelled buildings, for the mini map. */
-  get map() {
-    return { outline: this.track.outline(8), landmarks: this.landmarks, start: this.pose(0), finish: this.pose(this.route.length) };
+  get currentRoute() {
+    return this.route;
+  }
+
+  /** Swaps the ridden route; the campus itself stays. */
+  setRoute(route: Route) {
+    if (this.routeLayer) {
+      this.scene.remove(this.routeLayer);
+      disposeLayer(this.routeLayer);
+    }
+    this.route = route;
+    this.track = route.track;
+    this.routeLayer = buildRouteLayer(route.track, {
+      start: route.lead,
+      finish: route.lead + route.length,
+      startText: route.kind === 'explore' ? route.from.name : 'Start',
+      finishText: route.kind === 'explore' ? route.to.name : 'Finish',
+      labels: route.labels,
+      destination: route.to,
+    });
+    this.scene.add(this.routeLayer);
+    if (this.rider) this.reset(); // the constructor resets once the rider exists
+  }
+
+  /** Next direction ahead of the rider, for the explore HUD. */
+  private nextStep(): { step: RideStep; dist: number } | null {
+    for (const step of this.route.steps) {
+      if (step.turn === 'start') continue;
+      if (step.d > this.d - 3) return { step, dist: Math.max(0, step.d - this.d) };
+    }
+    return null;
   }
 
   setLook(jersey: string, bikeColor: string) {
@@ -270,9 +300,9 @@ export class Game {
     this.rider.body.position.set(0, 0, 0);
   }
 
-  /** Road frame at ride distance d (the start line is LEAD metres into the track). */
+  /** Road frame at ride distance d (the start line is `lead` metres into the track). */
   private pose(d: number, x = 0) {
-    return this.track.pose(d + LEAD, x);
+    return this.track.pose(d + this.route.lead, x);
   }
 
   /** Puts an object on the road at ride distance d, lateral x, facing along the road. */
@@ -397,6 +427,7 @@ export class Game {
       countdown,
       pos: [this.rider.root.position.x, this.rider.root.position.z],
       yaw: this.rider.root.rotation.y,
+      next: this.route.kind === 'explore' ? (() => { const n = this.nextStep(); return n && { text: n.step.text, turn: n.step.turn, dist: n.dist }; })() : null,
     });
   }
 
@@ -406,7 +437,8 @@ export class Game {
     while (!this.holdSpawns && this.nextSpawn < this.d + 230 && this.nextSpawn < this.route.length - 50) {
       this.spawnRow(this.nextSpawn);
       const progress = this.nextSpawn / this.route.length;
-      const gap = THREE.MathUtils.lerp(42, 24, Math.min(1, progress * 1.4));
+      // explore rides are about finding the way, so traffic is lighter
+      const gap = THREE.MathUtils.lerp(42, 24, Math.min(1, progress * 1.4)) * (this.route.kind === 'explore' ? 1.8 : 1);
       this.nextSpawn += gap * (0.8 + Math.random() * 0.45);
     }
   }
@@ -414,7 +446,9 @@ export class Game {
   private spawnRow(d: number) {
     const progress = d / this.route.length;
     const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
-    const highKinds: ObstacleKind[] = ['car', 'car', 'trotro', 'pedestrian'];
+    // no cars or trotros on footpaths
+    const footpath = this.route.classAt(d) === 4;
+    const highKinds: ObstacleKind[] = footpath ? ['pedestrian'] : ['car', 'car', 'trotro', 'pedestrian'];
     const high = () => highKinds[(Math.random() * highKinds.length) | 0];
     const r = Math.random();
 
@@ -491,7 +525,8 @@ export class Game {
         o.fling = new THREE.Vector3(p.tx * 12 + p.nx * side, 6, p.tz * 12 + p.nz * side);
         this.shake = 0.3;
         sfx.bump();
-      } else if (o.spec.hazard) {
+      } else if (o.spec.hazard || this.route.kind === 'explore') {
+        // explore rides never end in a crash, they just slow you down
         this.slowTimer = 1.2;
         this.shake = 0.35;
         sfx.bump();

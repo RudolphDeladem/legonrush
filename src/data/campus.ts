@@ -1,7 +1,5 @@
-// Campus data. Building positions are real (see ugmap.ts); buildings are still
-// boxes with labels until proper models exist.
-import { Track } from '../game/track';
-import { CAMPUS_LOOP_PATH, PLACES, toLocal, type Place } from './ugmap';
+// Halls and bikes. The campus itself (roads, buildings, places) comes from
+// OpenStreetMap: see game/campusmap.ts.
 
 export interface Hall {
   id: string;
@@ -27,40 +25,18 @@ export const HALLS: Hall[] = [
 
 export const hallById = (id: string) => HALLS.find((h) => h.id === id) ?? HALLS[HALLS.length - 1];
 
-export interface Route {
-  id: string;
-  name: string;
-  /** rideable length in metres, start line to finish line */
-  length: number;
-  difficulty: number;
-  reward: number;
-  available: boolean;
-  /** road centreline; the start line sits LEAD metres in so there is scenery behind the rider */
-  track?: Track;
-  places?: Place[];
-}
-
-/** metres of road before the start line and after the finish line */
-export const LEAD = 60;
-
-const loopTrack = new Track(CAMPUS_LOOP_PATH.map(([lat, lng]) => toLocal(lat, lng)));
-
-export const CAMPUS_LOOP: Route = {
-  id: 'campus-loop-2',
-  name: 'Campus Loop',
-  length: Math.round(loopTrack.length - LEAD * 2),
-  difficulty: 2,
-  reward: 250,
-  available: true,
-  track: loopTrack,
-  places: PLACES,
+/** Hall id to its place on the real campus map (see game/campusmap.ts). */
+export const HALL_PLACE: Record<string, string> = {
+  legon: 'Legon Hall', akuafo: 'Akuafo Hall Main', commonwealth: 'Commonwealth Hall', volta: 'Volta Hall',
+  sarbah: 'Mensah Sarbah Hall', 'jean-nelson': 'Jean Nelson Aka Hall', kwapong: 'Alexander Kwapong Hall',
+  sey: 'Elizabeth Frances Sey Hall', limann: 'Dr. Hilla Limann Hall',
 };
 
-export const ROUTES: Route[] = [
-  CAMPUS_LOOP,
-  { id: 'engineering-run', name: 'Engineering Run', length: 3600, difficulty: 3, reward: 350, available: false },
-  { id: 'sunset-route', name: 'Sunset Route', length: 4200, difficulty: 3, reward: 450, available: false },
-  { id: 'night-circuit', name: 'Night Circuit', length: 3100, difficulty: 4, reward: 400, available: false },
+/** Routes that are not rideable yet, shown as locked cards. */
+export const UPCOMING_ROUTES = [
+  { name: 'Engineering Run', length: 3600, difficulty: 3 },
+  { name: 'Sunset Route', length: 4200, difficulty: 3 },
+  { name: 'Night Circuit', length: 3100, difficulty: 4 },
 ];
 
 export interface BikeSpec {

@@ -1,4 +1,4 @@
-// A smooth road centreline built from map waypoints, sampled every metre so any
+// A road centreline built from map points with rounded corners, sampled every metre so any
 // distance along the route maps straight to a position and heading.
 
 export interface Pose {
@@ -24,24 +24,49 @@ export class Track {
   private grid = new Map<string, number[]>();
   private static readonly CELL = 24;
 
-  constructor(waypoints: [number, number][], smoothing = 4) {
-    // Chaikin corner cutting rounds every corner, then resample at even spacing
-    let pts = waypoints.map(([x, z]) => [x, z] as [number, number]);
-    for (let k = 0; k < smoothing; k++) {
-      const out: [number, number][] = [pts[0]];
-      for (let i = 0; i < pts.length - 1; i++) {
-        const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
-        out.push([ax * 0.75 + bx * 0.25, az * 0.75 + bz * 0.25], [ax * 0.25 + bx * 0.75, az * 0.25 + bz * 0.75]);
+  /** per-sample tag (e.g. which map road it lies on), from the waypoint segment it came from */
+  private tags: Int32Array;
+
+  /**
+   * @param waypoints road centreline points
+   * @param segTags optional tag for each segment (waypoints[i] -> waypoints[i+1])
+   * @param radius corners are rounded with arcs of up to this radius, so the road keeps its real line
+   */
+  constructor(waypoints: [number, number][], segTags?: number[], radius = 14) {
+    // drop points closer than 1.5 m, they only add kinks
+    const wp: { p: [number, number]; tag: number }[] = [];
+    waypoints.forEach((p, i) => {
+      const last = wp[wp.length - 1];
+      if (last && Math.hypot(p[0] - last.p[0], p[1] - last.p[1]) < 1.5 && i < waypoints.length - 1) return;
+      wp.push({ p, tag: segTags?.[Math.min(i, segTags.length - 1)] ?? 0 });
+    });
+    const pts: [number, number][] = [wp[0].p];
+    const ptTags: number[] = [wp[0].tag];
+    for (let i = 1; i < wp.length - 1; i++) {
+      const [ax, az] = wp[i - 1].p, [bx, bz] = wp[i].p, [cx, cz] = wp[i + 1].p;
+      const l1 = Math.hypot(bx - ax, bz - az), l2 = Math.hypot(cx - bx, cz - bz);
+      const d1x = (bx - ax) / l1, d1z = (bz - az) / l1, d2x = (cx - bx) / l2, d2z = (cz - bz) / l2;
+      const turn = Math.acos(Math.max(-1, Math.min(1, d1x * d2x + d1z * d2z)));
+      if (turn < 0.03) { pts.push(wp[i].p); ptTags.push(wp[i].tag); continue; }
+      const t = Math.min(radius * Math.tan(turn / 2), l1 * 0.45, l2 * 0.45);
+      const p1: [number, number] = [bx - d1x * t, bz - d1z * t], p2: [number, number] = [bx + d2x * t, bz + d2z * t];
+      const k = Math.max(2, Math.ceil(turn * 6));
+      for (let s = 0; s <= k; s++) {
+        const u = s / k;
+        // quadratic Bezier p1 -> corner -> p2
+        pts.push([(1 - u) ** 2 * p1[0] + 2 * (1 - u) * u * bx + u * u * p2[0], (1 - u) ** 2 * p1[1] + 2 * (1 - u) * u * bz + u * u * p2[1]]);
+        ptTags.push(u < 0.5 ? wp[i - 1].tag : wp[i].tag);
       }
-      out.push(pts[pts.length - 1]);
-      pts = out;
     }
+    pts.push(wp[wp.length - 1].p);
+    ptTags.push(wp[wp.length - 1].tag);
     const cum = [0];
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
     const total = cum[cum.length - 1];
     const n = Math.floor(total / Track.STEP) + 1;
     this.xs = new Float32Array(n);
     this.zs = new Float32Array(n);
+    this.tags = new Int32Array(n);
     let j = 0;
     for (let i = 0; i < n; i++) {
       const d = i * Track.STEP;
@@ -49,6 +74,7 @@ export class Track {
       const t = (d - cum[j]) / (cum[j + 1] - cum[j] || 1);
       this.xs[i] = pts[j][0] + (pts[j + 1][0] - pts[j][0]) * t;
       this.zs[i] = pts[j][1] + (pts[j + 1][1] - pts[j][1]) * t;
+      this.tags[i] = ptTags[j];
     }
     this.length = (n - 1) * Track.STEP;
     for (let i = 0; i < n; i += 2) {
@@ -61,6 +87,11 @@ export class Track {
 
   private cellKey(x: number, z: number) {
     return `${Math.floor(x / Track.CELL)},${Math.floor(z / Track.CELL)}`;
+  }
+
+  /** Tag of the waypoint segment under distance d. */
+  tagAt(d: number) {
+    return this.tags[Math.max(0, Math.min(this.tags.length - 1, Math.round(d / Track.STEP)))];
   }
 
   /** Position and frame at distance d (extrapolates straight past either end). */
