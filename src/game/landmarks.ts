@@ -58,27 +58,41 @@ const clocks = (g: THREE.Group, size: number, half: number, y: number, tex: THRE
   }
 };
 
-/** Balme Library: the tiered, pagoda-like clock tower over the entrance. */
+/** Balme Library, from DELA's photos: stepped hip roofs rising to a slim clock tower and a red spire. */
 function balmeTower(tex: THREE.Texture) {
   const g = new THREE.Group();
-  g.add(box(7, 16, 7, white));
-  clocks(g, 1.8, 3.5, 13, tex);
-  g.add(hip(9, 2.2, 16));
-  g.add(box(5, 3, 5, white, 19.2));
-  g.add(hip(7, 2, 20.6));
-  g.add(box(3.2, 2.4, 3.2, white, 23.4));
-  g.add(hip(4.6, 3.4, 24.5));
+  g.add(box(14, 9, 12, white));
+  g.add(hip(17, 3.2, 9));
+  g.add(box(8, 3.5, 8, white, 12 + 1.75 - 0.5));
+  g.add(hip(10, 2.4, 14.6));
+  g.add(box(3, 6, 3, white, 19.5));
+  clocks(g, 1.15, 1.5, 19.8, tex);
+  g.add(hip(4.2, 1.4, 22.5));
+  g.add(box(1.6, 1.8, 1.6, white, 24.6));
+  const spire = new THREE.Mesh(new THREE.ConeGeometry(0.55, 3, 8), new THREE.MeshStandardMaterial({ color: '#b3262b', roughness: 0.6 }));
+  spire.position.y = 27;
+  g.add(spire);
   return g;
 }
 
-/** Great Hall: the tall clock tower on Legon hill. */
+/** Great Hall, from DELA's photo: a very tall, slim white tower with a clock near the top. */
 function greatHallTower(tex: THREE.Texture) {
   const g = new THREE.Group();
-  g.add(box(6, 30, 6, white));
-  for (const s of [-1, 1]) for (const t of [-1, 1]) g.add(at(box(0.7, 30, 0.7, cream), s * 3, 15, t * 3));
-  clocks(g, 2, 3, 26, tex);
-  g.add(box(7, 1, 7, cream, 30.5));
-  g.add(hip(6, 4, 31));
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 38, 12), white);
+  shaft.position.y = 19;
+  shaft.castShadow = true;
+  g.add(shaft);
+  // vertical window slits
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2;
+    const slit = at(box(0.5, 20, 0.2, dark), Math.sin(a) * 2.75, 18, Math.cos(a) * 2.75);
+    slit.rotation.y = a;
+    g.add(slit);
+  }
+  clocks(g, 1.6, 2.65, 34, tex);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.8, 2.4, 12), new THREE.MeshStandardMaterial({ color: '#8a3b22', roughness: 0.7 }));
+  cap.position.y = 39.2;
+  g.add(cap);
   return g;
 }
 
