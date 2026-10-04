@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { CAMPUS_LOOP, type BikeSpec, type Route } from '../data/campus';
+import { CAMPUS_LOOP, LEAD, type BikeSpec, type Route } from '../data/campus';
 import { sfx } from '../audio';
 import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderRig } from './models';
-import { buildSky, buildWorld, LANES } from './world';
+import type { Track } from './track';
+import { buildSky, buildWorld, LANES, type PlacedLandmark } from './world';
 
 export type Action = 'left' | 'right' | 'jump' | 'boost';
 
@@ -15,6 +16,9 @@ export interface HudState {
   boosting: boolean;
   speed: number;
   countdown: string | null;
+  /** rider position on the map (metres, +x east, -z north) and heading */
+  pos: [number, number];
+  yaw: number;
 }
 
 export interface RideEnd {
@@ -28,6 +32,8 @@ interface Obstacle {
   spec: ObstacleSpec;
   mesh: THREE.Object3D;
   lane: number;
+  /** lateral offset from the road centre */
+  x: number;
   d: number;
   vd: number;
   hit: boolean;
@@ -69,6 +75,8 @@ export class Game {
   private cine = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
   private rider: RiderRig;
   private route: Route = CAMPUS_LOOP;
+  private track: Track = CAMPUS_LOOP.track!;
+  readonly landmarks: PlacedLandmark[];
   private timer = new THREE.Timer();
 
   private phase: Phase = 'showcase';
@@ -135,7 +143,9 @@ export class Game {
     this.sun.shadow.bias = -0.0005;
     this.scene.add(this.sun, this.sun.target);
 
-    this.scene.add(buildWorld(this.route));
+    const world = buildWorld(this.route);
+    this.scene.add(world.group);
+    this.landmarks = world.landmarks;
     this.scene.add(this.dynamic);
 
     this.rider = buildRider('#d64545', '#f2c230');
@@ -144,6 +154,11 @@ export class Game {
     this.resize();
     addEventListener('resize', () => this.resize());
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  /** Road outline and labelled buildings, for the mini map. */
+  get map() {
+    return { outline: this.track.outline(8), landmarks: this.landmarks, start: this.pose(0), finish: this.pose(this.route.length) };
   }
 
   setLook(jersey: string, bikeColor: string) {
@@ -176,8 +191,11 @@ export class Game {
     this.d = d;
     this.lane = lane;
     this.x = LANES[lane];
-    this.cine.pos.set(this.x + cam[0], cam[1], -d + cam[2]);
-    this.cine.look.set(this.x + look[0], look[1], -d + look[2]);
+    const p = this.pose(d, this.x);
+    // offsets are in the rider's frame: x right, y up, z behind
+    const local = (o: [number, number, number]) => new THREE.Vector3(p.x + p.nx * o[0] - p.tx * o[2], o[1], p.z + p.nz * o[0] - p.tz * o[2]);
+    this.cine.pos.copy(local(cam));
+    this.cine.look.copy(local(look));
   }
 
   /** Places traffic and coins ahead of the rider for staged shots. */
@@ -250,6 +268,18 @@ export class Game {
     this.paused = false;
     this.rider.body.rotation.set(0, 0, 0);
     this.rider.body.position.set(0, 0, 0);
+  }
+
+  /** Road frame at ride distance d (the start line is LEAD metres into the track). */
+  private pose(d: number, x = 0) {
+    return this.track.pose(d + LEAD, x);
+  }
+
+  /** Puts an object on the road at ride distance d, lateral x, facing along the road. */
+  private place(obj: THREE.Object3D, d: number, x: number, y = 0, yaw = 0) {
+    const p = this.pose(d, x);
+    obj.position.set(p.x, y, p.z);
+    obj.rotation.y = p.yaw + yaw;
   }
 
   private resize() {
@@ -365,6 +395,8 @@ export class Game {
       boosting: this.boostTime > 0,
       speed: this.speed,
       countdown,
+      pos: [this.rider.root.position.x, this.rider.root.position.z],
+      yaw: this.rider.root.rotation.y,
     });
   }
 
@@ -411,11 +443,11 @@ export class Game {
     const mesh = buildObstacle(kind);
     // some cars are moving with traffic
     const vd = kind === 'car' && Math.random() < 0.4 ? 5 + Math.random() * 3 : 0;
-    if (kind === 'pedestrian') mesh.rotation.y = (Math.random() - 0.5) * Math.PI;
-    if (kind === 'pothole') mesh.rotation.y = Math.random() * Math.PI;
-    mesh.position.set(LANES[lane] + (kind === 'pothole' || kind === 'pedestrian' ? (Math.random() - 0.5) * 0.6 : 0), 0, -d);
+    const yaw = kind === 'pedestrian' ? (Math.random() - 0.5) * Math.PI : kind === 'pothole' ? Math.random() * Math.PI : 0;
+    const x = LANES[lane] + (kind === 'pothole' || kind === 'pedestrian' ? (Math.random() - 0.5) * 0.6 : 0);
+    this.place(mesh, d, x, 0, yaw);
     this.dynamic.add(mesh);
-    this.obstacles.push({ spec, mesh, lane, d, vd, hit: false });
+    this.obstacles.push({ spec, mesh, lane, x, d, vd, hit: false });
   }
 
   private addCoinLine(lane: number, d: number, n: number) {
@@ -436,7 +468,7 @@ export class Game {
   private addCoin(x: number, y: number, d: number) {
     if (d > this.route.length - 20) return;
     const mesh = buildCoin();
-    mesh.position.set(x, y, -d);
+    this.place(mesh, d, x, y);
     this.dynamic.add(mesh);
     this.coinList.push({ mesh, x, y, d, taken: false, t: 0 });
   }
@@ -448,13 +480,15 @@ export class Game {
       if (o.hit) continue;
       const overlapD = Math.abs(o.d - this.d) < (o.spec.length + RIDER_LEN) / 2 * 0.85;
       if (!overlapD) continue;
-      const overlapX = Math.abs(o.mesh.position.x - this.x) < (o.spec.width + RIDER_W) / 2 * 0.8;
+      const overlapX = Math.abs(o.x - this.x) < (o.spec.width + RIDER_W) / 2 * 0.8;
       if (!overlapX) continue;
       if (this.y > o.spec.clearHeight) continue;
       o.hit = true;
       if (this.boostTime > 0) {
         // boosting riders bulldoze through
-        o.fling = new THREE.Vector3((Math.random() - 0.5) * 8, 6, -12);
+        const p = this.pose(this.d);
+        const side = (Math.random() - 0.5) * 8;
+        o.fling = new THREE.Vector3(p.tx * 12 + p.nx * side, 6, p.tz * 12 + p.nz * side);
         this.shake = 0.3;
         sfx.bump();
       } else if (o.spec.hazard) {
@@ -489,7 +523,7 @@ export class Game {
         o.mesh.rotation.x += dt * 6;
       } else if (o.vd && !o.hit) {
         o.d += o.vd * dt;
-        o.mesh.position.z = -o.d;
+        this.place(o.mesh, o.d, o.x);
       }
       if (o.d < behind || o.mesh.position.y < -10) {
         this.dynamic.remove(o.mesh);
@@ -501,7 +535,8 @@ export class Game {
       c.mesh.rotation.y += dt * 3.5;
       if (c.taken) {
         c.t += dt;
-        c.mesh.position.set(this.x, this.y + 1.2 + c.t * 6, -this.d);
+        const p = this.pose(this.d, this.x);
+        c.mesh.position.set(p.x, this.y + 1.2 + c.t * 6, p.z);
         c.mesh.scale.setScalar(Math.max(0.01, 1 - c.t * 4));
       }
       if (c.d < behind || c.t > 0.25) {
@@ -516,7 +551,7 @@ export class Game {
 
   private animateRider(dt: number, speed: number) {
     const r = this.rider;
-    r.root.position.set(this.x, this.y, -this.d);
+    this.place(r.root, this.d, this.x, this.y);
     const wheelSpin = (speed / 0.38) * dt;
     for (const w of r.wheels) w.rotation.x -= wheelSpin;
     r.crank.rotation.x = -this.crank;
@@ -538,19 +573,22 @@ export class Game {
       cam.lookAt(this.cine.look);
     } else if (this.phase === 'showcase') {
       const a = this.orbit;
-      cam.position.set(Math.sin(a) * 5.5, 2.1, Math.cos(a) * 5.5 - this.d);
-      cam.lookAt(0, 0.9, -this.d);
+      const p = this.pose(this.d);
+      cam.position.set(p.x + Math.sin(a) * 5.5, 2.1, p.z + Math.cos(a) * 5.5);
+      cam.lookAt(p.x, 0.9, p.z);
     } else {
       const boosting = this.boostTime > 0;
       const back = boosting ? 7.2 : 6.2;
-      const target = new THREE.Vector3(this.x * 0.6, 3.1 + this.y * 0.4, -this.d + back);
+      const behind = this.pose(this.d - back, this.x * 0.6);
+      const target = new THREE.Vector3(behind.x, 3.1 + this.y * 0.4, behind.z);
       cam.position.lerp(target, Math.min(1, dt * 8));
       if (this.shake > 0) {
         cam.position.x += (Math.random() - 0.5) * this.shake;
         cam.position.y += (Math.random() - 0.5) * this.shake;
         this.shake = Math.max(0, this.shake - dt);
       }
-      cam.lookAt(this.x * 0.8, 1.1, -this.d - 12);
+      const ahead = this.pose(this.d + 12, this.x * 0.8);
+      cam.lookAt(ahead.x, 1.1, ahead.z);
       const fovBase = innerWidth < innerHeight ? 72 : 60;
       const fov = fovBase + (boosting ? 10 : 0) + this.speed * 0.15;
       cam.fov += (fov - cam.fov) * Math.min(1, dt * 4);
@@ -558,8 +596,9 @@ export class Game {
     }
     this.sky.position.copy(cam.position);
     // shadows follow the rider
-    this.sun.position.set(this.x + this.sunOffset.x, this.sunOffset.y, -this.d + this.sunOffset.z);
-    this.sun.target.position.set(this.x, 0, -this.d - 10);
+    const here = this.rider.root.position;
+    this.sun.position.set(here.x + this.sunOffset.x, this.sunOffset.y, here.z + this.sunOffset.z);
+    this.sun.target.position.set(here.x, 0, here.z);
     this.renderer.render(this.scene, cam);
   }
 }

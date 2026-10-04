@@ -13,8 +13,9 @@ A browser-based 3D cycling game set on the University of Ghana, Legon campus, de
 
 - Splash → Welcome → Create Rider (name, username, hall) → Choose Starter Bike → tutorial first ride → Results → Home
 - Guest play (skip sign-up, create a rider later)
-- **Quick Ride on the Campus Loop (2.8 km)**: 3-lane arcade runner with cars, trotros, pedestrians, barriers and potholes, Rush Coins, a boost meter, score, distance, finish line and results
-- Campus landmarks as labelled boxes (Main Gate, Commonwealth Hall, Great Hall, Legon Hall, Balme Library, Akuafo Hall, JQB, Volta Hall, Mensah Sarbah Hall, Night Market, UGBS and the four newer halls)
+- **Quick Ride on the Campus Loop (3.3 km)**: 3-lane arcade runner with cars, trotros, pedestrians, barriers and potholes, Rush Coins, a boost meter, score, distance, finish line and results
+- A curving road through the real campus, from Valco Trust and Mensah Sarbah past Legon Hall, Commonwealth Hall and the Great Hall, then east past Volta Hall, Balme Library and JQB to the School of Law, with a heading-up mini map
+- 24 real buildings as labelled boxes at their real positions, plus unlabelled blocks for the rest of the campus
 - Real halls of residence to represent; jersey colour follows your hall
 - Home hub, Ride, Race (coming soon), Events (coming soon) and You (profile + stats)
 - Progress, coins, XP and levels saved on the device
@@ -68,9 +69,9 @@ public/shots/        in-game screenshots (marketing renders)
 scripts/             brand-assets.mjs (logo -> icons), landing-photos.mjs (photos -> WebP), landing-art.mjs (SVG illustrations), marketing-shots.mjs (game renders); the PNG ones need Playwright
 ```
 
-## Refining the campus map
+## The campus map
 
-Landmark positions in `src/data/campus.ts` are placeholders on one straight road. The next step is tracing the real road layout and building footprints from Google Maps or OpenStreetMap and replacing the boxes one landmark at a time.
+Building positions come from the [UG Campus Map](https://enkayyy97.github.io/ug-campus-map/) by enkayyy97 and live in `src/data/ugmap.ts` (latitude and longitude, projected to metres around Balme Library). The route is a list of waypoints between those buildings (`CAMPUS_LOOP_PATH`); `src/game/track.ts` smooths it into a road and everything in the world is placed by distance along it. That map has no road data, so the road between buildings is approximate. Next step: trace the real roads from OpenStreetMap and swap the waypoints.
 
 ## Roadmap (from the product spec)
 

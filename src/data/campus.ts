@@ -1,6 +1,7 @@
-// Campus data for the prototype. Positions are approximate placeholders:
-// landmarks are boxes placed along one straight route until the layout is
-// traced from Google Maps.
+// Campus data. Building positions are real (see ugmap.ts); buildings are still
+// boxes with labels until proper models exist.
+import { Track } from '../game/track';
+import { CAMPUS_LOOP_PATH, PLACES, toLocal, type Place } from './ugmap';
 
 export interface Hall {
   id: string;
@@ -26,62 +27,40 @@ export const HALLS: Hall[] = [
 
 export const hallById = (id: string) => HALLS.find((h) => h.id === id) ?? HALLS[HALLS.length - 1];
 
-export type LandmarkKind = 'hall' | 'academic' | 'landmark' | 'gate';
-
-export interface Landmark {
-  name: string;
-  kind: LandmarkKind;
-  /** metres from the start of the route */
-  at: number;
-  /** -1 = left of the road, 1 = right */
-  side: -1 | 1;
-  /** width (along road), height, depth (away from road) in metres */
-  size: [number, number, number];
-  /** distance of the near face from the road centre */
-  setback?: number;
-}
-
 export interface Route {
   id: string;
   name: string;
+  /** rideable length in metres, start line to finish line */
   length: number;
   difficulty: number;
   reward: number;
   available: boolean;
-  landmarks: Landmark[];
+  /** road centreline; the start line sits LEAD metres in so there is scenery behind the rider */
+  track?: Track;
+  places?: Place[];
 }
 
+/** metres of road before the start line and after the finish line */
+export const LEAD = 60;
+
+const loopTrack = new Track(CAMPUS_LOOP_PATH.map(([lat, lng]) => toLocal(lat, lng)));
+
 export const CAMPUS_LOOP: Route = {
-  id: 'campus-loop',
+  id: 'campus-loop-2',
   name: 'Campus Loop',
-  length: 2800,
+  length: Math.round(loopTrack.length - LEAD * 2),
   difficulty: 2,
   reward: 250,
   available: true,
-  landmarks: [
-    { name: 'Main Gate', kind: 'gate', at: 40, side: 1, size: [0, 0, 0] },
-    { name: 'Commonwealth Hall', kind: 'hall', at: 220, side: -1, size: [70, 16, 34] },
-    { name: 'Great Hall', kind: 'landmark', at: 340, side: -1, size: [40, 22, 30], setback: 60 },
-    { name: 'Legon Hall', kind: 'hall', at: 520, side: 1, size: [80, 14, 40] },
-    { name: 'Balme Library', kind: 'academic', at: 760, side: -1, size: [46, 20, 30] },
-    { name: 'Akuafo Hall', kind: 'hall', at: 980, side: 1, size: [80, 12, 40] },
-    { name: 'JQB', kind: 'academic', at: 1220, side: -1, size: [60, 18, 26] },
-    { name: 'Volta Hall', kind: 'hall', at: 1450, side: 1, size: [60, 13, 32] },
-    { name: 'Mensah Sarbah Hall', kind: 'hall', at: 1700, side: -1, size: [80, 14, 40] },
-    { name: 'Night Market', kind: 'landmark', at: 1900, side: 1, size: [50, 5, 24] },
-    { name: 'UGBS', kind: 'academic', at: 2120, side: -1, size: [56, 18, 28] },
-    { name: 'Jean Nelson Aka Hall', kind: 'hall', at: 2340, side: 1, size: [44, 24, 30] },
-    { name: 'Alexander Kwapong Hall', kind: 'hall', at: 2420, side: -1, size: [44, 24, 30] },
-    { name: 'Elizabeth Frances Sey Hall', kind: 'hall', at: 2560, side: 1, size: [44, 24, 30] },
-    { name: 'Hilla Limann Hall', kind: 'hall', at: 2640, side: -1, size: [44, 24, 30] },
-  ],
+  track: loopTrack,
+  places: PLACES,
 };
 
 export const ROUTES: Route[] = [
   CAMPUS_LOOP,
-  { id: 'engineering-run', name: 'Engineering Run', length: 3600, difficulty: 3, reward: 350, available: false, landmarks: [] },
-  { id: 'sunset-route', name: 'Sunset Route', length: 4200, difficulty: 3, reward: 450, available: false, landmarks: [] },
-  { id: 'night-circuit', name: 'Night Circuit', length: 3100, difficulty: 4, reward: 400, available: false, landmarks: [] },
+  { id: 'engineering-run', name: 'Engineering Run', length: 3600, difficulty: 3, reward: 350, available: false },
+  { id: 'sunset-route', name: 'Sunset Route', length: 4200, difficulty: 3, reward: 450, available: false },
+  { id: 'night-circuit', name: 'Night Circuit', length: 3100, difficulty: 4, reward: 400, available: false },
 ];
 
 export interface BikeSpec {

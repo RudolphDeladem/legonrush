@@ -181,6 +181,55 @@ function chooseBike(draft: Profile) {
 
 // ---------- gameplay ----------
 
+/** Heading-up mini map of the real campus road around the rider. */
+function miniMap(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d')!;
+  const { outline, landmarks, finish } = game.map;
+  const R = canvas.width / 2;
+  const k = R / 260; // shows about 260 m around the rider
+  return (pos: [number, number], yaw: number) => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(R, R, R - 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(11, 21, 48, 0.72)';
+    ctx.fill();
+    ctx.clip();
+    ctx.translate(R, R + R * 0.25);
+    ctx.rotate(yaw);
+    ctx.scale(k, k);
+    ctx.translate(-pos[0], -pos[1]);
+    ctx.lineJoin = ctx.lineCap = 'round';
+    ctx.beginPath();
+    outline.forEach(([x, z], i) => (i ? ctx.lineTo(x, z) : ctx.moveTo(x, z)));
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 7 / k;
+    ctx.stroke();
+    for (const l of landmarks) {
+      ctx.beginPath();
+      ctx.arc(l.x, l.z, (l.place.kind === 'hall' || l.place.kind === 'landmark' ? 7 : 4.5) / k, 0, Math.PI * 2);
+      ctx.fillStyle = l.place.kind === 'hall' ? '#f5c518' : l.place.kind === 'landmark' ? '#ff7a59' : '#5ec8ff';
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(finish.x, finish.z, 9 / k, 0, Math.PI * 2);
+    ctx.fillStyle = '#22c55e';
+    ctx.fill();
+    ctx.restore();
+    // rider arrow, always pointing up
+    ctx.save();
+    ctx.translate(R, R + R * 0.25);
+    ctx.beginPath();
+    ctx.moveTo(0, -14); ctx.lineTo(10, 10); ctx.lineTo(0, 4); ctx.lineTo(-10, 10); ctx.closePath();
+    ctx.fillStyle = '#f5c518';
+    ctx.strokeStyle = '#0b1530';
+    ctx.lineWidth = 3;
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  };
+}
+
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function play(tutorial: boolean) {
@@ -207,6 +256,7 @@ function play(tutorial: boolean) {
         <div class="boost" id="boostWrap"><label>BOOST${isTouch ? '' : ' · B / SHIFT'}</label><div class="xpbar"><div id="boost" style="width:0%"></div></div></div>
         ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : ''}
       </div>
+      <canvas class="minimap" id="minimap" width="240" height="240" aria-hidden="true"></canvas>
     </div>`);
 
   const $ = (id: string) => app.querySelector<HTMLElement>('#' + id)!;
@@ -218,6 +268,7 @@ function play(tutorial: boolean) {
   const prompt = $('prompt');
   const vignette = $('vignette');
   const boostBtn = app.querySelector<HTMLButtonElement>('#boostBtn');
+  const drawMap = miniMap(app.querySelector<HTMLCanvasElement>('#minimap')!);
 
   // tutorial: teach through play, one move at a time
   const steps: { action: Action; text: string }[] = [
@@ -250,6 +301,7 @@ function play(tutorial: boolean) {
 
   game.onHud = (h: HudState) => {
     dist.textContent = km(h.distance);
+    drawMap(h.pos, h.yaw);
     prog.style.width = `${(h.distance / h.routeLength) * 100}%`;
     coins.textContent = String(h.coins);
     boost.style.width = `${h.boost * 100}%`;
