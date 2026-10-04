@@ -121,24 +121,43 @@ function mainGate(span: number) {
   return g;
 }
 
-/** Night Market: rows of stalls under bright canopies. */
+/** Night Market, after the 2024 refurbishment: about 80 shops in rows under long roofs, and an eating area. */
 function nightMarket() {
   const g = new THREE.Group();
-  const colors = ['#e53935', '#f5c518', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa'];
-  const canopy = colors.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, side: THREE.DoubleSide }));
-  for (let row = 0; row < 2; row++)
-    for (let i = 0; i < 6; i++) {
-      const stall = new THREE.Group();
-      stall.add(box(3, 1.1, 1.6, cream));
-      const top = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), canopy[(i + row * 3) % canopy.length]);
-      top.rotation.x = -Math.PI / 2 + 0.25;
-      top.position.y = 2.7;
-      stall.add(top);
-      for (const s of [-1, 1]) stall.add(at(box(0.12, 2.7, 0.12, dark), s * 1.6, 1.35, 1));
-      stall.position.set((i - 2.5) * 4.2, 0, row * 7 - 3.5);
-      stall.rotation.y = row ? Math.PI : 0;
-      g.add(stall);
+  const roofMat = new THREE.MeshStandardMaterial({ color: '#2f6f8f', roughness: 0.6, side: THREE.DoubleSide });
+  const shopColors = ['#e53935', '#f5c518', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 }));
+  // four rows of ten shops, back to back in pairs, with a walkway between the pairs
+  for (let row = 0; row < 4; row++) {
+    const z = (row - 1.5) * 7 + (row % 2 ? -1.6 : 1.6);
+    for (let i = 0; i < 10; i++) {
+      const shop = box(3.6, 3, 3, cream);
+      shop.position.set((i - 4.5) * 3.8, 1.5, z);
+      g.add(shop);
+      const front = box(3.2, 0.5, 0.1, shopColors[(i + row) % shopColors.length], 2.6);
+      front.position.set((i - 4.5) * 3.8, 2.6, z + (row % 2 ? -1.55 : 1.55));
+      g.add(front);
     }
+    if (row % 2) {
+      // one long roof over each back-to-back pair
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(40, 0.25, 9.5), roofMat);
+      roof.position.set(0, 3.4, z + 1.6);
+      roof.castShadow = true;
+      g.add(roof);
+    }
+  }
+  // eating area: tables and benches under a canopy
+  const area = new THREE.Group();
+  for (let i = 0; i < 4; i++)
+    for (let j = 0; j < 3; j++) {
+      area.add(at(box(1.8, 0.75, 0.9, dark), (i - 1.5) * 3.2, 0.375, (j - 1) * 2.6));
+      for (const s of [-1, 1]) area.add(at(box(1.8, 0.45, 0.35, cream), (i - 1.5) * 3.2, 0.225, (j - 1) * 2.6 + s * 0.8));
+    }
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(14, 0.2, 9), roofMat);
+  canopy.position.y = 3.6;
+  area.add(canopy);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) area.add(at(box(0.2, 3.6, 0.2, dark), sx * 6.8, 1.8, sz * 4.3));
+  area.position.set(0, 0, -21);
+  g.add(area);
   return g;
 }
 
