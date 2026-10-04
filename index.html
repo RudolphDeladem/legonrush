@@ -2,19 +2,292 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#0a1020" />
-    <meta name="description" content="LEGONRUSH: The Campus Lifestyle Reimagined. Ride. Race. Connect." />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#010e20" />
+    <title>LEGONRUSH · The Campus Lifestyle Reimagined</title>
+    <meta name="description" content="LEGONRUSH is a social 3D cycling game that turns the University of Ghana campus into a living playground. Ride. Race. Connect." />
+    <meta property="og:title" content="LEGONRUSH" />
+    <meta property="og:description" content="The Campus Lifestyle Reimagined. Ride. Race. Connect." />
+    <meta property="og:image" content="/brand/og.jpg" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/icons/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
-    <title>LEGONRUSH</title>
   </head>
   <body>
-    <canvas id="world"></canvas>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a href="/" class="brand" aria-label="LEGONRUSH home"><img src="/brand/wordmark.webp" alt="LEGONRUSH" width="200" height="23" /></a>
+        <nav class="links" id="links" aria-label="Main">
+          <a href="#about">About</a>
+          <a href="#experience">Experience</a>
+          <a href="#world">Campus</a>
+          <a href="#events">Events</a>
+          <a href="#halls">Halls</a>
+          <a href="#brands">Partners</a>
+        </nav>
+        <div class="actions">
+          <a class="btn btn-outline btn-sm hide-sm" href="/play/">Sign in</a>
+          <a class="btn btn-gold btn-sm" href="/play/">Get started <span aria-hidden="true">→</span></a>
+          <button class="menu" id="menu" aria-label="Open menu" aria-expanded="false" aria-controls="links"><span></span><span></span></button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- HERO -->
+      <section class="hero" id="top">
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">The campus</p>
+            <h1 class="display">Lifestyle <span class="gold">reimagined.</span></h1>
+            <p class="lead"><strong>Ride. Race. Connect.</strong></p>
+            <p class="body">A social 3D cycling experience that turns the University of Ghana campus into a living, interactive playground.</p>
+            <div class="cta-row">
+              <a class="btn btn-gold" href="/play/">Get started <span aria-hidden="true">→</span></a>
+              <a class="btn btn-ghost" href="#world"><span class="play-dot" aria-hidden="true">▶</span> See the campus</a>
+            </div>
+            <div class="devices" aria-label="Plays on mobile, tablet, laptop and desktop">
+              <span class="devices-label">Play on any device</span>
+              <ul>
+                <li><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>Mobile</li>
+                <li><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M11 18h2"/></svg>Tablet</li>
+                <li><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M2.5 19h19"/></svg>Laptop</li>
+                <li><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>Desktop</li>
+              </ul>
+            </div>
+          </div>
+          <div class="hero-media">
+            <img src="/shots/hero.jpg" alt="A rider in a gold jersey cycling past campus buildings in LEGONRUSH" width="1200" height="800" fetchpriority="high" />
+            <div class="route-card">
+              <p class="route-live"><span class="dot"></span>Now playable</p>
+              <dl>
+                <div><dt>2.8 km</dt><dd>Campus Loop</dd></div>
+                <div><dt>15</dt><dd>Landmarks</dd></div>
+                <div><dt>9</dt><dd>Halls</dd></div>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ABOUT -->
+      <section class="section" id="about">
+        <div class="container split">
+          <div class="stack">
+            <p class="eyebrow">About LEGONRUSH</p>
+            <h2 class="h2">What is <span class="gold">LEGONRUSH?</span></h2>
+            <p class="body">LEGONRUSH is a social 3D cycling game that turns campus into a living digital playground. Ride past familiar places, challenge other riders, compete for your hall, discover events and build your own campus identity.</p>
+            <p class="body">It runs in the browser on any phone or laptop and installs like an app. No download store needed.</p>
+            <a class="btn btn-gold btn-sm" href="#experience">Learn more <span aria-hidden="true">→</span></a>
+          </div>
+          <figure class="media-frame">
+            <img src="/shots/aerial.jpg" alt="Aerial view of the 3D campus with halls and the main road" width="1200" height="800" loading="lazy" />
+            <figcaption>In-game view of the Campus Loop</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- RIDE RACE CONNECT -->
+      <section class="section tight" id="experience">
+        <div class="container pillars">
+          <a class="pillar" href="/play/">
+            <img src="/shots/ride.jpg" alt="" loading="lazy" />
+            <div class="pillar-body">
+              <svg class="pillar-icon" viewBox="0 0 24 24"><circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/><path d="M6 16l4-8h5l3 8M10 8l2 8h-6M14 5h2"/></svg>
+              <h3>Ride</h3>
+              <p>Explore campus. Dodge traffic, collect Rush Coins and chase your next personal best.</p>
+              <span class="pillar-go" aria-hidden="true">→</span>
+            </div>
+          </a>
+          <div class="pillar">
+            <img src="/shots/race.jpg" alt="" loading="lazy" />
+            <div class="pillar-body">
+              <svg class="pillar-icon" viewBox="0 0 24 24"><path d="M5 21V4"/><path d="M5 4h12l-2 4 2 4H5"/></svg>
+              <h3>Race <span class="tag">Soon</span></h3>
+              <p>Challenge up to 10 riders in real time and climb the rankings.</p>
+            </div>
+          </div>
+          <div class="pillar">
+            <img src="/shots/connect.jpg" alt="" loading="lazy" />
+            <div class="pillar-body">
+              <svg class="pillar-icon" viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M2.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M10.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/></svg>
+              <h3>Connect <span class="tag">Soon</span></h3>
+              <p>Ride with friends, meet new people and experience campus together.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WORLD -->
+      <section class="section world" id="world">
+        <div class="container world-grid">
+          <div class="stack">
+            <p class="eyebrow">The world</p>
+            <h2 class="h2">Your campus.<br /><span class="gold">Your playground.</span></h2>
+            <p class="body">Ride past the places you walk every day, rebuilt as a game world you can race through.</p>
+            <ul class="checks">
+              <li>Real campus locations and halls</li>
+              <li>Cars, trotros, potholes and barriers to dodge</li>
+              <li>Day, sunset and night rides</li>
+              <li>Hidden routes and shortcuts <em>(coming)</em></li>
+            </ul>
+            <a class="btn btn-gold btn-sm" href="/play/">Explore the world <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="world-media">
+            <img src="/shots/lm-gate.jpg" alt="Riding toward the Main Gate on the Campus Loop" loading="lazy" />
+          </div>
+        </div>
+        <div class="container">
+          <ul class="landmarks">
+            <li><img src="/shots/lm-gate.jpg" alt="" loading="lazy" /><span>Main Gate</span></li>
+            <li><img src="/shots/lm-great-hall.jpg" alt="" loading="lazy" /><span>Great Hall</span></li>
+            <li><img src="/shots/lm-balme.jpg" alt="" loading="lazy" /><span>Balme Library</span></li>
+            <li><img src="/shots/lm-akuafo.jpg" alt="" loading="lazy" /><span>Akuafo Hall</span></li>
+            <li><img src="/shots/lm-jqb.jpg" alt="" loading="lazy" /><span>JQB</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- EVENTS -->
+      <section class="section" id="events">
+        <div class="container">
+          <div class="section-head">
+            <div>
+              <h2 class="h2">Something is <span class="gold">always</span> happening.</h2>
+              <p class="body">Live events, special challenges and campus-wide competitions are on the way.</p>
+            </div>
+          </div>
+          <div class="events">
+            <article class="event">
+              <div class="event-media"><img src="/shots/ev-sunset.jpg" alt="" loading="lazy" /><span class="status status-soon">Coming soon</span></div>
+              <div class="event-body">
+                <h3>Sunset Rush</h3>
+                <ul class="meta"><li>Golden-hour route</li><li>Exclusive sunset bike</li></ul>
+              </div>
+            </article>
+            <article class="event">
+              <div class="event-media"><img src="/shots/ev-night.jpg" alt="" loading="lazy" /><span class="status status-soon">Coming soon</span></div>
+              <div class="event-body">
+                <h3>Night Rush</h3>
+                <ul class="meta"><li>Night-time campus cycling</li><li>Neon bike kit</li></ul>
+              </div>
+            </article>
+            <article class="event">
+              <div class="event-media"><img src="/shots/ev-hall.jpg" alt="" loading="lazy" /><span class="status status-hall">Hall event</span></div>
+              <div class="event-body">
+                <h3>Hall Championship</h3>
+                <ul class="meta"><li>Ride for your hall</li><li>Hall points ×2</li></ul>
+              </div>
+            </article>
+            <aside class="live-panel">
+              <h3>Live campus</h3>
+              <p>When multiplayer opens, this is where you'll see who is riding, racing and joining events right now.</p>
+              <ul>
+                <li><b>Riders online</b><span>at launch</span></li>
+                <li><b>Races in progress</b><span>at launch</span></li>
+                <li><b>Events today</b><span>at launch</span></li>
+              </ul>
+              <a class="btn btn-light btn-sm" href="/play/">Ride now <span aria-hidden="true">→</span></a>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <!-- HALLS + GARAGE -->
+      <section class="section tight" id="halls">
+        <div class="container duo">
+          <div class="panel halls-panel">
+            <h2 class="h3">Who runs campus?</h2>
+            <p class="body small">Every ride will count. Represent your hall and take it to the top.</p>
+            <ul class="hall-list" id="hall-list"></ul>
+            <p class="muted small">Season 1 rankings open with multiplayer.</p>
+          </div>
+          <div class="panel garage-panel">
+            <img src="/shots/garage.jpg" alt="" loading="lazy" />
+            <div class="garage-copy">
+              <h2 class="h3">Make campus <span class="gold">yours.</span></h2>
+              <p class="body small">Build your rider. Earn Rush Coins. Unlock bikes, vehicles, outfits and titles.</p>
+              <ul class="garage-icons">
+                <li><svg viewBox="0 0 24 24"><circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/><path d="M6 16l4-8h5l3 8M10 8l2 8h-6"/></svg>Bikes</li>
+                <li><svg viewBox="0 0 24 24"><path d="M3 15l2-6h14l2 6v3H3z"/><circle cx="7" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/></svg>Cars</li>
+                <li><svg viewBox="0 0 24 24"><path d="M8 3l-5 4 3 3 2-1v12h8V9l2 1 3-3-5-4c-1 1.5-2.5 2-4 2s-3-.5-4-2z"/></svg>Outfits</li>
+                <li><svg viewBox="0 0 24 24"><path d="M4 14a8 8 0 0116 0v1H4z"/><path d="M12 6V4"/></svg>Helmets</li>
+              </ul>
+              <a class="btn btn-gold btn-sm" href="/play/">Explore the garage <span aria-hidden="true">→</span></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TOGETHER -->
+      <section class="section tight">
+        <div class="container together">
+          <div class="stack">
+            <h2 class="h2">Campus is better <span class="gold">together.</span></h2>
+            <p class="body">Connect with friends, meet new riders, join group rides and become part of a growing community. Social riding always needs both riders to say yes, with block, mute and report built in.</p>
+          </div>
+          <img src="/shots/connect.jpg" alt="A rider cycling at sunset" loading="lazy" />
+        </div>
+      </section>
+
+      <!-- BRANDS -->
+      <section class="section brands" id="brands">
+        <div class="container split">
+          <div class="stack">
+            <h2 class="h2">Brands belong in <span class="gold">the world.</span></h2>
+            <p class="body">LEGONRUSH gives brands a new way to be part of campus life: in-world billboards, sponsored routes and events, and virtual stores that sit inside the game instead of interrupting it.</p>
+            <a class="btn btn-gold btn-sm" href="#contact">Partner with us <span aria-hidden="true">→</span></a>
+          </div>
+          <figure class="media-frame">
+            <img src="/shots/brands.jpg" alt="A LEGONRUSH billboard beside the campus road" loading="lazy" />
+            <figcaption>In-world billboard slot</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- READY -->
+      <section class="ready">
+        <img class="ready-bg" src="/shots/ready.jpg" alt="" loading="lazy" />
+        <div class="container ready-grid">
+          <div class="stack">
+            <h2 class="display light">Ready to <span class="gold">ride?</span></h2>
+            <p class="lead light">Your campus is waiting.</p>
+            <div class="cta-row">
+              <a class="btn btn-gold" href="/play/">Get started <span aria-hidden="true">→</span></a>
+              <span class="small light-muted">Play on mobile, tablet, laptop or desktop</span>
+            </div>
+          </div>
+          <img class="ready-logo" src="/brand/logo.webp" alt="LEGONRUSH logo: a cyclist on a winding road toward a campus tower at sunrise" width="1200" height="800" loading="lazy" />
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer" id="contact">
+      <div class="container footer-grid">
+        <div class="stack">
+          <img src="/brand/wordmark.webp" alt="LEGONRUSH" width="200" height="23" />
+          <p class="light-muted small">The Campus Lifestyle Reimagined.</p>
+        </div>
+        <div>
+          <h4>Explore</h4>
+          <a href="#about">About</a><a href="#experience">Experience</a><a href="#events">Events</a><a href="#halls">Halls</a>
+        </div>
+        <div>
+          <h4>Game</h4>
+          <a href="/play/">Get started</a><a href="/play/">Play as guest</a><a href="#events">Leaderboards <em>(soon)</em></a>
+        </div>
+        <div>
+          <h4>Business</h4>
+          <a href="#brands">Advertising</a><span class="light-muted small">Partnership enquiries open soon.</span>
+        </div>
+      </div>
+      <div class="container footer-base">
+        <span>© 2026 LEGONRUSH. All rights reserved.</span>
+        <span>Built for the University of Ghana community.</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/landing/landing.ts"></script>
   </body>
 </html>

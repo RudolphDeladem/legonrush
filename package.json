@@ -7,13 +7,17 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host",
     "typecheck": "tsc",
-    "icons": "node scripts/make-icons.mjs"
+    "brand": "node scripts/brand-assets.mjs",
+    "shots": "node scripts/marketing-shots.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/sora": "^5.3.0",
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@types/node": "^26.6.4",
     "@types/three": "^0.186.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.2",

@@ -40,33 +40,40 @@ export function buildSky(top: string, bottom: string) {
 export function buildWorld(route: Route) {
   const group = new THREE.Group();
   const total = route.length + MARGIN * 2;
-  const zCenter = -(route.length / 2);
-  const rand = rng(7);
+    const rand = rng(7);
 
-  // ground
+  // Ground, road and kerbs are laid in 200 m tiles: one huge plane with a
+  // very large texture repeat loses UV precision on some mobile GPUs.
+  const TILE = 200;
+  const tiles = Math.ceil(total / TILE);
+  const tileZ = (k: number) => MARGIN - TILE / 2 - k * TILE;
+
   const grassTex = grassTexture();
-  grassTex.repeat.set(60, total / 8);
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(480, total), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
-  grass.rotation.x = -Math.PI / 2;
-  grass.position.set(0, -0.02, zCenter);
-  grass.receiveShadow = true;
-  group.add(grass);
+  grassTex.repeat.set(60, TILE / 8);
+  const grassMat = new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 });
+  const grassGeo = new THREE.PlaneGeometry(480, TILE).rotateX(-Math.PI / 2);
 
-  // road
   const roadTex = asphaltTexture();
-  roadTex.repeat.set(2, total / 8);
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, total), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92 }));
-  road.rotation.x = -Math.PI / 2;
-  road.position.set(0, 0, zCenter);
-  road.receiveShadow = true;
-  group.add(road);
+  roadTex.repeat.set(2, TILE / 8);
+  const roadMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92 });
+  const roadGeo = new THREE.PlaneGeometry(ROAD_HALF * 2, TILE).rotateX(-Math.PI / 2);
+
+  for (let k = 0; k < tiles; k++) {
+    const grass = new THREE.Mesh(grassGeo, grassMat);
+    grass.position.set(0, -0.02, tileZ(k));
+    grass.receiveShadow = true;
+    const road = new THREE.Mesh(roadGeo, roadMat);
+    road.position.set(0, 0, tileZ(k));
+    road.receiveShadow = true;
+    group.add(grass, road);
+  }
 
   // edge lines and lane dashes
   const white = new THREE.MeshStandardMaterial({ color: '#e9e6dc', roughness: 0.8 });
   for (const x of [-ROAD_HALF + 0.2, ROAD_HALF - 0.2]) {
     const line = new THREE.Mesh(new THREE.PlaneGeometry(0.14, total), white);
     line.rotation.x = -Math.PI / 2;
-    line.position.set(x, 0.005, zCenter);
+    line.position.set(x, 0.005, MARGIN - total / 2);
     group.add(line);
   }
   const dashCount = Math.floor(total / 9);
@@ -83,13 +90,16 @@ export function buildWorld(route: Route) {
 
   // kerbs / sidewalks
   const conc = concreteTexture();
-  conc.repeat.set(1, total / 2);
+  conc.repeat.set(1, TILE / 2);
   const walkMat = new THREE.MeshStandardMaterial({ map: conc, roughness: 0.95 });
-  for (const s of [-1, 1]) {
-    const walk = new THREE.Mesh(new THREE.BoxGeometry(2, 0.14, total), walkMat);
-    walk.position.set(s * (ROAD_HALF + 1), 0.07, zCenter);
-    walk.receiveShadow = true;
-    group.add(walk);
+  const walkGeo = new THREE.BoxGeometry(2, 0.14, TILE);
+  for (let k = 0; k < tiles; k++) {
+    for (const s of [-1, 1]) {
+      const walk = new THREE.Mesh(walkGeo, walkMat);
+      walk.position.set(s * (ROAD_HALF + 1), 0.07, tileZ(k));
+      walk.receiveShadow = true;
+      group.add(walk);
+    }
   }
 
   // keep trees and filler buildings out of landmark plots
@@ -171,9 +181,9 @@ export function buildWorld(route: Route) {
     group.add(block);
     const { tex, aspect } = labelTexture(l.name.toUpperCase(), KIND_ACCENT[l.kind]);
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, fog: true }));
-    const lh = 2.2;
+    const lh = 2.6;
     label.scale.set(lh * aspect, lh, 1);
-    label.position.set(l.side * (setback + d / 2), h + 3.2, -l.at);
+    label.position.set(l.side * (setback - 1), h + 2.4, -l.at);
     group.add(label);
   }
 

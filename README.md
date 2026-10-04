@@ -4,6 +4,11 @@
 
 A browser-based 3D cycling game set on the University of Ghana, Legon campus, delivered as an installable Progressive Web App (PWA). This repository holds the MVP prototype (phase 1 of the product spec).
 
+## Site
+
+- `/` is the landing page (DELA's design and logo)
+- `/play/` is the game; every "Get started" button leads there, and the installed app opens straight into it
+
 ## What's playable now
 
 - Splash → Welcome → Create Rider (name, username, hall) → Choose Starter Bike → tutorial first ride → Results → Home
@@ -35,6 +40,8 @@ npm run build      # typecheck + production build in dist/
 npm run preview    # serve the production build (PWA/service worker active)
 ```
 
+Deploys to Netlify from `main` using `netlify.toml` (build `npm run build`, publish `dist`).
+
 Requires Node 20+.
 
 ## Project layout
@@ -50,7 +57,13 @@ src/
   game/world.ts      road, trees, lamps, buildings, landmarks, billboards
   game/models.ts     rider, bike, vehicles, obstacles, coins
   game/textures.ts   procedural textures (no image downloads)
-public/icons/        app icons (regenerate with `npm run icons`, needs Playwright)
+  landing/            landing page script and styles
+index.html           landing page
+play/index.html      game page
+public/brand/        logo, wordmark and social image
+public/icons/        app icons cut from the logo
+public/shots/        in-game screenshots used on the landing page
+scripts/             brand-assets.mjs (logo -> icons) and marketing-shots.mjs (re-render screenshots); both need Playwright
 ```
 
 ## Refining the campus map

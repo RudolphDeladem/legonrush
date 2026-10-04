@@ -1,3 +1,7 @@
+import '@fontsource/sora/400.css';
+import '@fontsource/sora/600.css';
+import '@fontsource/sora/700.css';
+import '@fontsource/sora/800.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
@@ -11,6 +15,8 @@ if ('serviceWorker' in navigator) registerSW({ immediate: true, onRegisterError:
 
 const app = document.getElementById('app')!;
 const canvas = document.getElementById('world') as HTMLCanvasElement;
+// in-world signs are drawn with Sora, so wait for it (but never block the game on it)
+await Promise.race([document.fonts.load('700 56px Sora'), new Promise((r) => setTimeout(r, 1500))]).catch(() => {});
 const game = new Game(canvas);
 if (import.meta.env.DEV) Object.assign(window, { __game: game });
 

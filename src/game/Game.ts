@@ -43,7 +43,15 @@ interface Coin {
   t: number;
 }
 
-type Phase = 'showcase' | 'countdown' | 'riding' | 'crashed' | 'finished';
+type Phase = 'showcase' | 'cinematic' | 'countdown' | 'riding' | 'crashed' | 'finished';
+
+export type TimeOfDay = 'day' | 'sunset' | 'night';
+
+const SKIES: Record<TimeOfDay, { top: string; bottom: string; fog: [number, number]; sun: string; sunI: number; sunPos: [number, number, number]; hemiSky: string; hemiGround: string; hemiI: number; env: number; exposure: number }> = {
+  day: { top: '#3f7fcf', bottom: '#f2d7b0', fog: [70, 340], sun: '#fff1d6', sunI: 2.6, sunPos: [-30, 45, 20], hemiSky: '#cfe3ff', hemiGround: '#5a6b3a', hemiI: 1.1, env: 0.35, exposure: 1.05 },
+  sunset: { top: '#2b3f7a', bottom: '#ff9a4a', fog: [60, 300], sun: '#ffb070', sunI: 2.4, sunPos: [-40, 14, -60], hemiSky: '#ffc59a', hemiGround: '#4a3a2a', hemiI: 0.8, env: 0.3, exposure: 1.0 },
+  night: { top: '#03060f', bottom: '#1b2650', fog: [40, 220], sun: '#9fb6ff', sunI: 0.55, sunPos: [20, 40, 10], hemiSky: '#3a4f8a', hemiGround: '#10131c', hemiI: 0.45, env: 0.12, exposure: 1.15 },
+};
 
 const GRAVITY = 22;
 const JUMP_V = 7;
@@ -56,6 +64,9 @@ export class Game {
   readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
   private sun = new THREE.DirectionalLight('#fff1d6', 2.6);
   private sky: THREE.Mesh;
+  private hemi = new THREE.HemisphereLight('#cfe3ff', '#5a6b3a', 1.1);
+  private sunOffset = new THREE.Vector3(-30, 45, 20);
+  private cine = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
   private rider: RiderRig;
   private route: Route = CAMPUS_LOOP;
   private timer = new THREE.Timer();
@@ -115,7 +126,7 @@ export class Game {
     this.sky = buildSky('#3f7fcf', horizon);
     this.scene.add(this.sky);
 
-    this.scene.add(new THREE.HemisphereLight('#cfe3ff', '#5a6b3a', 1.1));
+    this.scene.add(this.hemi);
     this.sun.position.set(-30, 45, 20);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(lowEnd ? 1024 : 2048, lowEnd ? 1024 : 2048);
@@ -138,6 +149,43 @@ export class Game {
   setLook(jersey: string, bikeColor: string) {
     this.rider.setJersey(jersey);
     this.rider.setBikeColor(bikeColor);
+  }
+
+  setTimeOfDay(t: TimeOfDay) {
+    const k = SKIES[t];
+    const mat = this.sky.material as THREE.ShaderMaterial;
+    mat.uniforms.top.value.set(k.top);
+    mat.uniforms.bottom.value.set(k.bottom);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.set(k.bottom);
+    [fog.near, fog.far] = k.fog;
+    this.sun.color.set(k.sun);
+    this.sun.intensity = k.sunI;
+    this.sunOffset.set(...k.sunPos);
+    this.hemi.color.set(k.hemiSky);
+    this.hemi.groundColor.set(k.hemiGround);
+    this.hemi.intensity = k.hemiI;
+    this.scene.environmentIntensity = k.env;
+    this.renderer.toneMappingExposure = k.exposure;
+  }
+
+  /** Fixed camera for trailers and marketing shots; offsets are relative to the rider. */
+  cinematic(d: number, lane: number, cam: [number, number, number], look: [number, number, number]) {
+    this.reset();
+    this.phase = 'cinematic';
+    this.d = d;
+    this.lane = lane;
+    this.x = LANES[lane];
+    this.cine.pos.set(this.x + cam[0], cam[1], -d + cam[2]);
+    this.cine.look.set(this.x + look[0], look[1], -d + look[2]);
+  }
+
+  /** Places traffic and coins ahead of the rider for staged shots. */
+  stage(items: { kind: ObstacleKind | 'coin'; lane: number; ahead: number }[]) {
+    for (const it of items) {
+      if (it.kind === 'coin') this.addCoin(LANES[it.lane], 0.9, this.d + it.ahead);
+      else this.addObstacle(it.kind, it.lane, this.d + it.ahead);
+    }
   }
 
   /** Idle camera orbiting the rider, used behind menus. */
@@ -227,6 +275,11 @@ export class Game {
   }
 
   private update(dt: number) {
+    if (this.phase === 'cinematic') {
+      this.crank += dt * 6;
+      this.animateRider(dt, 6);
+      return;
+    }
     if (this.phase === 'showcase') {
       this.orbit += dt * 0.18;
       this.crank += dt * 3;
@@ -480,7 +533,10 @@ export class Game {
 
   private render(dt: number) {
     const cam = this.camera;
-    if (this.phase === 'showcase') {
+    if (this.phase === 'cinematic') {
+      cam.position.copy(this.cine.pos);
+      cam.lookAt(this.cine.look);
+    } else if (this.phase === 'showcase') {
       const a = this.orbit;
       cam.position.set(Math.sin(a) * 5.5, 2.1, Math.cos(a) * 5.5 - this.d);
       cam.lookAt(0, 0.9, -this.d);
@@ -502,7 +558,7 @@ export class Game {
     }
     this.sky.position.copy(cam.position);
     // shadows follow the rider
-    this.sun.position.set(this.x - 30, 45, -this.d + 20);
+    this.sun.position.set(this.x + this.sunOffset.x, this.sunOffset.y, -this.d + this.sunOffset.z);
     this.sun.target.position.set(this.x, 0, -this.d - 10);
     this.renderer.render(this.scene, cam);
   }

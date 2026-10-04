@@ -1,11 +1,12 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'node:path';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icons/icon.svg', 'icons/apple-touch-icon.png'],
+      includeAssets: ['icons/favicon.png', 'icons/apple-touch-icon.png'],
       manifest: {
         name: 'LEGONRUSH',
         short_name: 'LEGONRUSH',
@@ -14,7 +15,8 @@ export default defineConfig({
         background_color: '#0a1020',
         display: 'fullscreen',
         orientation: 'any',
-        start_url: '/',
+        start_url: '/play/',
+        scope: '/',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -22,16 +24,19 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: { cacheName: 'google-fonts', expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 } },
-          },
-        ],
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,webp,woff2}'],
+        globIgnores: ['shots/**', 'brand/**'],
+        navigateFallback: null,
       },
     }),
   ],
-  build: { chunkSizeWarningLimit: 900 },
+  build: {
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        play: resolve(__dirname, 'play/index.html'),
+      },
+    },
+  },
 });
