@@ -120,6 +120,7 @@ const insideRing = (pts, [x, z]) => {
   return c;
 };
 let courtyards = 0;
+const isResidence = (t) => t.tourism === 'hostel' || t.building === 'dormitory' || /\b(hall|hostel|annex)\b/i.test(t.name ?? '') && !/great hall|lecture|dining|dinning|library|assembly/i.test(t.name ?? '');
 function addBuilding(pts, t, holes = []) {
   if (pts.length < 3) return;
   const levels = parseFloat(t['building:levels']);
@@ -127,6 +128,7 @@ function addBuilding(pts, t, holes = []) {
   const b = { p: pts.flatMap(([x, z]) => [dm(x), dm(z)]) };
   if (height > 0) b.h = Math.round(height);
   else if (levels > 0) b.h = Math.round(levels * 3.4 + 1);
+  else if (isResidence(t)) b.h = Math.round((/valco/i.test(t.name ?? '') ? 3 : area(pts) > 1200 ? 4 : 3) * 3.4 + 1); // Valco: 3 storeys (meqasa); other halls estimated by size
   if (t.name) b.n = t.name;
   if (holes.length) { b.i = holes.map((hp) => hp.flatMap(([x, z]) => [dm(x), dm(z)])); courtyards += holes.length; }
   buildings.push(b);
@@ -225,6 +227,10 @@ for (const [name, list] of byName) {
 // still clashing (same anchor): number them
 const seen = new Map();
 for (const p of places) { const c = (seen.get(p.n) ?? 0) + 1; seen.set(p.n, c); if (c > 1) p.n = `${p.n} ${c}`; }
+
+// corrections to names on the map
+const RENAME = { 'James Quartey Building, JQB': 'Jones Quartey Building, JQB' }; // JQB is the Jones Quartey Building
+for (const p of places) if (RENAME[p.n]) p.n = RENAME[p.n];
 
 const json = {
   attribution: 'Map data © OpenStreetMap contributors (ODbL). Extra places from the UG Campus Map by enkayyy97.',

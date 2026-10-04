@@ -9,13 +9,15 @@ export interface Hall {
 }
 
 // Halls of residence at the University of Ghana, Legon.
-// Colors are placeholders for the in-game jersey, not official hall colors.
+// Jersey colours: Commonwealth (red), Akuafo (green and yellow), Volta (blue and yellow)
+// and Sarbah (dark blue) follow the halls' own colours; the rest are placeholders until
+// DELA confirms them.
 export const HALLS: Hall[] = [
-  { id: 'legon', name: 'Legon Hall', short: 'Legon', color: '#d64545' },
-  { id: 'akuafo', name: 'Akuafo Hall', short: 'Akuafo', color: '#2f8f4e' },
-  { id: 'commonwealth', name: 'Commonwealth Hall', short: 'Vandals', color: '#7a3db8' },
-  { id: 'volta', name: 'Volta Hall', short: 'Volta', color: '#2b74d6' },
-  { id: 'sarbah', name: 'Mensah Sarbah Hall', short: 'Sarbah', color: '#e08a1e' },
+  { id: 'legon', name: 'Legon Hall', short: 'Legon', color: '#e08a1e' },
+  { id: 'akuafo', name: 'Akuafo Hall', short: 'Akuafo', color: '#2e8b3a' },
+  { id: 'commonwealth', name: 'Commonwealth Hall', short: 'Vandals', color: '#c8102e' },
+  { id: 'volta', name: 'Volta Hall', short: 'Volta', color: '#1f3a93' },
+  { id: 'sarbah', name: 'Mensah Sarbah Hall', short: 'Sarbah', color: '#0b2a5b' },
   { id: 'jean-nelson', name: 'Jean Nelson Aka Hall', short: 'JNA', color: '#16a3a3' },
   { id: 'kwapong', name: 'Alexander Kwapong Hall', short: 'Kwapong', color: '#c23b8a' },
   { id: 'sey', name: 'Elizabeth Frances Sey Hall', short: 'Sey', color: '#8a9a1c' },

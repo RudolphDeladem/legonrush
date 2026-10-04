@@ -586,7 +586,7 @@ function home(next: Tab = 'home') {
 
 // ---------- explore ----------
 
-const POPULAR = ['School of Law', 'Pent Hostel Block A', 'The Balme Library', 'Great Hall', 'Night Market', 'James Quartey Building, JQB', 'University of Ghana Hospital', 'Legon Main Entrance'];
+const POPULAR = ['School of Law', 'Pent Hostel Block A', 'The Balme Library', 'Great Hall', 'Night Market', 'Jones Quartey Building, JQB', 'University of Ghana Hospital', 'Legon Main Entrance'];
 
 function stepsList(route: Route) {
   return `<ol class="steps">${route.steps.map((s, i) => `
