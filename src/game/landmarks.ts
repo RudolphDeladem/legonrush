@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { placeByName, roadAt } from './campusmap';
 import { labelTexture } from './textures';
 import { facadeBox, hipRoof } from './facades';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { nightHooks } from './life';
 
 const white = new THREE.MeshStandardMaterial({ color: '#f1ece2', roughness: 0.85 });
 const cream = new THREE.MeshStandardMaterial({ color: '#e3d6bd', roughness: 0.9 });
@@ -29,6 +31,27 @@ function clockTexture() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+/** many small coloured parts merged into one mesh (one draw call) */
+const detailMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+function detail(parts: [THREE.BufferGeometry, string][]) {
+  const geos = parts.map(([g, c]) => {
+    const n = g.index ? g.toNonIndexed() : g;
+    for (const k of Object.keys(n.attributes)) if (k !== 'position' && k !== 'normal') n.deleteAttribute(k);
+    const col = new THREE.Color(c);
+    const arr = new Float32Array(n.attributes.position.count * 3);
+    for (let i = 0; i < arr.length; i += 3) { arr[i] = col.r; arr[i + 1] = col.g; arr[i + 2] = col.b; }
+    n.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+    return n;
+  });
+  const m = new THREE.Mesh(mergeGeometries(geos), detailMat);
+  m.castShadow = m.receiveShadow = true;
+  return m;
+}
+const B = (w: number, h: number, d: number, x: number, y: number, z: number) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+/** lamp globes and lit clock faces glow after dark */
+const nightGlow = new THREE.MeshStandardMaterial({ color: '#f4efe0', emissive: '#ffd98a', emissiveIntensity: 0, roughness: 0.4 });
+nightHooks.push((on) => { nightGlow.emissiveIntensity = on ? 2.2 : 0; });
 
 const box = (w: number, h: number, d: number, mat: THREE.Material, y = h / 2) => {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -78,10 +101,14 @@ function balmeTower(tex: THREE.Texture) {
   return g;
 }
 
-/** Great Hall, from DELA's photo: a very tall, slim white tower with a clock near the top. */
+/**
+ * Great Hall, from DELA's photo: a very tall, slim white tower with a clock near the top.
+ * Detail added without photos: a stepped podium, string courses, an open belfry under
+ * the cap, and a finial with the national flag.
+ */
 function greatHallTower(tex: THREE.Texture) {
   const g = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 38, 12), white);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.9, 38, 16), white);
   shaft.position.y = 19;
   shaft.castShadow = true;
   g.add(shaft);
@@ -93,27 +120,107 @@ function greatHallTower(tex: THREE.Texture) {
     g.add(slit);
   }
   clocks(g, 1.6, 2.65, 34, tex);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.8, 2.4, 12), new THREE.MeshStandardMaterial({ color: '#8a3b22', roughness: 0.7 }));
-  cap.position.y = 39.2;
+  const parts: [THREE.BufferGeometry, string][] = [
+    // stepped podium and a plinth
+    [B(9, 0.5, 9, 0, 0.25, 0), '#d8d1c3'],
+    [B(7.6, 0.5, 7.6, 0, 0.75, 0), '#e4ddd0'],
+    [new THREE.CylinderGeometry(3.15, 3.15, 1.6, 16).translate(0, 1.8, 0), '#cfc6b6'],
+    // doorway on the front
+    [B(1.6, 2.8, 0.4, 0, 2.4, 2.85), '#3a2a20'],
+    [B(2.2, 0.3, 0.5, 0, 3.95, 2.9), '#f6f2ea'],
+    // fins flanking the slits
+    ...[0, 1, 2, 3].flatMap((k) => {
+      const a = (k * Math.PI) / 2;
+      return [-0.55, 0.55].map((o) => [B(0.18, 21, 0.3, o, 18, 0).translate(0, 0, 2.78).rotateY(a), '#f7f4ee'] as [THREE.BufferGeometry, string]);
+    }),
+    // a cornice round the clock stage
+    [new THREE.CylinderGeometry(2.95, 2.95, 0.35, 16).translate(0, 31.4, 0), '#f7f4ee'],
+  ];
+  // string courses up the shaft
+  for (const y of [8, 15, 22, 29]) parts.push([new THREE.CylinderGeometry(2.9 - y * 0.007, 2.9 - y * 0.007, 0.22, 16).translate(0, y, 0), '#e2dbcd']);
+  // open belfry: a dark core with eight piers round it, under the cap
+  parts.push([new THREE.CylinderGeometry(1.9, 1.9, 2.4, 12).translate(0, 39.2, 0), '#1e1a18']);
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    parts.push([B(0.5, 2.4, 0.5, Math.sin(a) * 2.35, 39.2, Math.cos(a) * 2.35), '#f4f0e8']);
+  }
+  parts.push([new THREE.CylinderGeometry(2.75, 2.75, 0.3, 16).translate(0, 38.05, 0), '#f7f4ee']);
+  // finial and flagpole
+  parts.push([new THREE.ConeGeometry(1.2, 2.2, 12).translate(0, 42.6, 0), '#8a3b22']);
+  parts.push([new THREE.CylinderGeometry(0.05, 0.06, 5, 6).translate(0, 45.5, 0), '#d8d8d8']);
+  for (const [y, c] of [[47.6, '#ce1126'], [47.2, '#fcd116'], [46.8, '#006b3f']] as [number, string][]) parts.push([B(0.02, 0.4, 1.6, 0.03, y, 0.82), c]);
+  parts.push([B(0.03, 0.2, 0.2, 0.04, 47.2, 0.82), '#111111']);
+  g.add(detail(parts));
+  // the old cap sits on the belfry
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.9, 1.2, 16), new THREE.MeshStandardMaterial({ color: '#8a3b22', roughness: 0.7 }));
+  cap.position.y = 41;
   g.add(cap);
   return g;
 }
 
-/** Main entrance: two pillars and a sign across the road. */
+/**
+ * Main entrance: two big rendered pillars with recessed panels and lamps, a beam
+ * with the university's name and motto, a crest disc, guard booths and boom barriers.
+ */
 function mainGate(span: number) {
   const g = new THREE.Group();
+  const px = span / 2 + 1.1;
+  const parts: [THREE.BufferGeometry, string][] = [];
   for (const s of [-1, 1]) {
-    const pillar = box(2.2, 9, 2.2, white);
-    pillar.position.x = s * (span / 2 + 1.1);
-    g.add(pillar);
-    const cap = box(2.8, 0.6, 2.8, tile, 9.3);
-    cap.position.x = s * (span / 2 + 1.1);
-    g.add(cap);
+    const x = s * px;
+    parts.push(
+      [B(2.2, 9, 2.2, x, 4.5, 0), '#f3eee4'],
+      [B(2.7, 0.9, 2.7, x, 0.45, 0), '#8f8476'],
+      [B(2.5, 0.25, 2.5, x, 1.0, 0), '#d9d0c0'],
+      [B(2.8, 0.6, 2.8, x, 9.3, 0), '#a24b2e'],
+      [B(2.5, 0.25, 2.5, x, 8.85, 0), '#e6dfd2'],
+      // recessed panels on the faces
+      [B(1.3, 5.2, 0.06, x, 4.6, 1.11), '#ded6c8'], [B(1.3, 5.2, 0.06, x, 4.6, -1.11), '#ded6c8'],
+      [B(0.06, 5.2, 1.3, x + 1.11 * s, 4.6, 0), '#ded6c8'],
+      // planter at the foot with flowers
+      [B(1.0, 0.6, 3.2, x + 1.9 * s, 0.3, 0), '#e8e2d4'],
+      [B(0.8, 0.12, 3.0, x + 1.9 * s, 0.62, 0), '#4b3527'],
+      ...[-1.1, -0.4, 0.3, 1.0].map((z, i) => [B(0.5, 0.35, 0.5, x + 1.9 * s, 0.8, z), ['#d81b60', '#f5c518', '#e53935', '#ff7043'][i]] as [THREE.BufferGeometry, string]),
+      // lamp posts on top of the pillars
+      [new THREE.CylinderGeometry(0.08, 0.1, 1.2, 6).translate(x, 10.2, 0), '#2b2f3a'],
+    );
+    // guard booth outside each pillar, and a boom barrier across each lane
+    const bx = x + 5 * s;
+    parts.push(
+      [B(2.4, 2.6, 2.4, bx, 1.3, 2.5), '#f1ece2'],
+      [B(1.8, 0.9, 0.04, bx, 1.7, 3.71), '#22303c'], [B(1.8, 0.9, 0.04, bx, 1.7, 1.29), '#22303c'],
+      [B(3.0, 0.2, 3.0, bx, 2.7, 2.5), '#a24b2e'],
+      [B(0.4, 1.0, 0.4, x - 1.6 * s, 0.5, 2.2), '#c8c8c8'],
+    );
+    const arm = span / 2 - 1.8;
+    for (let i = 0; i < 8; i++) {
+      const len = arm / 8;
+      parts.push([B(len, 0.12, 0.12, x - 1.6 * s - s * (i + 0.5) * len, 1.05, 2.2), i % 2 ? '#ffffff' : '#d32f2f']);
+    }
   }
-  const beam = box(span + 4.4, 1.8, 1.2, white, 8.1);
-  g.add(beam);
+  // the beam, its cornice and a pediment with the crest
+  parts.push(
+    [B(span + 4.4, 1.8, 1.2, 0, 8.1, 0), '#f3eee4'],
+    [B(span + 4.8, 0.25, 1.5, 0, 9.1, 0), '#e6dfd2'],
+    [B(span + 4.6, 0.2, 1.4, 0, 7.15, 0), '#e6dfd2'],
+    [B(4.4, 1.3, 1.0, 0, 9.85, 0), '#f3eee4'],
+    [B(4.8, 0.2, 1.2, 0, 10.55, 0), '#a24b2e'],
+  );
+  for (const z of [0.51, -0.51]) {
+    parts.push(
+      [new THREE.CylinderGeometry(0.62, 0.62, 0.06, 20).rotateX(Math.PI / 2).translate(0, 9.85, z), '#c9a227'],
+      [new THREE.CylinderGeometry(0.5, 0.5, 0.08, 20).rotateX(Math.PI / 2).translate(0, 9.85, z), '#1f3a93'],
+      [B(0.36, 0.42, 0.1, 0, 9.88, z), '#f5f0e0'],
+    );
+  }
+  g.add(detail(parts));
+  for (const s of [-1, 1]) {
+    const globe = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 8), nightGlow);
+    globe.position.set(s * px, 11.1, 0);
+    g.add(globe);
+  }
   const { tex, aspect } = labelTexture('UNIVERSITY OF GHANA', '#f5c518');
-  const signH = 1.5;
+  const signH = 1.4;
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(span + 2, signH * aspect), signH), new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide }));
   sign.position.set(0, 8.1, 0.62);
   g.add(sign);
@@ -121,6 +228,11 @@ function mainGate(span: number) {
   back.position.z = -0.62;
   back.rotation.y = Math.PI;
   g.add(back);
+  const motto = labelTexture('INTEGRI PROCEDAMUS', '#1f3a93');
+  const mh = 0.5;
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(mh * motto.aspect, mh), new THREE.MeshBasicMaterial({ map: motto.tex, transparent: true, side: THREE.DoubleSide }));
+  plate.position.set(0, 6.75, 0.5);
+  g.add(plate);
   return g;
 }
 
