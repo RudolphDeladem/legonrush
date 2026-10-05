@@ -682,3 +682,4 @@ html.night .light .screen.dress { background: linear-gradient(180deg, rgba(12,18
 .home:has(.continue-row) .qr { height: clamp(96px, 13vh, 150px); }
 @media (max-width: 599px) { .home:has(.continue-row) .qr { height: 96px; } }
 .hud-top .coin-hud { margin-left: auto; }
+.photo-on .hud > :not(.photo-ui){visibility:hidden}

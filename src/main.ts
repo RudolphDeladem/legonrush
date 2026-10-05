@@ -1231,6 +1231,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     app.querySelector('#pauseOverlay')?.remove();
     game.paused = false;
     game.setPhotoMode(true);
+    app.classList.add('photo-on');
     const ov = document.createElement('div');
     ov.className = 'photo-ui';
     ov.id = 'pauseOverlay';
@@ -1240,7 +1241,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     ov.addEventListener('pointerdown', (e) => { if ((e.target as HTMLElement).closest('button')) return; drag = true; px = e.clientX; py = e.clientY; });
     ov.addEventListener('pointermove', (e) => { if (!drag) return; game.orbitPhoto(e.clientX - px, e.clientY - py); px = e.clientX; py = e.clientY; });
     for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) ov.addEventListener(ev, () => (drag = false));
-    const back = () => { game.setPhotoMode(false); ov.remove(); game.paused = false; togglePause(); };
+    const back = () => { game.setPhotoMode(false); app.classList.remove('photo-on'); ov.remove(); game.paused = false; togglePause(); };
     onBack(back);
     ov.querySelector('[data-ph="back"]')!.addEventListener('click', back);
     ov.querySelector('[data-ph="save"]')!.addEventListener('click', async () => {
@@ -1281,6 +1282,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   document.addEventListener('visibilitychange', onHidden);
 
   function cleanup() {
+    app.classList.remove('photo-on');
     music(false);
     stopAmbience();
     clearInterval(ambTimer);
