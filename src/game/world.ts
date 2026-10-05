@@ -4,6 +4,7 @@ import { AREAS, BUILDINGS, NODE_XZ, ROADS, buildingAt, mapBounds, type Place, ty
 import type { Track } from './track';
 import { asphaltTexture, billboardTexture, concreteTexture, grassMacroTexture, grassTexture, labelTexture, pitchTexture } from './textures';
 import { buildBuildings } from './facades';
+import { addRouteTrees, buildCampusLife, buildRoadEdges, cullBeyondFog, ROAD_WIDTH } from './life';
 
 export const LANES = [-2.4, 0, 2.4];
 
@@ -38,8 +39,26 @@ export const KIND_ACCENT: Record<PlaceKind, string> = {
   other: '#b2bec3',
 };
 
-/** real road widths by class: main, through, residential, service lane, footpath */
-const ROAD_WIDTH = [9, 7.4, 6.2, 4.6, 2.6];
+/**
+ * Road surfaces that darken and turn glossy in the rain (see weatherfx.ts).
+ * The route layer adds its own and removes them when it is disposed.
+ */
+const wetMats = new Map<THREE.MeshStandardMaterial, { color: THREE.Color; rough: number }>();
+function wettable<T extends THREE.MeshStandardMaterial>(m: T) {
+  wetMats.set(m, { color: m.color.clone(), rough: m.roughness });
+  m.color.multiplyScalar(1 - wetness * 0.45);
+  m.roughness = m.roughness - (m.roughness - 0.28) * wetness;
+  return m;
+}
+let wetness = 0;
+/** 0 = dry, 1 = soaked: darker roads and paths with a sheen. */
+export function setWet(k: number) {
+  wetness = k;
+  for (const [m, base] of wetMats) {
+    m.color.copy(base.color).multiplyScalar(1 - k * 0.45);
+    m.roughness = base.rough - (base.rough - 0.28) * k;
+  }
+}
 
 /** Seeded random so the campus looks the same every ride. */
 function rng(seed: number) {
@@ -166,7 +185,6 @@ function grassMaterial(map: THREE.Texture) {
  */
 export function buildCampus() {
   const group = new THREE.Group();
-  const rand = rng(11);
 
   // ground: 200 m tiles merged into one mesh, each with its own UV origin, because
   // one huge texture repeat loses UV precision on some mobile GPUs
@@ -227,9 +245,9 @@ export function buildCampus() {
     for (const [x, z] of [pts[0], pts[pts.length - 1]]) (footpath ? pathCaps : caps).push(new THREE.CircleGeometry(half, 10).rotateX(-Math.PI / 2).translate(x, 0, z));
   }
   const campusAsphalt = asphaltTexture(false);
-  const asphalt = groundMat('#f2f2f2', 3, campusAsphalt);
+  const asphalt = wettable(groundMat('#f2f2f2', 3, campusAsphalt));
   const pathTex = concreteTexture();
-  const path = groundMat('#efe2c2', 2, pathTex);
+  const path = wettable(groundMat('#efe2c2', 2, pathTex));
   const merged = (main: THREE.BufferGeometry, extra: THREE.BufferGeometry[]) => {
     const parts = [main, ...extra].map((g) => {
       const flat = g.index ? g.toNonIndexed() : g;
@@ -275,64 +293,19 @@ export function buildCampus() {
   if (dashPos.length) group.add(new THREE.Mesh(flatGeometry(dashPos, dashIdx), groundMat('#e9e6dc', 4)));
 
   // every building: cream walls with window bays, a plinth, and terracotta tile roofs
-  group.add(buildBuildings(BUILDINGS));
+  const buildings = buildBuildings(BUILDINGS);
+  group.add(buildings);
 
-  // street trees along the main campus roads
-  const broad: THREE.Matrix4[] = [], palms: THREE.Matrix4[] = [];
-  const up = new THREE.Vector3(0, 1, 0);
-  for (const r of ROADS) {
-    if (r.cls > 2) continue;
-    const half = ROAD_WIDTH[r.cls] / 2;
-    let carry = rand() * 20;
-    for (let k = 0; k < r.nodes.length - 1; k++) {
-      const a = r.nodes[k], c = r.nodes[k + 1];
-      const ax = NODE_XZ[a * 2], az = NODE_XZ[a * 2 + 1], cx = NODE_XZ[c * 2], cz = NODE_XZ[c * 2 + 1];
-      const len = Math.hypot(cx - ax, cz - az);
-      const nx = -(cz - az) / len, nz = (cx - ax) / len;
-      for (let t = carry; t < len; t += 24) {
-        for (const s of [-1, 1]) {
-          const off = half + 3 + rand() * 4;
-          const x = ax + ((cx - ax) * t) / len + nx * s * off, z = az + ((cz - az) * t) / len + nz * s * off;
-          if (buildingAt(x, z, 2)) continue;
-          const sc = 0.8 + rand() * 0.6;
-          (rand() < 0.35 ? palms : broad).push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(up, rand() * 6.28), new THREE.Vector3(sc, sc, sc)));
-        }
-        carry = t + 24 - len;
-      }
-    }
-  }
-  addTrees(group, broad, palms, rand);
+  // trees, kerbs, lamps, stops, signs, cars, kiosks and people (see life.ts)
+  const life = buildCampusLife();
+  group.add(life);
+  // skip whatever lies past the fog: building and life cells far from the camera
+  // concrete verges and open drains along the roads
+  const edges = buildRoadEdges(concreteTexture());
+  wettable(edges.material);
+  group.add(edges.group);
+  cullBeyondFog(group, [...(buildings.children as THREE.Mesh[]), ...(life.userData.cullMeshes as THREE.Mesh[]), ...edges.meshes]);
   return group;
-}
-
-const treeGeo = {
-  trunk: new THREE.CylinderGeometry(0.16, 0.24, 2.6, 7).translate(0, 1.3, 0),
-  crown: new THREE.IcosahedronGeometry(1.9, 1).scale(1, 0.8, 1).translate(0, 3.6, 0),
-  palmTrunk: new THREE.CylinderGeometry(0.14, 0.2, 7, 7).translate(0, 3.5, 0),
-  palmCrown: palmCrown(),
-};
-const treeMat = {
-  trunk: new THREE.MeshStandardMaterial({ color: '#5b4330', roughness: 1 }),
-  leaf: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 }),
-  palmTrunk: new THREE.MeshStandardMaterial({ color: '#8a7a66', roughness: 1 }),
-};
-function addInstanced(group: THREE.Group, geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[], rand: () => number, colors?: string[]) {
-  if (!list.length) return;
-  const im = new THREE.InstancedMesh(geo, mat, list.length);
-  list.forEach((mm, k) => {
-    im.setMatrixAt(k, mm);
-    if (colors) im.setColorAt(k, new THREE.Color(colors[k % colors.length]).offsetHSL(0, 0, (rand() - 0.5) * 0.08));
-  });
-  im.castShadow = true;
-  im.receiveShadow = true;
-  im.userData.shared = true;
-  group.add(im);
-}
-function addTrees(group: THREE.Group, broad: THREE.Matrix4[], palms: THREE.Matrix4[], rand: () => number) {
-  addInstanced(group, treeGeo.trunk, treeMat.trunk, broad, rand);
-  addInstanced(group, treeGeo.crown, treeMat.leaf, broad, rand, ['#3f7d2c', '#4a8a33', '#356b25', '#5a9440']);
-  addInstanced(group, treeGeo.palmTrunk, treeMat.palmTrunk, palms, rand);
-  addInstanced(group, treeGeo.palmCrown, treeMat.leaf, palms, rand, ['#4f8f2f', '#5c9a36']);
 }
 
 export interface RouteLabel {
@@ -368,7 +341,7 @@ export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
 
   const roadTex = asphaltTexture();
   roadTex.repeat.set(2, 1);
-  const road = new THREE.Mesh(ribbon(track, -ROAD_HALF, 0, ROAD_HALF, 0, 0, L), groundMat('#ffffff', 5, roadTex));
+  const road = new THREE.Mesh(ribbon(track, -ROAD_HALF, 0, ROAD_HALF, 0, 0, L), wettable(groundMat('#ffffff', 5, roadTex)));
   road.receiveShadow = true;
   group.add(road);
   const white = groundMat('#e9e6dc', 6);
@@ -378,7 +351,7 @@ export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
   }
   const conc = concreteTexture();
   conc.repeat.set(1, 4);
-  const walkMat = new THREE.MeshStandardMaterial({ map: conc, roughness: 0.95, side: THREE.DoubleSide });
+  const walkMat = wettable(new THREE.MeshStandardMaterial({ map: conc, roughness: 0.95, side: THREE.DoubleSide }));
   for (const s of [-1, 1]) {
     const a = s * ROAD_HALF, c = s * (ROAD_HALF + 1.6);
     const top = s > 0 ? ribbon(track, a, 0.12, c, 0.12, 0, L) : ribbon(track, c, 0.12, a, 0.12, 0, L);
@@ -405,16 +378,16 @@ export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
 
   // trees and lamps along the route, kept off buildings and off the road on tight bends
   const clear = (p: THREE.Vector3, r: number) => track.distanceToRoad(p.x, p.z) > ROAD_HALF + 1.8 + r && !buildingAt(p.x, p.z, r + 0.5);
-  const broad: THREE.Matrix4[] = [], palms: THREE.Matrix4[] = [];
+  const spots: THREE.Matrix4[] = [];
   for (let d = 0; d < L; d += 13) {
     for (const s of [-1, 1]) {
       const p = at(d + (rand() - 0.5) * 6, s * (ROAD_HALF + 4 + rand() * 5));
-      const sc = 0.8 + rand() * 0.6, spin = rand() * 6.28, palm = rand() < 0.4;
+      const sc = 0.8 + rand() * 0.6, spin = rand() * 6.28;
       if (!clear(p, 1.2)) continue;
-      (palm ? palms : broad).push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromAxisAngle(up, spin), new THREE.Vector3(sc, sc, sc)));
+      spots.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromAxisAngle(up, spin), new THREE.Vector3(sc, sc, sc)));
     }
   }
-  addTrees(group, broad, palms, rand);
+  addRouteTrees(group, spots, rand);
   const lamps: THREE.Matrix4[] = [];
   for (let d = 0; d < L; d += 36) {
     for (const s of [-1, 1]) {
@@ -484,22 +457,11 @@ export function disposeLayer(group: THREE.Object3D) {
     if (mesh.geometry) mesh.geometry.dispose();
     const mats = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
     for (const mat of mats) {
+      wetMats.delete(mat as THREE.MeshStandardMaterial);
       for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.dispose();
       mat.dispose();
     }
   });
-}
-
-function palmCrown() {
-  const fronds: THREE.BufferGeometry[] = [];
-  for (let k = 0; k < 9; k++) {
-    const f = new THREE.ConeGeometry(0.32, 2.6, 4).rotateX(Math.PI / 2).translate(0, 0, 1.3);
-    f.scale(1, 0.25, 1);
-    f.rotateX(0.35 + (k % 3) * 0.15);
-    f.rotateY((k / 9) * Math.PI * 2);
-    fronds.push(f.translate(0, 7, 0));
-  }
-  return mergeGeometries(fronds);
 }
 
 function gate(text: string, pos: THREE.Vector3, yaw: number, finish = false) {

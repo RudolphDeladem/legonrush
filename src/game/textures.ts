@@ -159,6 +159,47 @@ export const facadeTexture = () =>
     ctx.fillRect(winX - 10, winY + winH + 11, winW + 20, 4);
   });
 
+/**
+ * Which windows are lit at night, laid out exactly like facadeTexture's window
+ * (one 32 px cell per bay and storey): warm, cool or off, some with a curtain.
+ */
+export function windowLightTexture(bays: number, storeys: number) {
+  const W = 32;
+  const c = document.createElement('canvas');
+  c.width = bays * W;
+  c.height = storeys * W;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, c.width, c.height);
+  const k = W / 256;
+  const winX = 46 * k, winW = 164 * k, winY = 44 * k, winH = 128 * k;
+  let seed = 4242;
+  const r = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < bays; i++) for (let j = 0; j < storeys; j++) {
+    const u = r();
+    if (u < 0.42) continue;
+    const warm = ['#ffcf7d', '#ffd99a', '#ffc46a', '#ffe7b8'];
+    ctx.fillStyle = u < 0.86 ? warm[(r() * warm.length) | 0] : '#cfe4ff';
+    const x = i * W + winX, y = j * W + winY;
+    ctx.globalAlpha = 0.65 + r() * 0.35;
+    ctx.fillRect(x + 0.8, y + 0.8, winW - 1.6, winH - 1.6);
+    // a drawn curtain over part of the glass
+    if (r() < 0.4) {
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(x + (r() < 0.5 ? 0 : winW / 2), y, winW / 2, winH);
+    }
+    ctx.globalAlpha = 1;
+    // mullions stay dark
+    ctx.fillStyle = '#000';
+    for (const m of [winX + winW / 3, winX + (2 * winW) / 3]) ctx.fillRect(i * W + m - 0.4, y, 0.8, winH);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
 /** Clay roof tiles in rows (one tile = 2 m x 2 m of roof), near-white so roofs can be tinted. */
 export const roofTileTexture = () =>
   canvasTexture(128, (ctx, s) => {

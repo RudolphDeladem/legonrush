@@ -7,7 +7,7 @@
 // campus costs a handful of draw calls, and the shadow pass only touches nearby cells.
 import * as THREE from 'three';
 import type { Building } from './campusmap';
-import { facadeTexture, roofTileTexture } from './textures';
+import { facadeTexture, roofTileTexture, windowLightTexture } from './textures';
 
 type V = [number, number];
 
@@ -26,6 +26,8 @@ const ROOF_COLORS = ['#b4532e', '#a94a2b', '#bf5f36', '#9c4429', '#b65a3a', '#a6
 const PLINTH_COLORS = ['#8b8072', '#7f7466', '#93877a', '#7a6253'];
 
 let shared: { wall: THREE.MeshStandardMaterial; roof: THREE.MeshStandardMaterial; facade: THREE.Texture; tiles: THREE.Texture } | null = null;
+/** how many bays and storeys the lit-window pattern spans before it repeats */
+const LIT_BAYS = 8, LIT_STOREYS = 4;
 
 /** Shared building materials and textures (made once, reused by landmarks). */
 export function buildingMaterials() {
@@ -35,10 +37,24 @@ export function buildingMaterials() {
   shared = {
     facade,
     tiles,
-    wall: new THREE.MeshStandardMaterial({ map: facade, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide }),
+    // after dark some windows glow: an emissive pattern spanning several bays and
+    // storeys, so neighbouring windows differ; dark by day (intensity 0)
+    wall: new THREE.MeshStandardMaterial({ map: facade, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, emissive: '#ffffff', emissiveMap: litWindows(), emissiveIntensity: 0 }),
     roof: new THREE.MeshStandardMaterial({ map: tiles, vertexColors: true, roughness: 0.78, side: THREE.DoubleSide }),
   };
   return shared;
+}
+
+function litWindows() {
+  const t = windowLightTexture(LIT_BAYS, LIT_STOREYS);
+  t.repeat.set(1 / LIT_BAYS, 1 / LIT_STOREYS);
+  return t;
+}
+
+/** Turns the lit windows up (1) or off (0); walls are tinted, so this is a gentle glow. */
+export function setWindowLights(k: number) {
+  const { wall } = buildingMaterials();
+  wall.emissiveIntensity = k * 1.1;
 }
 
 class Batch {
