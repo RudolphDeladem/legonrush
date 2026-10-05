@@ -49,6 +49,7 @@ export const sfx = {
   count: () => tone(660, 0.12, 'sine', 0.08),
   go: () => tone(990, 0.3, 'sine', 0.1),
   finish: () => [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'triangle', 0.08), i * 110)),
+  honk: () => { tone(415, 0.22, 'square', 0.035); tone(523, 0.22, 'square', 0.03); },
 };
 
 // ---------- ride music ----------
