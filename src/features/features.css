@@ -1,0 +1,129 @@
+/* Feature screens: challenges, badges, shop extras, missions, treasure, guide, favourites, profile card.
+   Light menus (see light.css); the mission HUD pill follows the dark ride HUD. */
+.fx-screen .wrap { padding-bottom: 40px; }
+.fx-screen .wrap.stack { gap: 12px; }
+@media (min-width: 900px) { .fx-screen .wrap { max-width: 720px; } }
+
+.fx-ico { width: 32px; height: 32px; border-radius: 9px; background: #fff7cc; color: var(--ink); display: inline-grid; place-items: center; flex: none; }
+.fx-ico .i { width: 18px; height: 18px; }
+.fx-big-ico { width: 48px; height: 48px; border-radius: 14px; background: #fff4bf; color: var(--ink); display: grid; place-items: center; flex: none; }
+.fx-big-ico .i { width: 26px; height: 26px; }
+.fx-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.fx-head .shop-h { margin-top: 0; }
+
+/* challenges */
+.fx-list { display: flex; flex-direction: column; gap: 14px; }
+.fx-row { display: flex; align-items: center; gap: 12px; }
+.fx-row .grow { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.fx-row b { font-size: 14px; }
+.fx-row .xpbar { height: 6px; }
+.fx-row.claimed { opacity: 0.6; }
+.fx-reward { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; font-size: 14px; white-space: nowrap; }
+.fx-row .btn-sm { white-space: nowrap; }
+.fx-streak { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fx-streak .grow { min-width: 200px; flex: 1; }
+.fx-days { display: flex; gap: 5px; width: 100%; }
+.fx-days i { flex: 1; height: 8px; border-radius: 4px; background: #e9edf5; }
+.fx-days i.on { background: var(--gold); }
+
+/* badges */
+.fx-badges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 640px) { .fx-badges { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.fx-badge { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 12px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; box-shadow: var(--shadow); }
+.fx-badge b { font-size: 14px; }
+.fx-badge small { font-size: 12px; line-height: 1.35; }
+.fx-badge .xpbar { width: 100%; height: 6px; margin-top: auto; }
+.fx-medal { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: #eef1f6; color: #98a2b3; border: 2px dashed #d0d5dd; }
+.fx-medal .i { width: 26px; height: 26px; }
+.fx-badge.on .fx-medal { background: var(--gold); color: var(--ink); border: 2px solid #e0b400; box-shadow: 0 6px 16px rgba(255, 196, 0, 0.35); }
+.fx-badge .badge .i { width: 12px; height: 12px; }
+
+/* campus guide */
+.fx-guide { display: grid; gap: 8px; }
+@media (min-width: 640px) { .fx-guide { grid-template-columns: 1fr 1fr; } }
+.fx-fact { text-align: left; display: flex; flex-direction: column; gap: 8px; }
+.fx-fact .row { gap: 10px; }
+.fx-fact.locked { cursor: pointer; }
+.fx-fact.locked b { color: var(--muted); }
+.fx-fact.locked .fx-ico { background: #eef1f6; color: #98a2b3; }
+.fx-fact .small .i { width: 14px; height: 14px; vertical-align: -2px; }
+.fx-newbadge { display: flex; align-items: center; gap: 10px; }
+
+/* missions */
+.fx-missions { display: grid; gap: 12px; }
+@media (min-width: 900px) { .fx-missions { grid-template-columns: 1fr 1fr; } }
+.fx-mission { display: flex; flex-direction: column; gap: 10px; }
+.fx-mission .row { gap: 12px; align-items: flex-start; }
+.fx-mission h3 { font-size: 18px; font-weight: 800; }
+.fx-mission .btn { margin-top: auto; }
+.fx-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+.fx-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.fx-meta .i { width: 15px; height: 15px; }
+.fx-outcome { display: flex; flex-direction: column; gap: 6px; }
+.fx-outcome .row { gap: 10px; }
+.fx-outcome.pass { border-color: #22c55e; }
+.fx-outcome.pass .fx-ico { background: #dcfce7; color: #15803d; }
+.fx-outcome.fail .fx-ico { background: #fee2e2; color: #b91c1c; }
+
+/* mission HUD pill (dark ride HUD) */
+.fx-mhud { position: absolute; left: 146px; top: calc(156px + var(--safe-t, 0px)); display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; border-radius: 16px; background: rgba(10, 16, 32, 0.78); color: #fff; border: 1px solid rgba(255, 255, 255, 0.14); pointer-events: none; z-index: 5; max-width: calc(100vw - 160px); }
+@media (min-width: 900px) { .fx-mhud { left: 50%; transform: translateX(-50%); max-width: 440px; } }
+.fx-mhud .fx-ico { background: var(--gold); width: 30px; height: 30px; }
+.fx-mhud small { display: block; font-size: 10px; letter-spacing: 0.12em; color: #9aa6c4; font-weight: 700; }
+.fx-mhud b { font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fx-mhud.soon b { color: var(--gold); }
+.fx-mhud.late b { color: #ff6b6b; }
+.fx-mnote { font-size: 13px; font-weight: 800; color: var(--gold); }
+.fx-mnote:empty { display: none; }
+
+/* treasure */
+.fx-treasure { display: flex; gap: 12px; align-items: center; }
+.fx-treasure .grow { display: flex; flex-direction: column; gap: 6px; }
+
+/* shop extras */
+.fx-pips { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: 2px; }
+.fx-pips i { width: 14px; height: 6px; border-radius: 3px; background: #e4e7ef; }
+.fx-pips i.on { background: var(--gold); }
+.fx-toggle { font: inherit; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink-2); cursor: pointer; }
+.fx-toggle.on { background: #fff4bf; border-color: var(--gold); color: var(--gold-ink); }
+.fx-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.fx-swatch { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; border-radius: 14px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; font: inherit; text-align: center; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.05); }
+.fx-swatch i { width: 40px; height: 40px; border-radius: 50%; border: 2px solid rgba(11, 21, 48, 0.12); display: grid; place-items: center; color: #fff; }
+.fx-swatch i .i { width: 22px; height: 22px; }
+.fx-swatch b { font-size: 12px; line-height: 1.2; }
+.fx-swatch small { font-size: 11.5px; color: var(--muted); font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.fx-swatch small .i { width: 13px; height: 13px; }
+.fx-swatch.on { border-color: var(--gold); box-shadow: inset 0 0 0 2px var(--gold); }
+.fx-swatch.on small { color: var(--gold-ink); }
+.fx-swatch:disabled { opacity: 0.5; cursor: default; }
+
+/* explore: search, favourites, mode cards, save place */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fx-search { position: relative; }
+.fx-search input { padding-left: 46px !important; font-size: 16px; min-height: 52px; border-radius: 14px; }
+.fx-search-ico { position: absolute; left: 14px; top: 15px; color: var(--muted); pointer-events: none; z-index: 1; }
+.fx-search-ico .i { width: 22px; height: 22px; }
+.fx-favs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.fx-favs::-webkit-scrollbar { display: none; }
+.fx-fav { flex: none; cursor: pointer; text-align: left; padding: 7px 12px; }
+.fx-fav .i { width: 18px; height: 18px; color: var(--gold-ink); }
+.fx-fav span { display: flex; flex-direction: column; line-height: 1.15; }
+.fx-fav small { font-size: 11px; color: var(--muted); font-weight: 700; }
+.fx-modes { display: grid; gap: 8px; }
+@media (min-width: 600px) { .fx-modes { grid-template-columns: 1fr 1fr; } }
+.fx-modecard { display: flex; align-items: center; gap: 12px; text-align: left; }
+.fx-modecard .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fx-modecard > .i { width: 18px; height: 18px; flex: none; }
+.fx-star .i { width: 16px; height: 16px; vertical-align: -3px; }
+.fx-star.on { border-color: var(--gold); color: var(--gold-ink); }
+
+/* You tab links */
+.fx-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fx-link { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; border-radius: 14px; border: 1px solid var(--line); background: #fff; color: var(--ink); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.05); }
+.fx-link small { font-size: 11px; color: var(--muted); }
+.fx-dot { position: absolute; top: 6px; right: 8px; min-width: 18px; height: 18px; border-radius: 9px; background: #e5484d; color: #fff; font-size: 11px; font-style: normal; display: grid; place-items: center; padding: 0 5px; }
+
+/* profile card */
+.fx-cardimg { width: 100%; max-width: 420px; height: auto; aspect-ratio: 1080 / 1350; margin: 0 auto; display: block; border-radius: 18px; box-shadow: 0 14px 40px rgba(11, 21, 48, 0.25); }
+.fx-screen .two .btn .i { width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px; }
+.fx-screen .two a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }

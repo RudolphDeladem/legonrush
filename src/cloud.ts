@@ -3,7 +3,7 @@
 // signs in or opens a leaderboard, so guests never download it.
 // Tables and rules live in supabase/schema.sql.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Profile } from './state';
+import { newGear, normalizeProfile, type Gear, type Profile } from './state';
 import { SUPABASE_KEY, SUPABASE_REF, SUPABASE_URL, weekStart } from './cloud-config';
 
 const AUTH_KEY = `sb-${SUPABASE_REF}-auth-token`;
@@ -171,6 +171,46 @@ async function pushNow(p: Profile) {
   }
 }
 
+const union = (a?: string[], b?: string[]) => [...new Set([...(a ?? []), ...(b ?? [])])];
+const maxEach = <T extends Record<string, number | undefined>>(a: T = {} as T, b: T = {} as T) => {
+  const out: Record<string, number> = {};
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) out[k] = Math.max(a[k] ?? 0, b[k] ?? 0);
+  return out as T;
+};
+
+/** shop gear: the most of each item, every cosmetic owned on either side, and what the newer rider has fitted */
+function mergeGear(local: Profile, remote: Profile, base: Profile): Gear {
+  const l = { ...newGear(), ...local.gear }, r = { ...newGear(), ...remote.gear }, fitted = base === local ? l : r;
+  return {
+    ...fitted,
+    helmets: Math.max(l.helmets, r.helmets), brakes: Math.max(l.brakes, r.brakes),
+    repairKits: Math.max(l.repairKits, r.repairKits), energy: Math.max(l.energy, r.energy),
+    upgrades: maxEach(l.upgrades, r.upgrades),
+    paints: union(l.paints, r.paints), bells: union(l.bells, r.bells), lights: union(l.lights, r.lights), jerseys: union(l.jerseys, r.jerseys),
+  };
+}
+
+/** challenges, badges, places, favourites, missions and the treasure hunt */
+function mergeFeatures(local: Profile, remote: Profile) {
+  const later = <K extends 'weekly' | 'treasure' | 'dailyStreak'>(k: K, id: (p: Profile) => string, both: (a: Profile[K], b: Profile[K]) => Profile[K]) => {
+    const a = local[k], b = remote[k];
+    if (!a || !b) return (a ?? b)!;
+    return id(local) === id(remote) ? both(a, b) : id(local) > id(remote) ? a : b;
+  };
+  const missionBest = { ...(local.missionBest ?? {}) };
+  for (const [k, t] of Object.entries(remote.missionBest ?? {})) missionBest[k] = Math.min(t, missionBest[k] ?? Infinity);
+  return {
+    weekly: later('weekly', (p) => p.weekly?.id ?? '', (a, b) => ({ id: a.id, n: maxEach(a.n, b.n), claimed: union(a.claimed, b.claimed) })),
+    treasure: later('treasure', (p) => p.treasure?.week ?? '', (a, b) => ({ week: a.week, found: Math.max(a.found, b.found), claimed: a.claimed || b.claimed })),
+    dailyStreak: later('dailyStreak', (p) => p.dailyStreak?.last ?? '', (a, b) => (a.count >= b.count ? a : b)),
+    stats: maxEach(local.stats, remote.stats),
+    badges: union(local.badges, remote.badges),
+    visited: union(local.visited, remote.visited),
+    favourites: union(local.favourites, remote.favourites),
+    missionBest,
+  };
+}
+
 /** Combines this device's progress with the account's, keeping the best of both. */
 export function merge(local: Profile, remote: Profile): Profile {
   const base = remote.xp >= local.xp ? remote : local;
@@ -183,13 +223,14 @@ export function merge(local: Profile, remote: Profile): Profile {
   const daily = (local.lastDaily ?? '') > (remote.lastDaily ?? '') ? local : remote;
   // the account's rider (name, hall, bike) wins unless it never made one
   const who = remote.guest ? local : remote;
-  return {
+  return normalizeProfile({
     ...base,
     name: who.name, username: who.username, hall: who.hall, bike: who.bike, guest: false,
     gender: who.gender ?? local.gender, department: who.department ?? local.department ?? '',
     snap: who.snap ?? '', snapPublic: who.snapPublic ?? true, look: { ...local.look, ...who.look },
     about: { ...local.about, ...who.about },
-    gear: { helmets: Math.max(local.gear?.helmets ?? 0, remote.gear?.helmets ?? 0), brakes: Math.max(local.gear?.brakes ?? 0, remote.gear?.brakes ?? 0) },
+    gear: mergeGear(local, remote, base),
+    ...mergeFeatures(local, remote),
     xp: Math.max(local.xp, remote.xp),
     rides: Math.max(local.rides, remote.rides),
     finishes: Math.max(local.finishes, remote.finishes),
@@ -201,7 +242,7 @@ export function merge(local: Profile, remote: Profile): Profile {
     ownedBikes: [...new Set([...(local.ownedBikes ?? []), ...(remote.ownedBikes ?? [])])],
     lastDaily: daily.lastDaily, streak: daily.streak,
     week,
-  };
+  });
 }
 
 // ---------- results: sent now, or kept until the phone is back online ----------

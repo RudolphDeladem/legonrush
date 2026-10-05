@@ -14,13 +14,14 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, normalizeProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
 import * as cloud from './cloud';
 import * as live from './live';
 import { CAMPUSES, campusById } from './data/campuses';
+import * as fx from './features';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -119,7 +120,7 @@ const riderLook = (p: Profile) => ({ ...p.look, gender: p.gender, jersey: p.look
 
 function applyLook(p: Profile | null = profile) {
   if (!p) return;
-  game.setLook(riderLook(p), bikeById(p.bike).color);
+  game.setLook(riderLook(p), fx.bikePaint(p));
 }
 
 // ---------- splash + welcome ----------
@@ -677,6 +678,10 @@ interface PlayOpts {
   event?: EventDef;
   /** riding with people right now: a Quick Match race or a Vibe Ride */
   live?: LiveRide;
+  /** a campus mission: time limit, HUD and pass or fail (features/missions.ts) */
+  mission?: fx.MissionRun;
+  /** this week's treasure hunt: chests to place on the route (the lead wires Game.setTreasure) */
+  treasure?: { count: number; seed: number };
 }
 
 interface LiveRide {
@@ -738,7 +743,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     ? lr.riders.map((r) => ({ run: { step: 0.1, d: [], x: [] }, name: r.name, color: r.jersey || '#ffd21f', ghostly: false, live: true }))
     : opts.challenge
     ? [{ run: opts.challenge.run, name: opts.challenge.name, color: '#ffd21f', ghostly: false }]
-    : opts.rivals ?? (ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
+    : opts.rivals ?? (opts.mission?.friend ? [opts.mission.friend] : ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
   game.setRivals(rivals);
   game.setGear(profile.gear.helmets, profile.gear.brakes);
   const helmetsEl = app.querySelector<HTMLElement>('#helmets');
@@ -751,6 +756,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     setTimeout(() => { if (prompt.textContent?.startsWith('HELMET')) prompt.innerHTML = ''; }, 2200);
   };
   const gapName = rivals[0]?.name.replace(/ \(bot\)$/, '') ?? '';
+  const missionTick = opts.mission ? fx.missionHud(app.querySelector<HTMLElement>('.hud')!, opts.mission) : null;
   let lastTurn = '';
 
   // riding with people: stream your position, and place theirs as it arrives
@@ -821,6 +827,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
   };
 
   game.onHud = (h: HudState) => {
+    missionTick?.(h);
     dist.textContent = km(h.distance);
     drawMap(h.pos, h.yaw);
     turn.hidden = !h.next || !!h.countdown;
@@ -892,7 +899,8 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
       saveProfile(profile!);
       prize = event.prize;
     }
-    results(result, rewards, route, { hadGhost: !!ghost, rivals: game.rivalTimes, run, opts, event, prize });
+    const feature = fx.afterRide(profile!, route, result, opts.mission);
+    results(result, rewards, route, { hadGhost: !!ghost, rivals: game.rivalTimes, run, opts, event, prize, feature });
     if (lr) liveStandings(lr, result);
   };
 
@@ -992,7 +1000,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     }
     leaveSolo();
   };
-  const leaveSolo = () => (route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
+  const leaveSolo = () => (opts.mission ? fx.missionsScreen() : route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
   document.addEventListener('visibilitychange', onHidden);
@@ -1037,6 +1045,8 @@ interface ResultExtras {
   opts: PlayOpts;
   event?: EventDef;
   prize?: string;
+  /** mission outcome, campus-guide facts and new badges (features/index.ts afterRide) */
+  feature?: string;
 }
 
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
@@ -1147,7 +1157,9 @@ function garageScreen() {
             <div class="grow"><h3>${b.name}</h3><p class="muted small">${b.text} ${isTouch ? 'Hold the brake button.' : 'Hold S or ↓.'}</p></div>
             <div class="gear-buy">${p.gear.brakes >= b.level ? `<span class="badge gold">${icons.check} Fitted</span>` : `<button class="btn btn-primary btn-sm" data-brakes="${b.level}" ${p.coins < b.price ? 'disabled' : ''}>${fmt(b.price)} ${icons.coin}</button>`}</div>
           </div>`).join('')}
+          ${fx.gearCards(p)}
         </div>
+        ${fx.shopSections(p)}
         <h2 class="shop-h">${icons.bike} Bikes</h2>
         <p class="muted small">Buy bikes with Rush Coins, or win the event bikes by finishing Sunset Rush or Night Rush while they are live.</p>
         <div class="bike-grid garage-grid">${[...BIKES, ...GARAGE_BIKES].map(card).join('')}</div>
@@ -1186,6 +1198,11 @@ function garageScreen() {
     p.ownedBikes.push(b.id);
     sfx.finish();
     equip(b.id);
+  });
+  fx.bindShop(p, () => {
+    const y = scrollY;
+    garageScreen();
+    scrollTo(0, y);
   });
   on('#back', 'click', () => home('you'));
   onBack(() => home('you'));
@@ -1241,6 +1258,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
           <div class="reward-row"><span>Coins</span><b>+<span data-count="${rw.coins}">0</span> ${icons.coin}</b></div>
           <div class="reward-row"><span>XP</span><b>+<span data-count="${rw.xp}">0</span></b></div>
         </div>
+        ${x.feature ?? ''}
         ${!r.finished && !explore && !p.gear.helmets ? `<button class="card selectable helmet-tip" id="getHelmet"><span class="gear-ico">${icons.helmet}</span><span class="grow"><b>Out of helmets</b><span class="muted small">A crash helmet saves you from your next crash. ${fmt(SHOP.helmet.price)} coins in the Garage.</span></span>${icons.arrow}</button>` : ''}
         ${levelUp ? `<div class="levelup">${icons.star} Level up! You're now level ${rw.levelAfter}</div>` : ''}
         ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>${icons.unlock} New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
@@ -1616,6 +1634,7 @@ function home(next: Tab = 'home') {
           <div class="stat"><b>${fmt(p.coins)}</b><span>Rush coins</span></div>
           <div class="stat"><b>${fmt(p.bestScore)}</b><span>Best score</span></div>
         </div>
+        ${fx.youLinksHtml(p)}
         <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
         <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit details'}</button></div>
         <button class="btn btn-ghost" id="settings">Settings</button>
@@ -1699,6 +1718,7 @@ function home(next: Tab = 'home') {
     if (claimDaily(p)) sfx.finish();
     home('home');
   });
+  fx.bindFeatureLinks(() => home('you'));
   bindSocial();
   showUpdate('menu');
   // back from another tab goes to Home; from Home it leaves the app
@@ -2505,7 +2525,7 @@ async function afterSignIn() {
   void loadInvites();
   const remote = await cloud.pull().catch(() => null);
   if (remote) {
-    profile = profile ? cloud.merge(profile, remote) : { ...newProfile(), ...remote };
+    profile = profile ? cloud.merge(profile, remote) : normalizeProfile(remote);
     saveProfile(profile);
     applyLook();
     return home('you');
@@ -2524,7 +2544,7 @@ async function syncDown() {
     if (profile && !profile.guest) saveProfile(profile);
     return;
   }
-  profile = profile ? cloud.merge(profile, remote) : { ...newProfile(), ...remote };
+  profile = profile ? cloud.merge(profile, remote) : normalizeProfile(remote);
   saveProfile(profile);
   // refresh the menu if one is showing; never interrupt a ride
   if (app.querySelector('.shell')) home(tab);
@@ -2667,6 +2687,10 @@ function settingsScreen() {
           <p class="muted small" id="gNote">${graphicsNote()}</p>
         </div>
         <div class="card stack">
+          <div class="set-row"><b>Difficulty</b>${seg('difficulty', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']], settings.difficulty)}</div>
+          <p class="muted small">Easy gives you more time on missions; Hard gives less and more traffic.</p>
+        </div>
+        <div class="card stack">
           <div class="set-row"><b>Boost button</b>${seg('hand', [['0', 'Right'], ['1', 'Left']], settings.leftHanded ? '1' : '0')}</div>
           <p class="muted small">Put the boost button under the thumb you prefer.</p>
         </div>
@@ -2691,6 +2715,7 @@ function settingsScreen() {
     app.querySelector('#gNote')!.textContent = graphicsNote();
   });
   pick('hand', (v) => changeSettings({ leftHanded: v === '1' }));
+  pick('difficulty', (v) => changeSettings({ difficulty: v as typeof settings.difficulty }));
   pick('motion', (v) => changeSettings({ reducedMotion: v === '1' }));
   on('#volume', 'input', (_, el) => changeSettings({ volume: Number((el as HTMLInputElement).value) / 100 }));
   on('#volume', 'change', () => sfx.coin());
@@ -2800,8 +2825,10 @@ function explorePicker(fromName?: string, toName = '') {
         <button class="btn btn-link back" id="back">← Back</button>
         <p class="kicker">${icons.map} Explore</p>
         <h1 class="title">Find your way</h1>
+        ${fx.exploreSearchHtml(p)}
         <button class="qr-campus solo" data-campus><span>${icons.pin}</span><span class="grow"><small>Campus</small>${esc(campusById(settings.campus).name)}${settings.campus === 'ug' ? ', Legon' : ''}</span><em>▾</em></button>
         <button class="card selectable tour-card" id="tour"><div class="row"><h3 style="font-weight:800">${icons.star} FRESHERS' TOUR</h3><span class="grow"></span><span class="badge gold">${TOUR_STOPS.length} places · 3.5 km</span></div><p class="muted small" style="margin-top:4px">One ride past the places you need in week one: ${TOUR_STOPS.map((n) => esc(n.replace(/^The |, .*$/g, ''))).join(', ')}.</p></button>
+        ${fx.exploreModesHtml(p)}
         <p class="kicker" style="margin-top:6px">Or plan your own way</p>
         <p class="muted">Pick where you are and where you need to be. Type a name or what students call it, like Vandals, Pent or JQB.</p>
         <div class="field picker"><label for="from">From</label><input id="from" autocomplete="off" spellcheck="false" placeholder="Your hall, a faculty, a landmark…"><ul class="suggest" id="fromList" hidden></ul></div>
@@ -2838,6 +2865,7 @@ function explorePicker(fromName?: string, toName = '') {
     }
     preview.innerHTML = `
       ${placeCard(to)}
+      ${fx.favButtonHtml(p, to)}
       <canvas class="route-map" width="720" height="440" aria-label="Map of the way from ${esc(from.name)} to ${esc(to.name)}"></canvas>
       <div class="stats three">
         <div class="stat"><b>${dm(route.length)}</b><span>Distance</span></div>
@@ -2853,6 +2881,7 @@ function explorePicker(fromName?: string, toName = '') {
       <p class="kicker" style="margin-top:6px">Directions</p>
       ${stepsList(route)}`;
     routeMap(preview.querySelector('canvas')!, route);
+    fx.bindFavButton(preview, p);
     preview.querySelector('#go')!.addEventListener('click', () => route && play(false, route));
     const [fl, fg] = toLatLng(from.x, from.z), [tl, tg] = toLatLng(to.x, to.z);
     preview.querySelector<HTMLAnchorElement>('#gmaps')!.href =
@@ -2902,6 +2931,11 @@ function explorePicker(fromName?: string, toName = '') {
   };
   picker(fromIn, app.querySelector('#fromList')!, (pl) => { from = pl; });
   picker(toIn, app.querySelector('#toList')!, (pl) => { to = pl; });
+  // "Where do you want to go?" picks the destination; favourites are one tap
+  picker(app.querySelector('#fxWhere')!, app.querySelector('#fxWhereList')!, (pl) => { to = pl; toIn.value = pl.name; });
+  on('[data-fav]', 'click', (_, el) => { to = placeByName(el.dataset.fav!); toIn.value = show(to); update(); preview.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  on('#fxMissions', 'click', () => fx.missionsScreen(() => explorePicker(fromName, toName)));
+  on('#fxTreasure', 'click', () => fx.treasureScreen(() => explorePicker(fromName, toName)));
 
   on('[data-to]', 'click', (_, el) => { to = placeByName(el.dataset.to!); toIn.value = show(to); update(); });
   on('#swap', 'click', () => { [from, to] = [to, from]; fromIn.value = show(from); toIn.value = show(to); update(); });
@@ -3022,6 +3056,17 @@ function whereIsIt() {
   onBack(() => home());
   ask();
 }
+
+// feature screens (challenges, badges, missions, treasure, profile card) share the shell's helpers
+fx.initFeatures({
+  app, settings, onBack, share,
+  profile: () => profile!,
+  showcase: () => { game.showcase(); applyLook(); },
+  play: (route, extras) => play(false, route, extras),
+  home: (t) => home(t),
+  explore: (from, to) => explorePicker(from, to),
+  garage: () => garageScreen(),
+});
 
 // a signed-in rider's progress follows them between devices
 const resetting = cloud.cameFromReset();
