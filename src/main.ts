@@ -24,6 +24,7 @@ import * as cloud from './cloud';
 import * as live from './live';
 import { CAMPUSES, campusById } from './data/campuses';
 import * as fx from './features';
+import * as money from './features/money-ui';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -856,7 +857,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   if (!profile) return;
   applyLook();
   if (!opts.live && !opts.rivals && !opts.challenge) saveLastRide(route);
-  const bike = bikeById(profile.bike);
+  const bike = bikeById(money.isPrizeRide(route.id) ? money.PRIZE_BIKE : profile.bike);
   // the first ride lends rim brakes, so the brake tip has something to teach
   const brakes = tutorial ? Math.max(1, profile.gear.brakes) : profile.gear.brakes;
   const RING = 2 * Math.PI * 52;
@@ -926,6 +927,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   const raining = !!weather?.rain && !lr;
   game.setWeather(raining ? 'rain' : 'clear');
   game.setTreasure(opts.treasure?.count ?? 0, opts.treasure?.seed ?? 1);
+  if (money.isPrizeRide(route.id)) money.levelField(game, brakes);
   const flash = (head: string, text: string, ms = 1600) => {
     prompt.innerHTML = `<small>${head}</small>${text}`;
     setTimeout(() => { if (prompt.textContent?.startsWith(head)) prompt.innerHTML = ''; }, ms);
@@ -1129,6 +1131,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     if (lr) setTimeout(() => lr.ch.leave(), 90e3);
     const rewards = applyRide(profile!, result, finishReward(route), event ? 2 : 1);
     cloud.record({ hall: profile!.hall, department: profile!.department, km: r.distance / 1000, race: route.kind === 'race' && r.finished ? { route: route.id, time: r.time } : undefined });
+    money.afterRace(route, r, run);
     if (route.kind === 'race' && r.finished && profile!.bestTimes[result.routeId] === r.time) saveGhost(route.id, { time: r.time, ...run });
     // finishing a live event wins its bike
     let prize: string | undefined;
@@ -1423,7 +1426,7 @@ function garageScreen() {
     <div class="screen solid fade-in">
       <div class="wrap stack">
         <button class="btn btn-link back" id="back">← Back</button>
-        <div class="row"><h1 class="title">Garage &amp; shop</h1><span class="grow"></span><span class="chip">${icons.coin} ${fmt(p.coins)}</span></div>
+        <div class="row"><h1 class="title">Garage &amp; shop</h1><span class="grow"></span>${money.shopBuyHtml()}<span class="chip">${icons.coin} ${fmt(p.coins)}</span></div>
         <h2 class="shop-h">${icons.shop} Ride gear</h2>
         <div class="gear-grid">
           <div class="card gear-card">
@@ -1957,6 +1960,7 @@ function home(next: Tab = 'home') {
         <p class="kicker">Events</p>
         <h1 class="title">Campus events</h1>
         <p class="muted">Ride an event while it is live for double coins and a bike you can only win there.</p>
+        ${money.prizeCardHtml()}
         ${EVENTS.map(eventCard).join('')}
         <div class="card stack" style="gap:8px">
           <div class="row"><h3 style="font-weight:800">${icons.pillars} HALL WEEK</h3><span class="grow"></span><span class="badge gold">+${WEEK_REWARD} ${icons.coin}</span></div>
@@ -1998,6 +2002,7 @@ function home(next: Tab = 'home') {
           <div class="stat"><b>${fmt(p.bestScore)}</b><span>Best score</span></div>
         </div>
         ${fx.youLinksHtml(p)}
+        ${money.youMoneyHtml()}
         <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
         <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create account' : 'Edit details'}</button></div>
         <button class="btn btn-ghost" id="settings">Settings</button>
@@ -3453,6 +3458,7 @@ fx.initFeatures({
   explore: (from, to) => explorePicker(from, to),
   garage: () => garageScreen(),
 });
+money.initMoney();
 
 // a signed-in rider's progress follows them between devices
 const resetting = cloud.cameFromReset();
@@ -3482,7 +3488,8 @@ cloud.restore(() => {
 }).then(() => {
   if (resetting && cloud.account) return authScreen('newpass', () => home('you'));
   if (cloud.account) {
-    void syncDown();
+    // coins paid for while away are added after the account's progress has arrived
+    void syncDown().then(() => money.afterLaunch());
     void loadInvites();
-  }
+  } else void money.afterLaunch();
 });

@@ -1,0 +1,114 @@
+/* Money screens: Buy coins, Weekly prize race, Wallet, terms. Light menus like the other feature screens. */
+.mn-screen .wrap.stack { gap: 12px; }
+.mn-screen h3 { font-weight: 800; display: flex; align-items: center; gap: 6px; }
+.mn-screen h3 .i, .mn-screen .row > .i { width: 18px; height: 18px; flex: none; }
+.coin-pill { cursor: pointer; }
+
+.mn-loading { display: flex; align-items: center; gap: 10px; padding: 18px 4px; }
+.mn-spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid #e4e7ec; border-top-color: var(--ink, #101828); animation: mn-spin 0.8s linear infinite; display: inline-block; vertical-align: -4px; flex: none; }
+.mn-spin.sm { width: 14px; height: 14px; border-width: 2px; vertical-align: -2px; }
+@keyframes mn-spin { to { transform: rotate(360deg); } }
+
+.mn-test { background: #eef4ff; color: #1d3f8f; border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 700; }
+.mn-error { color: #b42318; font-size: 13px; font-weight: 600; margin: 4px 0 0; }
+.mn-error[hidden] { display: none; }
+
+/* coming soon */
+.mn-soon { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 22px 16px; }
+.mn-soon-ico { width: 56px; height: 56px; border-radius: 16px; background: #fff4bf; color: var(--ink); display: grid; place-items: center; }
+.mn-soon-ico .i { width: 28px; height: 28px; }
+.mn-soon .badge .i { width: 12px; height: 12px; }
+.mn-soon p { max-width: 420px; }
+
+/* bundles */
+.mn-bundles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 640px) { .mn-bundles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.mn-bundles.soon { opacity: 0.55; filter: grayscale(0.4); }
+.mn-bundle { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px 10px 12px; text-align: center; }
+.mn-bundle .btn { width: 100%; margin-top: 6px; }
+.mn-coins { display: flex; align-items: center; gap: 6px; font-size: 22px; }
+.mn-coins .i { width: 24px; height: 24px; color: #c99a00; }
+.mn-tag { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--gold); color: var(--ink); font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; }
+.mn-fine { display: flex; flex-direction: column; gap: 8px; }
+.mn-fine p .i { width: 15px; height: 15px; vertical-align: -3px; margin-right: 2px; }
+.mn-terms-link { align-self: flex-start; padding: 0; font-size: 13px; }
+.mn-buy-btn .i { width: 15px; height: 15px; vertical-align: -3px; }
+
+/* payment result, cash-out result */
+.mn-pay { display: flex; gap: 12px; align-items: flex-start; }
+.mn-pay .btn { margin-top: 8px; }
+.mn-pay-ico { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: #eef1f6; color: var(--ink); flex: none; }
+.mn-pay-ico .i { width: 20px; height: 20px; }
+.mn-pay.ok { border-color: #abefc6; background: #f3fdf7; }
+.mn-pay.ok .mn-pay-ico { background: #d1fadf; color: #067647; }
+.mn-pay.bad { border-color: #fecdca; background: #fffbfa; }
+.mn-pay.bad .mn-pay-ico { background: #fee4e2; color: #b42318; }
+
+/* prize race */
+.mn-prize-card { text-align: left; }
+.mn-prize-card .badge { white-space: nowrap; flex: none; margin-left: 8px; }
+.mn-prize-card p { margin-top: 4px; }
+.mn-prize-card h3 .i { width: 18px; height: 18px; }
+.mn-event { display: flex; flex-direction: column; gap: 8px; }
+.mn-event h2 { font-size: 22px; font-weight: 800; margin: 2px 0 0; }
+.mn-event .badge .i, .mn-event .muted .i { width: 13px; height: 13px; vertical-align: -2px; }
+.mn-sponsor { font-size: 13px; color: var(--ink-2, #344054); }
+.mn-podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; align-items: end; gap: 8px; margin: 8px 0 4px; }
+.mn-step { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; border-radius: 12px 12px 4px 4px; padding: 10px 4px; background: #eef1f6; }
+.mn-step span { font-size: 12px; font-weight: 700; color: var(--ink-2, #344054); }
+.mn-step b { font-size: 16px; font-weight: 800; }
+.mn-step.p1 { order: 2; min-height: 86px; background: var(--gold); }
+.mn-step.p2 { order: 1; min-height: 70px; background: #e4e7ec; }
+.mn-step.p3 { order: 3; min-height: 60px; background: #f6e3cf; }
+.mn-mine p { margin: 6px 0 0; }
+.mn-tries { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.mn-try { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.mn-try .i { width: 16px; height: 16px; flex: none; }
+.mn-try span { font-weight: 800; font-variant-numeric: tabular-nums; }
+.mn-try small { color: var(--muted); }
+.mn-try.ok .i { color: #067647; }
+.mn-try.bad .i { color: #b42318; }
+.mn-board .board-row { border-bottom-color: var(--line); }
+.mn-board .board-row.prize .rank { background: var(--gold); color: var(--ink); border-radius: 50%; width: 24px; height: 24px; display: inline-grid; place-items: center; font-size: 12px; }
+.mn-win { font-style: normal; font-size: 11px; font-weight: 800; background: #fff4bf; color: var(--gold-ink, #7a5c00); border-radius: 999px; padding: 2px 7px; white-space: nowrap; }
+.mn-rules ol { margin: 8px 0 4px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; }
+.mn-rules h3 .i { width: 18px; height: 18px; }
+
+/* wallet */
+.mn-links { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 0; }
+.mn-balance-card { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.mn-balance-card b { font-size: 34px; font-weight: 800; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+.mn-balance-card.soon b { color: #98a2b3; }
+.mn-open .row { gap: 8px; }
+.mn-open .i { width: 18px; height: 18px; }
+.mn-cash { gap: 10px; }
+.mn-nets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.mn-nets .chip-btn { flex: 1 1 auto; min-width: 0; padding: 9px 4px; border-radius: 999px; text-align: center; line-height: 1.2; border: 1px solid var(--line); background: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; color: var(--ink); }
+.mn-nets .chip-btn.on { background: var(--gold); border-color: var(--gold); }
+.mn-check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.mn-check input { width: 18px; height: 18px; margin-top: 1px; flex: none; accent-color: #101828; }
+.mn-confirm { background: #fffbea; border: 1px solid #fde68a; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.mn-confirm p { margin: 0; }
+.mn-history h4 { margin: 14px 0 4px; font-size: 13px; color: var(--ink-2, #344054); }
+.mn-hrow { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.mn-hrow:last-child { border-bottom: 0; }
+.mn-hrow .grow { display: flex; flex-direction: column; min-width: 0; }
+.mn-hrow small { color: var(--muted); font-size: 12px; }
+.mn-hrow b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mn-hrow b.plus { color: #067647; }
+.mn-status { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #eef1f6; white-space: nowrap; }
+.mn-status.sent { background: #d1fadf; color: #067647; }
+.mn-status.failed { background: #fee4e2; color: #b42318; }
+.mn-status.pending, .mn-status.processing { background: #fff4bf; color: #7a5c00; }
+
+/* terms */
+.mn-terms ul { margin: 6px 0 14px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; }
+.mn-terms h3 { margin-top: 4px; }
+
+/* floating note over any screen (also over the ride results) */
+.mn-notice { position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 9999; width: min(440px, calc(100vw - 32px)); display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px; background: #fff; color: var(--ink, #101828); border: 1px solid #e4e7ec; box-shadow: 0 10px 30px rgba(16, 24, 40, 0.18); font-size: 14px; line-height: 1.35; cursor: pointer; }
+.mn-notice .i { width: 20px; height: 20px; flex: none; }
+.mn-notice.ok { border-color: #abefc6; }
+.mn-notice.ok .i { color: #067647; }
+.mn-notice.bad { border-color: #fecdca; }
+.mn-notice.bad .i { color: #b42318; }
