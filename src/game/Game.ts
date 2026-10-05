@@ -28,6 +28,10 @@ export interface HudState {
   ghostGap: number | null;
   /** your place among the rivals, when racing more than one */
   place: { pos: number; of: number } | null;
+  /** crash helmets left: each one saves a ride from one crash */
+  helmets: number;
+  /** holding the brake (only with brakes fitted) */
+  braking: boolean;
 }
 
 /** A recorded ride: road distance and lateral offset every `step` seconds. */
@@ -153,6 +157,12 @@ export class Game {
   private crank = 0;
   private lean = 0;
   private shake = 0;
+  /** gear from the shop: crash helmets left and brake level (0 none, 1 rim, 2 disc) */
+  private helmets = 0;
+  private brakeLevel = 0;
+  private braking = false;
+  /** seconds of no-crash time after a helmet saves you */
+  private shield = 0;
 
   private obstacles: Obstacle[] = [];
   private coinList: Coin[] = [];
@@ -174,6 +184,8 @@ export class Game {
   /** no traffic or obstacles: for learning the way */
   calm = false;
   onEnd: (r: RideEnd) => void = () => {};
+  /** a helmet just saved the rider from a crash; how many are left */
+  onHelmet: (left: number) => void = () => {};
   onAction: (a: Action) => void = () => {};
 
   constructor(canvas: HTMLCanvasElement) {
@@ -429,6 +441,19 @@ export class Game {
     this.nextSpawn = Math.max(this.nextSpawn, this.d + 70);
   }
 
+  /** fits the shop gear for the next ride */
+  setGear(helmets: number, brakeLevel: number) {
+    this.helmets = helmets;
+    this.brakeLevel = brakeLevel;
+  }
+
+  /** hold to brake; does nothing without brakes */
+  setBrake(on: boolean) {
+    const was = this.braking;
+    this.braking = on && this.brakeLevel > 0 && this.phase === 'riding';
+    if (this.braking && !was) sfx.lane();
+  }
+
   giveBoost(amount: number) {
     this.boost = Math.min(1, this.boost + amount);
   }
@@ -465,7 +490,8 @@ export class Game {
     this.obstacles = [];
     this.coinList = [];
     this.d = this.x = this.y = this.vy = this.speed = this.boost = this.boostTime = this.coins = this.time = 0;
-    this.slowTimer = this.endTimer = this.lean = this.shake = 0;
+    this.slowTimer = this.endTimer = this.lean = this.shake = this.shield = 0;
+    this.braking = false;
     this.lane = 1;
     this.paused = false;
     this.rec = { step: GHOST_STEP, d: [], x: [] };
@@ -563,8 +589,13 @@ export class Game {
         target *= 0.6;
         this.slowTimer -= dt;
       }
+      if (this.shield > 0) this.shield -= dt;
       const accel = 4 + (this.bike?.acceleration ?? 3) * 1.6;
-      this.speed += Math.sign(target - this.speed) * Math.min(Math.abs(target - this.speed), accel * dt * (target < this.speed ? 2.5 : 1));
+      if (this.braking && this.boostTime <= 0) {
+        // disc brakes stop about twice as hard as rim brakes
+        const floor = 2.5;
+        this.speed = Math.max(Math.min(this.speed, floor), this.speed - (this.brakeLevel > 1 ? 26 : 13) * dt);
+      } else this.speed += Math.sign(target - this.speed) * Math.min(Math.abs(target - this.speed), accel * dt * (target < this.speed ? 2.5 : 1));
     } else {
       // crashed or finished: coast to a stop
       this.speed = Math.max(0, this.speed - (this.phase === 'crashed' ? 30 : 10) * dt);
@@ -697,6 +728,8 @@ export class Game {
       yaw: this.rider.root.rotation.y,
       ghostGap: this.ghostGap(),
       place: this.standing(),
+      helmets: this.helmets,
+      braking: this.braking,
       next: this.route.kind === 'explore' ? (() => { const n = this.nextStep(); return n && { text: n.step.text, turn: n.step.turn, dist: n.dist }; })() : null,
     });
   }
@@ -800,11 +833,24 @@ export class Game {
         o.fling = new THREE.Vector3(p.tx * 12 + p.nx * side, 6, p.tz * 12 + p.nz * side);
         this.shake = 0.3;
         sfx.bump();
+      } else if (this.shield > 0) {
+        // just got back up after a helmet save: brush past
+        this.slowTimer = Math.max(this.slowTimer, 0.6);
+        sfx.bump();
       } else if (o.spec.hazard || this.route.kind === 'explore') {
         // explore rides never end in a crash, they just slow you down
         this.slowTimer = 1.2;
         this.shake = 0.35;
         sfx.bump();
+      } else if (this.helmets > 0) {
+        // the helmet takes the hit: wobble, slow down, ride on
+        this.helmets--;
+        this.shield = 2.5;
+        this.slowTimer = 2;
+        this.speed *= 0.35;
+        this.shake = 0.6;
+        sfx.crash();
+        this.onHelmet(this.helmets);
       } else {
         this.phase = 'crashed';
         this.endTimer = 1.3;
@@ -870,6 +916,8 @@ export class Game {
     if (this.phase === 'crashed') {
       r.body.rotation.z = Math.min(r.body.rotation.z + dt * 4, 1.4);
       r.body.position.y = Math.max(-0.2, r.body.position.y - dt);
+    } else if (this.shield > 1.6) {
+      r.body.rotation.z = Math.sin(this.shield * 22) * 0.35;
     } else {
       r.body.rotation.z = this.lean;
       r.body.rotation.x = this.y > 0 ? -0.15 : 0;

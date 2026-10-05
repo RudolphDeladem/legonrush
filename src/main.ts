@@ -14,7 +14,7 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { MISSIONS, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
@@ -217,13 +217,13 @@ const OB_STEPS: { img: string; side: string; line: string }[] = [
 ];
 
 const RIDER_TYPES: [RiderType, string, string, string][] = [
-  ['racer', '🏁', 'Racer', 'I love competition and winning.'],
-  ['explorer', '🧭', 'Explorer', 'I love discovering new places.'],
-  ['social', '👥', 'Social Rider', 'I love riding with friends.'],
-  ['speedster', '⚡', 'Speedster', 'I live for speed and thrill.'],
-  ['chill', '😎', 'Chill Rider', 'I ride to relax and enjoy.'],
+  ['racer', icons.flag, 'Racer', 'I love competition and winning.'],
+  ['explorer', icons.compass, 'Explorer', 'I love discovering new places.'],
+  ['social', icons.social, 'Social Rider', 'I love riding with friends.'],
+  ['speedster', icons.bolt, 'Speedster', 'I live for speed and thrill.'],
+  ['chill', icons.smile, 'Chill Rider', 'I ride to relax and enjoy.'],
 ];
-const STATUSES: [StudentStatus, string, string][] = [['student', '🎓', 'UG Student'], ['alumni', '🏛️', 'Alumni'], ['staff', '💼', 'Staff'], ['visitor', '👋', 'Visitor / Guest']];
+const STATUSES: [StudentStatus, string, string][] = [['student', icons.grad, 'UG Student'], ['alumni', icons.pillars, 'Alumni'], ['staff', icons.briefcase, 'Staff'], ['visitor', icons.hand, 'Visitor / Guest']];
 
 /** a side-on bike drawing in the bike's colour */
 const bikeArt = (color: string) => `<svg viewBox="0 0 220 120" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -246,33 +246,33 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
   const bike = bikeById(d.bike);
   const bodies: (() => [string, string, string])[] = [
     () => ['Create your <em>account</em>', 'Join thousands of riders on campus.', `
-      ${field('✉️', 'Email address', `<input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="you@st.ug.edu.gh" value="${esc(s.email)}">`)}
-      ${field('🔒', 'Password', `<input id="pass" type="password" autocomplete="new-password" placeholder="Create a password" value="${esc(s.pass)}">`, '<button type="button" class="eye" id="eye">Show</button>')}
+      ${field(icons.mail, 'Email address', `<input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="you@st.ug.edu.gh" value="${esc(s.email)}">`)}
+      ${field(icons.lock, 'Password', `<input id="pass" type="password" autocomplete="new-password" placeholder="Create a password" value="${esc(s.pass)}">`, '<button type="button" class="eye" id="eye">Show</button>')}
       <div class="rules" id="rules"><span data-r="len">At least 8 characters</span><span data-r="num">Contains a number</span><span data-r="sym">Contains a special character</span></div>
       ${field('@', 'Username', `<input id="user" maxlength="20" autocapitalize="off" placeholder="rudolphrides" value="${esc(d.username)}">`)}
       <button class="btn btn-link" id="skipAcct">Skip for now and save on this phone only</button>`],
     () => ['Tell us about <em>you</em>', 'This helps us personalise your experience.', `
-      <div class="ob-avatar" id="avatar" style="background:#ffd21f">${esc((d.name || '?')[0].toUpperCase())}<i>📷</i></div>
-      ${field('👤', 'Display name', `<input id="name" maxlength="18" autocomplete="nickname" placeholder="Rudolph" value="${esc(d.name)}">`)}
+      <div class="ob-avatar" id="avatar" style="background:#ffd21f">${esc((d.name || '?')[0].toUpperCase())}<i>${icons.camera}</i></div>
+      ${field(icons.user, 'Display name', `<input id="name" maxlength="18" autocomplete="nickname" placeholder="Rudolph" value="${esc(d.name)}">`)}
       <p class="ob-label">Gender</p>
       <div class="opt-grid two" id="gender">${(['male', 'female'] as const).map((g) => `<button class="opt row ${d.gender === g ? 'on' : ''}" data-v="${g}">${g === 'male' ? 'Male' : 'Female'}</button>`).join('')}</div>
-      ${field('🎂', 'Date of birth (optional)', `<input id="dob" type="date" max="${new Date().toISOString().slice(0, 10)}" value="${esc(A.dob)}">`)}`],
+      ${field(icons.cake, 'Date of birth (optional)', `<input id="dob" type="date" max="${new Date().toISOString().slice(0, 10)}" value="${esc(A.dob)}">`)}`],
     () => ['Your <em>university</em>', 'Connect with your campus community.', `
-      ${field('🏫', 'University', `<select id="uni">${CAMPUSES.map((c) => `<option value="${c.id}" ${A.campus === c.id ? 'selected' : ''} ${c.open ? '' : 'disabled'}>${esc(c.name)}${c.open ? '' : ' (coming soon)'}</option>`).join('')}</select>`, '<em class="muted">▾</em>')}
+      ${field(icons.pillars, 'University', `<select id="uni">${CAMPUSES.map((c) => `<option value="${c.id}" ${A.campus === c.id ? 'selected' : ''} ${c.open ? '' : 'disabled'}>${esc(c.name)}${c.open ? '' : ' (coming soon)'}</option>`).join('')}</select>`, '<em class="muted">▾</em>')}
       <p class="ob-label">Student status</p>
       <div class="opt-grid two" id="status">${STATUSES.map(([v, i, t]) => `<button class="opt ${A.status === v ? 'on' : ''}" data-v="${v}"><span class="o-ico">${i}</span>${t}</button>`).join('')}</div>
       <div id="progWrap" ${A.status === 'staff' || A.status === 'visitor' ? 'hidden' : ''}>
-      ${field('📘', 'Programme / Department', `<input id="dept" list="depts" autocomplete="off" placeholder="Start typing, like Computer Science" value="${esc(d.department === OTHER_DEPARTMENT ? '' : d.department)}">`)}
+      ${field(icons.book, 'Programme / Department', `<input id="dept" list="depts" autocomplete="off" placeholder="Start typing, like Computer Science" value="${esc(d.department === OTHER_DEPARTMENT ? '' : d.department)}">`)}
       <datalist id="depts">${DEPARTMENTS.flatMap((g) => g.departments.map((x) => `<option value="${esc(x)}" label="${esc(g.college)}"></option>`)).join('')}</datalist></div>`],
     () => ['Choose your <em>hall</em>', 'Represent your hall and earn points together.', `
       <div class="hall-tiles" id="halls">${HALLS.filter((h) => h.id !== 'none').map((h) => `<button class="hall-t ${d.hall === h.id ? 'on' : ''}" data-v="${h.id}" style="--hc:${h.color}">${esc(h.name)}</button>`).join('')}</div>
       <button class="opt row ${d.hall === 'none' ? 'on' : ''}" data-v="none" id="nonRes">I don't live in a hall (non-resident)</button>`],
     () => ['Connect your <em>social</em>', 'Let riders you meet find you. All optional.', `
-      <div class="social-row"><span class="s-logo" style="background:#fffc00;color:#0b1530">👻</span><input id="snap" maxlength="15" autocapitalize="off" placeholder="Snapchat username" value="${esc(d.snap)}"></div>
-      <div class="social-row"><span class="s-logo" style="background:#f1f3f8;color:#0b1530">👁️</span><span class="grow">Who can see your Snapchat?</span>
+      <div class="social-row"><span class="s-logo" style="background:#fffc00;color:#0b1530">${icons.ghost}</span><input id="snap" maxlength="15" autocapitalize="off" placeholder="Snapchat username" value="${esc(d.snap)}"></div>
+      <div class="social-row"><span class="s-logo" style="background:#f1f3f8;color:#0b1530">${icons.eye}</span><span class="grow">Who can see your Snapchat?</span>
         <select id="snapVis"><option value="all" ${d.snapPublic ? 'selected' : ''}>Everyone</option><option value="me" ${d.snapPublic ? '' : 'selected'}>Only me</option></select></div>
-      <div class="social-row"><span class="s-logo" style="background:linear-gradient(45deg,#f9a825,#e91e63,#7b1fa2)">📷</span><input id="insta" maxlength="30" autocapitalize="off" placeholder="Instagram username" value="${esc(A.instagram)}"></div>
-      <div class="social-row"><span class="s-logo" style="background:#0b1530">♪</span><input id="tiktok" maxlength="24" autocapitalize="off" placeholder="TikTok username" value="${esc(A.tiktok)}"></div>`],
+      <div class="social-row"><span class="s-logo" style="background:linear-gradient(45deg,#f9a825,#e91e63,#7b1fa2)">${icons.camera}</span><input id="insta" maxlength="30" autocapitalize="off" placeholder="Instagram username" value="${esc(A.instagram)}"></div>
+      <div class="social-row"><span class="s-logo" style="background:#0b1530">${icons.music}</span><input id="tiktok" maxlength="24" autocapitalize="off" placeholder="TikTok username" value="${esc(A.tiktok)}"></div>`],
     () => ['What kind of <em>rider</em> are you?', 'Choose the style that fits you best.', `
       <div class="types" id="types">${RIDER_TYPES.map(([v, i, t, x]) => `<button class="type ${A.riderType === v ? 'on' : ''}" data-v="${v}"><img src="${photo('type-' + v)}" alt="" loading="lazy"><span class="t-ico">${i}</span><span><b>${t}</b><small>${x}</small></span></button>`).join('')}</div>`],
     () => ['', '', ''],
@@ -584,7 +584,7 @@ function createRider(draft: Profile, editing = false) {
 const JERSEY_COLORS = ['#d64545', '#f2c230', '#2e8b3a', '#1f6fd6', '#7b3fc4', '#ff7a1a', '#111418', '#f4f4f4'];
 const HELMET_COLORS = ['#f5c518', '#f4f4f4', '#111418', '#d64545', '#1f6fd6', '#2ecc71'];
 const OUTFITS: [Outfit, string][] = [['jersey', 'Jersey'], ['hall-tee', 'Hall T-shirt'], ['hoodie', 'Hoodie'], ['kente', 'Kente jersey']];
-const ACCESSORIES: [Accessory, string, string][] = [['helmet', '⛑️', 'Helmet'], ['sunglasses', '🕶️', 'Sunglasses'], ['backpack', '🎒', 'Backpack'], ['watch', '⌚', 'Watch'], ['gloves', '🧤', 'Gloves']];
+const ACCESSORIES: [Accessory, string, string][] = [['helmet', icons.helmet, 'Helmet'], ['sunglasses', icons.glasses, 'Sunglasses'], ['backpack', icons.backpack, 'Backpack'], ['watch', icons.watch, 'Watch'], ['gloves', icons.glove, 'Gloves']];
 
 /** Step 2: dress the rider, with the 3D rider turning above the options. */
 interface DressFlow { next: () => void; back: () => void; step: number; of: number }
@@ -665,6 +665,8 @@ const routeKey = (r: Route) => (r.id === 'explore' ? `explore:${r.from.name}>${r
 const finishReward = (r: Route) => (isExplore(r) ? 50 + Math.round(r.length / 20) : 250);
 
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
+let brakeDown: ((e: KeyboardEvent) => void) | null = null;
+let brakeUp: ((e: KeyboardEvent) => void) | null = null;
 
 interface PlayOpts {
   /** bots for Quick Match */
@@ -700,6 +702,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
           <div class="row" style="gap:6px;justify-content:center${opts.live?.kind === 'vibe' ? ';display:none' : ''}"><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
         </div>
         <div class="row">
+          ${route.kind === 'explore' ? '' : `<div class="hud-pill helmet-pill" id="helmetPill" title="Crash helmets: each one saves you from a crash">${icons.helmet} <span id="helmets">${profile.gear.helmets}</span></div>`}
           <div class="hud-pill">${icons.coin} <span id="coins">0</span></div>
           <button class="pause-btn" id="pause" aria-label="Pause">${icons.pause}</button>
         </div>
@@ -707,6 +710,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
       <div class="turn-banner" id="turn" hidden><span class="turn-arrow" id="turnArrow"></span><div><b id="turnDist"></b><span id="turnText"></span></div></div>
       <div class="prompt" id="prompt"></div>
       <div class="hud-bottom" style="position:relative">
+        ${profile.gear.brakes ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : ''}
         <div class="boost" id="boostWrap"><label>BOOST${isTouch ? '' : ' · B / SHIFT'}</label><div class="xpbar"><div id="boost" style="width:0%"></div></div></div>
         ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : ''}
       </div>
@@ -736,6 +740,16 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     ? [{ run: opts.challenge.run, name: opts.challenge.name, color: '#ffd21f', ghostly: false }]
     : opts.rivals ?? (ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
   game.setRivals(rivals);
+  game.setGear(profile.gear.helmets, profile.gear.brakes);
+  const helmetsEl = app.querySelector<HTMLElement>('#helmets');
+  const brakeBtn = app.querySelector<HTMLButtonElement>('#brakeBtn');
+  game.onHelmet = (left) => {
+    profile!.gear.helmets = left;
+    saveProfile(profile!);
+    if (helmetsEl) helmetsEl.textContent = String(left);
+    prompt.innerHTML = `<small>HELMET SAVED YOU</small>${left ? `${left} helmet${left === 1 ? '' : 's'} left` : 'No helmets left. Ride carefully!'}`;
+    setTimeout(() => { if (prompt.textContent?.startsWith('HELMET')) prompt.innerHTML = ''; }, 2200);
+  };
   const gapName = rivals[0]?.name.replace(/ \(bot\)$/, '') ?? '';
   let lastTurn = '';
 
@@ -836,6 +850,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     boostWrap.classList.toggle('ready', ready);
     if (boostBtn) boostBtn.disabled = !ready;
     vignette.classList.toggle('on', h.boosting);
+    brakeBtn?.classList.toggle('on', h.braking);
     if (h.countdown) {
       prompt.innerHTML = `<span class="countdown">${h.countdown}</span>`;
       countdownShown = true;
@@ -900,6 +915,20 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     }
   };
   addEventListener('keydown', keyHandler);
+  // brakes: hold S or ↓, or the brake button
+  const brakeKey = (on: boolean) => (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement) return;
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); game.setBrake(on); }
+  };
+  brakeDown = brakeKey(true);
+  brakeUp = brakeKey(false);
+  addEventListener('keydown', brakeDown);
+  addEventListener('keyup', brakeUp);
+  if (brakeBtn) {
+    const hold = (on: boolean) => (e: Event) => { e.stopPropagation(); e.preventDefault(); game.setBrake(on); };
+    brakeBtn.addEventListener('pointerdown', hold(true));
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) brakeBtn.addEventListener(ev, hold(false));
+  }
 
   const touch = $('touch');
   let sx = 0, sy = 0, st = 0, swiped = false;
@@ -932,7 +961,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
         <button class="btn btn-primary" data-p="continue">Continue</button>
         ${lr ? '' : '<button class="btn btn-ghost" data-p="restart">Restart</button>'}
         <button class="btn btn-ghost" data-p="sound">Sound: ${settings.sound ? 'On' : 'Off'}</button>
-        <p class="muted small" style="margin:6px 0">${isTouch ? 'Swipe left/right to change lanes, up to jump, tap to boost.' : '← → or A D to steer, ↑ W or Space to jump, B or Shift to boost, Esc to pause.'}</p>
+        <p class="muted small" style="margin:6px 0">${isTouch ? 'Swipe left/right to change lanes, up to jump, tap to boost.' : `← → or A D to steer, ↑ W or Space to jump, B or Shift to boost${profile!.gear.brakes ? ', hold S or ↓ to brake' : ''}, Esc to pause.`}</p>
         <button class="btn btn-link" data-p="exit">Exit ride</button>
       </div>`;
     app.appendChild(ov);
@@ -972,6 +1001,10 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     music(false);
     if (keyHandler) removeEventListener('keydown', keyHandler);
     keyHandler = null;
+    if (brakeDown) removeEventListener('keydown', brakeDown);
+    if (brakeUp) removeEventListener('keyup', brakeUp);
+    brakeDown = brakeUp = null;
+    game.setBrake(false);
     document.removeEventListener('visibilitychange', onHidden);
     game.onHud = () => {};
     game.onEnd = () => {};
@@ -1097,7 +1130,25 @@ function garageScreen() {
     <div class="screen solid fade-in">
       <div class="wrap stack">
         <button class="btn btn-link back" id="back">← Back</button>
-        <div class="row"><h1 class="title">Garage</h1><span class="grow"></span><span class="chip">${icons.coin} ${fmt(p.coins)}</span></div>
+        <div class="row"><h1 class="title">Garage &amp; shop</h1><span class="grow"></span><span class="chip">${icons.coin} ${fmt(p.coins)}</span></div>
+        <h2 class="shop-h">${icons.shop} Ride gear</h2>
+        <div class="gear-grid">
+          <div class="card gear-card">
+            <div class="gear-ico">${icons.helmet}</div>
+            <div class="grow"><h3>Crash helmet</h3><p class="muted small">Saves you from one crash, so the ride goes on. Used up when it saves you.</p>
+              <p class="gear-have">You have <b>${p.gear.helmets}</b></p></div>
+            <div class="gear-buy">
+              <button class="btn btn-primary btn-sm" data-helmets="1" ${p.coins < SHOP.helmet.price ? 'disabled' : ''}>1 for ${fmt(SHOP.helmet.price)} ${icons.coin}</button>
+              <button class="btn btn-ghost btn-sm" data-helmets="${SHOP.helmet.pack}" ${p.coins < SHOP.helmet.packPrice ? 'disabled' : ''}>${SHOP.helmet.pack} for ${fmt(SHOP.helmet.packPrice)} ${icons.coin}</button>
+            </div>
+          </div>
+          ${SHOP.brakes.map((b) => `<div class="card gear-card${p.gear.brakes >= b.level ? ' owned' : ''}">
+            <div class="gear-ico">${icons.brake}</div>
+            <div class="grow"><h3>${b.name}</h3><p class="muted small">${b.text} ${isTouch ? 'Hold the brake button.' : 'Hold S or ↓.'}</p></div>
+            <div class="gear-buy">${p.gear.brakes >= b.level ? `<span class="badge gold">${icons.check} Fitted</span>` : `<button class="btn btn-primary btn-sm" data-brakes="${b.level}" ${p.coins < b.price ? 'disabled' : ''}>${fmt(b.price)} ${icons.coin}</button>`}</div>
+          </div>`).join('')}
+        </div>
+        <h2 class="shop-h">${icons.bike} Bikes</h2>
         <p class="muted small">Buy bikes with Rush Coins, or win the event bikes by finishing Sunset Rush or Night Rush while they are live.</p>
         <div class="bike-grid garage-grid">${[...BIKES, ...GARAGE_BIKES].map(card).join('')}</div>
       </div>
@@ -1109,6 +1160,25 @@ function garageScreen() {
     garageScreen();
   };
   on('[data-equip]', 'click', (_, el) => equip(el.dataset.equip!));
+  on('[data-helmets]', 'click', (_, el) => {
+    const n = Number(el.dataset.helmets);
+    const price = n === 1 ? SHOP.helmet.price : SHOP.helmet.packPrice;
+    if (p.coins < price) return;
+    p.coins -= price;
+    p.gear.helmets += n;
+    saveProfile(p);
+    sfx.coin();
+    garageScreen();
+  });
+  on('[data-brakes]', 'click', (_, el) => {
+    const b = SHOP.brakes.find((x) => x.level === Number(el.dataset.brakes))!;
+    if (p.coins < b.price || p.gear.brakes >= b.level) return;
+    p.coins -= b.price;
+    p.gear.brakes = b.level;
+    saveProfile(p);
+    sfx.finish();
+    garageScreen();
+  });
   on('[data-buy]', 'click', (_, el) => {
     const b = bikeById(el.dataset.buy!);
     if (!b.price || p.coins < b.price || p.ownedBikes.includes(b.id)) return;
@@ -1163,7 +1233,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
         <h1 class="title">${headline}</h1>
         ${explore && r.finished && route.id === 'explore' ? placeCard(route.to) : ''}
         ${explore && r.finished ? `<p class="muted">${route.id === 'freshers-tour' ? `You toured ${TOUR_STOPS.length} places every fresher needs.` : `You found your way to <b>${esc(route.to.name)}</b>.`} Here is the way you rode:</p>${stepsList(route)}` : ''}
-        ${rw.newBestTime ? '<span class="badge gold">New personal best 🔥</span>' : rw.newBestScore ? '<span class="badge gold">New high score 🔥</span>' : ''}
+        ${rw.newBestTime ? '<span class="badge gold">New personal best</span>' : rw.newBestScore ? '<span class="badge gold">New high score</span>' : ''}
         <div class="result-big">${km(r.distance)} <span style="font-size:0.4em">KM</span></div>
         ${r.finished ? `<p class="muted">Time ${clock(r.time)}</p>` : ''}
         <div class="card">
@@ -1171,12 +1241,13 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
           <div class="reward-row"><span>Coins</span><b>+<span data-count="${rw.coins}">0</span> ${icons.coin}</b></div>
           <div class="reward-row"><span>XP</span><b>+<span data-count="${rw.xp}">0</span></b></div>
         </div>
-        ${levelUp ? `<div class="levelup">🎉 Level up! You're now level ${rw.levelAfter}</div>` : ''}
-        ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>🔓 New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
+        ${!r.finished && !explore && !p.gear.helmets ? `<button class="card selectable helmet-tip" id="getHelmet"><span class="gear-ico">${icons.helmet}</span><span class="grow"><b>Out of helmets</b><span class="muted small">A crash helmet saves you from your next crash. ${fmt(SHOP.helmet.price)} coins in the Garage.</span></span>${icons.arrow}</button>` : ''}
+        ${levelUp ? `<div class="levelup">${icons.star} Level up! You're now level ${rw.levelAfter}</div>` : ''}
+        ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>${icons.unlock} New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
         ${verdict ? `<div class="levelup">${verdict}</div>` : ''}
         ${table.length > 1 ? `<div class="card standings" id="standings">${table.map((t, i) => `<div class="reward-row${t.me ? ' me' : ''}"><span>${ordinal(i + 1)} · ${esc(t.name)}</span><b>${Number.isFinite(t.time) ? clock(t.time) : 'DNF'}</b></div>`).join('')}</div>` : ''}
-        ${x.event ? `<p class="muted small">${x.event.icon} ${esc(x.event.name)} is live: coins doubled.</p>` : ''}
-        ${prizeBike ? `<div class="levelup">🚲 You won the ${esc(prizeBike.name)}! Equip it in the Garage.</div>` : ''}
+        ${x.event ? `<p class="muted small">${eventIcon(x.event)} ${esc(x.event.name)} is live: coins doubled.</p>` : ''}
+        ${prizeBike ? `<div class="levelup">${icons.trophy} You won the ${esc(prizeBike.name)}! Equip it in the Garage.</div>` : ''}
         ${route.kind === 'race' && r.finished && !hadGhost && !x.rivals.length ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
         ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="challenge">${ch ? `Send ${esc(ch.name)} your answer` : 'Challenge a friend to beat this'}</button><p class="muted small" id="shareNote" hidden></p>` : ''}
         ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="board">${cloud.account ? 'See the leaderboard' : 'Leaderboard · sign in to post your time'}</button>` : ''}
@@ -1198,6 +1269,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
     requestAnimationFrame(tick);
   });
   on('#again', 'click', () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route) } : x.opts)));
+  on('#getHelmet', 'click', () => garageScreen());
   on('#challenge', 'click', () => share(`Can you beat my ${clock(r.time)} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, x.run, r.time), app.querySelector('#shareNote')!));
   on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
   on('#home', 'click', () => home());
@@ -1229,7 +1301,7 @@ function shell(content: string) {
       <nav class="nav">
         <div class="nav-brand"><div class="brand-mark">LEGON<span>RUSH</span></div></div>
         ${NAV.map(([id, label, icon, phone]) => `<button class="nav-item${tab === id ? ' active' : ''}${phone ? '' : ' desk-only'}" data-nav="${id}">${icon}<span>${id === 'you' ? '<i class="phone-only">You</i><i class="desk-only">Profile</i>' : id === 'social' ? '<i class="phone-only">Social</i><i class="desk-only">Community</i>' : label}</span></button>`).join('')}
-        <button class="nav-campus" data-campus><small>📍 Riding on</small><b>${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)}</b><span class="small">Change campus →</span></button>
+        <button class="nav-campus" data-campus><small>Riding on</small><b>${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)}</b><span class="small">Change campus →</span></button>
       </nav>
       <main class="content fade-in tab-${tab}">${tab === 'home' ? content : topBar() + content}</main>
     </div>`;
@@ -1253,7 +1325,7 @@ function topBar() {
 
 /** Legon's weather now, for the top bar; quietly absent when offline */
 let weather: { icon: string; temp: number; word: string; at: number } | null = null;
-const WEATHER: [number, string, string][] = [[0, '☀️', 'Sunny'], [2, '⛅', 'Partly cloudy'], [3, '☁️', 'Cloudy'], [48, '🌫️', 'Hazy'], [67, '🌧️', 'Rain'], [82, '🌦️', 'Showers'], [99, '⛈️', 'Storm']];
+const WEATHER: [number, string, string][] = [[0, icons.sun, 'Sunny'], [2, icons.cloudSun, 'Partly cloudy'], [3, icons.cloud, 'Cloudy'], [48, icons.fog, 'Hazy'], [67, icons.rain, 'Rain'], [82, icons.rain, 'Showers'], [99, icons.storm, 'Storm']];
 async function fillWeather() {
   const show = () => {
     const el = app.querySelector<HTMLElement>('#weather');
@@ -1269,7 +1341,7 @@ async function fillWeather() {
     const code = Number(j.current.weather_code);
     const [, icon, word] = WEATHER.find(([max]) => code <= max) ?? WEATHER[0];
     const night = new Date().getHours() >= 19 || new Date().getHours() < 6;
-    weather = { icon: night && code <= 2 ? '🌙' : icon, temp: Math.round(j.current.temperature_2m), word: night && code <= 2 ? 'Clear' : word, at: Date.now() };
+    weather = { icon: night && code <= 2 ? icons.moon : icon, temp: Math.round(j.current.temperature_2m), word: night && code <= 2 ? 'Clear' : word, at: Date.now() };
     show();
   } catch {
     /* offline: no weather */
@@ -1308,12 +1380,13 @@ function campusSheet(after: () => void) {
   }));
 }
 
+const eventIcon = (e: { id: string }) => (e.id === 'night-rush' ? icons.moon : icons.sunrise);
 const photo = (name: string) => `${import.meta.env.BASE_URL}photos/${name}.webp`;
 const MODES = [
-  { id: 'explore', icon: '🗺️', title: 'Explore', text: 'Discover campus, hidden routes and iconic locations.', img: photo('mode-explore') },
-  { id: 'match', icon: '🏁', title: 'Quick Match', text: 'Get matched with riders online and race now.', img: photo('mode-match') },
-  { id: 'challenge', icon: '🏆', title: 'Challenge', text: 'Create or join a challenge and beat your friends.', img: photo('mode-challenge') },
-  { id: 'vibe', icon: '❤️', title: 'Vibe Ride', text: 'Meet someone, ride together and enjoy the ride.', img: photo('mode-vibe') },
+  { id: 'explore', icon: icons.map, title: 'Explore', text: 'Discover campus, hidden routes and iconic locations.', img: photo('mode-explore') },
+  { id: 'match', icon: icons.flag, title: 'Quick Match', text: 'Get matched with riders online and race now.', img: photo('mode-match') },
+  { id: 'challenge', icon: icons.trophy, title: 'Challenge', text: 'Create or join a challenge and beat your friends.', img: photo('mode-challenge') },
+  { id: 'vibe', icon: icons.heart, title: 'Vibe Ride', text: 'Meet someone, ride together and enjoy the ride.', img: photo('mode-vibe') },
 ];
 
 const BIKE_ICON = '<svg class="qr-bike" viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="27" r="10"/><circle cx="51" cy="27" r="10"/><path d="M13 27l10-16h18l10 16M23 11l9 16h-19M32 27l9-16M20 6h8M41 11l-2-6h6"/></svg>';
@@ -1331,16 +1404,16 @@ function quickRideCard() {
 function missionsPanel() {
   const m = todayMissions(profile!);
   return `<div class="panel">
-    <div class="panel-head"><span>🎯</span><b>Daily Missions</b><span class="muted small" style="margin-left:auto">Resets at midnight</span></div>
+    <div class="panel-head"><span class="p-ico">${icons.target}</span><b>Daily Missions</b><span class="muted small" style="margin-left:auto">Resets at midnight</span></div>
     <div class="mission-list">${MISSIONS.map((x) => {
       const got = Math.min(x.goal, x.progress(m));
       const done = got >= x.goal;
       const claimed = m.claimed.includes(x.id);
       return `<div class="mission${claimed ? ' claimed' : ''}">
-        <span class="m-icon">${x.icon}</span>
+        <span class="m-icon">${icons[x.icon as keyof typeof icons] ?? ''}</span>
         <div class="grow"><div class="small" style="font-weight:600">${esc(x.title)}</div><div class="xpbar"><div style="width:${(got / x.goal) * 100}%"></div></div></div>
         <span class="m-count">${x.unit ? got.toFixed(1) : got} / ${x.goal}</span>
-        ${claimed ? '<span class="m-reward">✓</span>' : done ? `<button class="btn btn-primary btn-sm" data-mission="${x.id}">+${x.reward}</button>` : `<span class="m-reward">${icons.coin} ${x.reward}</span>`}
+        ${claimed ? `<span class="m-reward">${icons.check}</span>` : done ? `<button class="btn btn-primary btn-sm" data-mission="${x.id}">+${x.reward}</button>` : `<span class="m-reward">${icons.coin} ${x.reward}</span>`}
       </div>`;
     }).join('')}</div>
   </div>`;
@@ -1356,13 +1429,13 @@ function livePanel() {
     <span class="lp-join">${live ? 'Join Now' : 'Practise'}</span>
     <h3>${esc(first)} <span>${esc(rest.join(' '))}</span></h3>
     <p>${live ? `2× coins and the ${esc(bikeById(e.prize).name)} until ${hourText(st.ends!)}.` : esc(e.blurb)}</p>
-    <span class="lp-meta"><span>📅 ${live ? 'Now' : `Today · ${hourText(st.next)}`}</span><span>📍 ${esc(routeById(e.race)?.name ?? 'Campus')}</span></span>
+    <span class="lp-meta"><span>${icons.events} ${live ? 'Now' : `Today · ${hourText(st.next)}`}</span><span>${icons.pin} ${esc(routeById(e.race)?.name ?? 'Campus')}</span></span>
   </button>`;
 }
 
 function onlinePanel() {
   return `<div class="panel online-panel">
-    <div class="panel-head"><span>👥</span><b>Riders Online</b><span class="small" style="margin-left:auto;font-weight:600"><span class="dot-live"></span> <span id="onlineCount">${onlineCountText()}</span></span></div>
+    <div class="panel-head"><span class="p-ico">${icons.social}</span><b>Riders Online</b><span class="small" style="margin-left:auto;font-weight:600"><span class="dot-live"></span> <span id="onlineCount">${onlineCountText()}</span></span></div>
     <div id="onlineList" class="online-list">${onlineRows()}</div>
   </div>`;
 }
@@ -1408,7 +1481,7 @@ function home(next: Tab = 'home') {
   const best = p.bestTimes[CAMPUS_LOOP.id];
   const daily = dailyReward(p);
   const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
-  const TIME_ICON = { day: '☀️', sunset: '🌅', night: '🌙' };
+  const TIME_ICON = { day: icons.sun, sunset: icons.sunrise, night: icons.moon };
   const raceCard = (r: RaceDef) => {
     if (level < r.level) {
       return `<div class="card locked"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge">Level ${r.level}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">Reach level ${r.level} to unlock.</p></div>`;
@@ -1424,7 +1497,7 @@ function home(next: Tab = 'home') {
     const prize = bikeById(e.prize);
     const won = p.ownedBikes.includes(e.prize);
     return `<div class="card stack event-card${st.live ? ' live' : ''}" style="gap:8px">
-      <div class="row"><h3 style="font-weight:800">${e.icon} ${esc(e.name.toUpperCase())}</h3><span class="grow"></span><span class="badge${st.live ? ' gold live-badge' : ''}">${st.live ? 'Live now' : `Starts at ${hourText(st.next)}`}</span></div>
+      <div class="row"><h3 style="font-weight:800">${eventIcon(e)} ${esc(e.name.toUpperCase())}</h3><span class="grow"></span><span class="badge${st.live ? ' gold live-badge' : ''}">${st.live ? 'Live now' : `Starts at ${hourText(st.next)}`}</span></div>
       <p class="muted small">${esc(e.blurb)}</p>
       <p class="small">${esc(route.name)} · ${(route.length / 1000).toFixed(1)} km · ${st.live ? `<b>2× coins</b>, ends ${hourText(st.ends!)}` : `opens ${inText(st.next)}`}</p>
       <div class="row small"><span class="hall-swatch" style="background:${prize.color}"></span><span>${won ? `You won the ${esc(prize.name)} ✓` : `Finish while live to win the <b>${esc(prize.name)}</b>`}</span></div>
@@ -1432,8 +1505,8 @@ function home(next: Tab = 'home') {
     </div>`;
   };
   const unlocked = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)];
-  const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">🗺️ EXPLORE</h3><span class="grow"></span><span class="badge gold">Directions</span></div><p class="muted small" style="margin-top:4px">Discover the campus your way. Ride freely through familiar places, find hidden routes and shortcuts, and visit iconic landmarks.</p></button>
-    <button class="card selectable explore-card" id="quizBtn"><div class="row"><h3 style="font-weight:800">📍 WHERE IS IT?</h3><span class="grow"></span><span class="badge gold">Earn ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">Five campus places. Tap the map where you think each one is.</p></button>`;
+  const exploreCard = `<button class="card selectable explore-card" id="exploreBtn"><div class="row"><h3 style="font-weight:800">${icons.map} EXPLORE</h3><span class="grow"></span><span class="badge gold">Directions</span></div><p class="muted small" style="margin-top:4px">Discover the campus your way. Ride freely through familiar places, find hidden routes and shortcuts, and visit iconic landmarks.</p></button>
+    <button class="card selectable explore-card" id="quizBtn"><div class="row"><h3 style="font-weight:800">${icons.pin} WHERE IS IT?</h3><span class="grow"></span><span class="badge gold">Earn ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">Five campus places. Tap the map where you think each one is.</p></button>`;
   const firstName = p.name.split(' ')[0];
 
   const views: Record<Tab, string> = {
@@ -1443,15 +1516,15 @@ function home(next: Tab = 'home') {
         <div class="home-head">
           <section class="hello">
             <p class="greet">${greeting()},</p>
-            <h1>${esc(firstName)} <span class="wave">👋</span></h1>
+            <h1>${esc(firstName)}</h1>
             <p class="slogan">Your campus. Your ride. Your competition.</p>
           </section>
           <div class="stat-chips">
-            <div class="stat-chip"><span class="s-ico">👑</span><span><b>${level}</b><small>Level</small></span></div>
-            <div class="stat-chip opt-chip"><span class="s-ico">🚲</span><span><b>${p.rides}</b><small>Rides</small></span></div>
-            <div class="stat-chip"><span class="s-ico">🚩</span><span><b>${(p.totalDistance / 1000).toFixed(1)} km</b><small>Distance</small></span></div>
-            <div class="stat-chip"><span class="s-ico">🏆</span><span><b>${p.wins}</b><small>Races won</small></span></div>
-            ${daily ? `<button class="stat-chip daily-chip" id="daily"><span class="s-ico">🎁</span><span><b>+${daily.coins}</b><small>Daily reward</small></span></button>` : ''}
+            <div class="stat-chip"><span class="s-ico">${icons.crown}</span><span><b>${level}</b><small>Level</small></span></div>
+            <div class="stat-chip opt-chip"><span class="s-ico">${icons.bike}</span><span><b>${p.rides}</b><small>Rides</small></span></div>
+            <div class="stat-chip"><span class="s-ico">${icons.flag}</span><span><b>${(p.totalDistance / 1000).toFixed(1)} km</b><small>Distance</small></span></div>
+            <div class="stat-chip"><span class="s-ico">${icons.trophy}</span><span><b>${p.wins}</b><small>Races won</small></span></div>
+            ${daily ? `<button class="stat-chip daily-chip" id="daily"><span class="s-ico">${icons.gift}</span><span><b>+${daily.coins}</b><small>Daily reward</small></span></button>` : ''}
           </div>
         </div>
         ${quickRideCard()}
@@ -1481,9 +1554,9 @@ function home(next: Tab = 'home') {
         <p class="kicker">Race</p>
         <h1 class="title">Race someone</h1>
         <button class="ride-cta" id="quick">
-          <div><div class="big" style="font-size:26px">🏁 QUICK MATCH</div><div class="sub">Race against riders online. Get matched with available riders and jump straight into a live race.</div></div>${icons.arrow}
+          <div><div class="big" style="font-size:26px">${icons.flag} QUICK MATCH</div><div class="sub">Race against riders online. Get matched with available riders and jump straight into a live race.</div></div>${icons.arrow}
         </button>
-        <p class="kicker" style="margin-top:8px">⚡ Challenge</p>
+        <p class="kicker" style="margin-top:8px">${icons.bolt} Challenge</p>
         <p class="muted small">Create a route challenge and invite others, or join one someone shared with you. Beat their time and claim the top spot.</p>
         <div class="card stack" style="gap:8px">
           <b>Create a challenge</b>
@@ -1500,7 +1573,7 @@ function home(next: Tab = 'home') {
           <div class="field"><label for="cLink">Paste the link or code a friend sent you</label><input id="cLink" autocapitalize="off" autocomplete="off" placeholder="${esc(PLAY_URL.replace(/^https?:\/\//, ''))}?c=..."></div>
           <button class="btn btn-ghost" id="cOpen">Open challenge</button>
         </div>
-        <button class="card selectable" id="boards" style="text-align:left"><div class="row"><h3 style="font-weight:800">🏆 LEADERBOARDS</h3><span class="grow"></span><span class="badge gold">Live</span></div><p class="muted small" style="margin-top:4px">The fastest riders on every route, and this week's hall standings.${cloud.account ? '' : ' Sign in to post your times.'}</p></button>
+        <button class="card selectable" id="boards" style="text-align:left"><div class="row"><h3 style="font-weight:800">${icons.trophy} LEADERBOARDS</h3><span class="grow"></span><span class="badge gold">Live</span></div><p class="muted small" style="margin-top:4px">The fastest riders on every route, and this week's hall standings.${cloud.account ? '' : ' Sign in to post your times.'}</p></button>
       </div>`,
     events: `
       <div class="hub">
@@ -1509,7 +1582,7 @@ function home(next: Tab = 'home') {
         <p class="muted">Ride an event while it is live for double coins and a bike you can only win there.</p>
         ${EVENTS.map(eventCard).join('')}
         <div class="card stack" style="gap:8px">
-          <div class="row"><h3 style="font-weight:800">🏫 HALL WEEK</h3><span class="grow"></span><span class="badge gold">+${WEEK_REWARD} ${icons.coin}</span></div>
+          <div class="row"><h3 style="font-weight:800">${icons.pillars} HALL WEEK</h3><span class="grow"></span><span class="badge gold">+${WEEK_REWARD} ${icons.coin}</span></div>
           <p class="muted small">Ride ${WEEK_GOAL_KM} km for ${esc(hall.name)} between Monday and Sunday. Every ride counts.</p>
           <div class="xpbar"><div style="width:${Math.min(100, (week.km / WEEK_GOAL_KM) * 100)}%"></div></div>
           <div class="row small"><span>${Math.min(week.km, WEEK_GOAL_KM).toFixed(1)} / ${WEEK_GOAL_KM} km</span><span class="grow"></span><span class="muted">${week.claimed ? 'Claimed ✓ New goal on Monday' : 'Resets on Monday'}</span></div>
@@ -1528,7 +1601,7 @@ function home(next: Tab = 'home') {
             ${p.username ? `<p class="muted">@${esc(p.username)}</p>` : ''}
             <p class="small" style="margin-top:4px">Level ${level} · ${esc(hall.name)}</p>
             ${p.department ? `<p class="muted small">${esc(p.department)}</p>` : ''}
-            ${p.snap ? `<p class="muted small">👻 @${esc(p.snap)}${p.snapPublic ? '' : ' · hidden'}</p>` : ''}
+            ${p.snap ? `<p class="muted small">${icons.ghost} @${esc(p.snap)}${p.snapPublic ? '' : ' · hidden'}</p>` : ''}
           </div>
         </div>
         <div class="card stack" style="gap:8px">
@@ -1784,7 +1857,7 @@ function gotInvite(n: Notice) {
   sfx.coin?.();
   const bell = app.querySelector('#bell');
   if (bell) bell.innerHTML = `${icons.bell}<i class="dot-badge">${notices.length}</i>`;
-  toast(`💛 <b>${esc(n.from.name)}</b> is inviting you to ride with them`, [['Accept', () => acceptNotice(n), true], ['Not now', () => {}]], 20000);
+  toast(`${icons.heart} <b>${esc(n.from.name)}</b> is inviting you to ride with them`, [['Accept', () => acceptNotice(n), true], ['Not now', () => {}]], 20000);
   // the game is open in the background: tell the phone too
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     try {
@@ -1800,7 +1873,7 @@ function dropNotice(n: Notice) {
 
 function acceptNotice(n: Notice) {
   dropNotice(n);
-  if (game.isRiding) return toast('Finish this ride first, then accept from the 🔔.');
+  if (game.isRiding) return toast('Finish this ride first, then accept from the bell.');
   void joinVibe(n.code, false);
 }
 
@@ -1834,7 +1907,7 @@ function socialView() {
   const canAlert = 'Notification' in window && Notification.permission === 'default';
   return `
     <div class="hub">
-      <p class="kicker">💛 Vibe Ride</p>
+      <p class="kicker">${icons.heart} Vibe Ride</p>
       <h1 class="title">Ride together</h1>
       <p class="muted">Find someone and enjoy the ride together. Get paired with an online rider, or create a private ride and invite someone with a link or code. No racing: just ride, connect and enjoy the campus.</p>
       <div class="card stack" style="gap:10px">
@@ -1849,7 +1922,7 @@ function socialView() {
         <button class="btn btn-ghost" id="vibeNew">Create a private ride</button>
         <div class="row"><input class="code-in" id="vibeCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Got a code?"><button class="btn btn-ghost btn-sm" id="vibeJoin">Join</button></div>
       </div>
-      ${canAlert ? '<button class="btn btn-link" id="alerts">🔔 Turn on invite alerts</button>' : ''}
+      ${canAlert ? `<button class="btn btn-link" id="alerts">${icons.bell} Turn on invite alerts</button>` : ''}
       ${onlineCard()}
       <div class="two"><button class="btn btn-ghost" id="hallStand">Hall standings</button><button class="btn btn-ghost" id="deptStand">Departments</button></div>
     </div>`;
@@ -1925,7 +1998,7 @@ function searchScreen(kicker: string, title: string, text: string, fallback: str
 async function vibeFind() {
   if (needsRider()) return;
   stopSearching();
-  searchScreen('💛 Vibe Ride', 'Finding a rider', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
+  searchScreen(`${icons.heart} Vibe Ride`, 'Finding a rider', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
   on('#fallback', 'click', () => { stopSearching(); void joinVibe(live.newCode(), true); });
   on('#cancel', 'click', () => home('social'));
   onBack(() => home('social'));
@@ -1991,7 +2064,7 @@ async function quickMatch() {
     if (note) toast(note, [], 5000);
     play(false, route, { rivals: botRivals(route) });
   };
-  searchScreen('🏁 Quick Match', 'Finding riders', 'Looking for riders online…', 'Race bots now');
+  searchScreen(`${icons.flag} Quick Match`, 'Finding riders', 'Looking for riders online…', 'Race bots now');
   on('#fallback', 'click', () => bots());
   on('#cancel', 'click', () => home('race'));
   onBack(() => home('race'));
@@ -2108,7 +2181,7 @@ async function joinVibe(code: string, host: boolean, partnerName = '') {
   if (vibe?.code === code) return vibeRoom();
   leaveVibe();
   stopSearching();
-  render(`<div class="screen scrim center fade-in"><div class="wrap stack"><p class="kicker">💛 Vibe Ride</p><h1 class="title">${partnerName ? `Joining ${esc(partnerName)}` : 'Opening the ride'}…</h1></div></div>`);
+  render(`<div class="screen scrim center fade-in"><div class="wrap stack"><p class="kicker">${icons.heart} Vibe Ride</p><h1 class="title">${partnerName ? `Joining ${esc(partnerName)}` : 'Opening the ride'}…</h1></div></div>`);
   const me = riderState('room');
   const ch = await live.join(`vibe:${code}`, myId(), { ...me });
   if (!ch) {
@@ -2225,7 +2298,7 @@ function chatLine(m: ChatMsg) {
   }
   if (m.place) {
     const canGo = vibe?.host && !game.isRiding;
-    return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>📍 Let's go to ${esc(m.place)}</span>${canGo ? `<button class="btn btn-ghost btn-sm" data-goto="${esc(m.place)}">Go there</button>` : ''}</div>`;
+    return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>${icons.pin} Let's go to ${esc(m.place)}</span>${canGo ? `<button class="btn btn-ghost btn-sm" data-goto="${esc(m.place)}">Go there</button>` : ''}</div>`;
   }
   return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>${esc(m.text ?? '')}</span></div>`;
 }
@@ -2289,7 +2362,7 @@ function vibeRoom() {
     <div class="screen solid vibe-room fade-in">
       <div class="wrap stack">
         <div class="row"><button class="btn btn-link back" id="leave">← Leave ride</button><span class="grow"></span><span class="badge gold">Code ${esc(s.code)}</span></div>
-        <p class="kicker">💛 Vibe Ride</p>
+        <p class="kicker">${icons.heart} Vibe Ride</p>
         <h1 class="title">${partner ? `Riding with ${esc(partner.name)}` : 'Waiting for your friend'}</h1>
         ${partner
           ? `<div class="card row partner"><span class="avatar sm" style="background:${hallById(partner.hall).color}">${esc(partner.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(partner.name)}</b><small class="muted">${esc(hallById(partner.hall).name)}${partner.department ? ` · ${esc(partner.department)}` : ''}</small></span><span class="badge gold">● Here</span></div>`
@@ -2308,11 +2381,11 @@ function vibeRoom() {
           <div class="field"><label for="vTo">To</label>${select('vTo', s.to)}</div>
           ${s.host
             ? `<button class="btn btn-primary" id="vGo" ${partner ? '' : 'disabled'}>${partner ? 'Start the ride' : 'Waiting for your friend'}</button>`
-            : `<p class="muted small">${partner ? `${esc(partner.name)} picks the route and starts the ride. Suggest a place with 📍.` : 'Waiting for the host…'}</p>`}
+            : `<p class="muted small">${partner ? `${esc(partner.name)} picks the route and starts the ride. Suggest a place with the pin button.` : 'Waiting for the host…'}</p>`}
           ${s.host && !partner ? '<button class="btn btn-link" id="vSolo">Ride it alone for now</button>' : ''}
         </div>
         <div class="card stack chat-card">
-          <div class="row"><b>💬 Chat</b><span class="grow"></span><span class="muted small">Be kind. Leave anytime.</span></div>
+          <div class="row"><b>${icons.chat} Chat</b><span class="grow"></span><span class="muted small">Be kind. Leave anytime.</span></div>
           <div class="chat-log" id="log"></div>
           ${quickActions()}
           <form class="chat-form"><input id="say" maxlength="160" autocomplete="off" placeholder="${partner ? `Message ${esc(partner.name)}…` : 'Say something…'}"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form>
@@ -2368,7 +2441,7 @@ function vibeRoom() {
         let found: cloud.RiderCard[] = [];
         try { found = await cloud.findRiders(who.value); } catch { /* offline */ }
         whoList.hidden = !found.length;
-        whoList.innerHTML = found.map((r, i) => `<li data-i="${i}"><span class="kind">${online.some((o) => o.key === r.id) ? '🟢' : '⚪'}</span><span class="grow"><b>${esc(r.name)}</b> <small class="muted">${r.username ? `@${esc(r.username)}` : ''}${r.snap ? ` · 👻 ${esc(r.snap)}` : ''}</small></span><small class="muted">${esc(hallById(r.hall).short)}</small></li>`).join('');
+        whoList.innerHTML = found.map((r, i) => `<li data-i="${i}"><span class="kind">${online.some((o) => o.key === r.id) ? '<i class="on-dot"></i>' : '<i class="on-dot off"></i>'}</span><span class="grow"><b>${esc(r.name)}</b> <small class="muted">${r.username ? `@${esc(r.username)}` : ''}${r.snap ? ` · 👻 ${esc(r.snap)}` : ''}</small></span><small class="muted">${esc(hallById(r.hall).short)}</small></li>`).join('');
         whoList.querySelectorAll<HTMLElement>('li').forEach((li) => li.addEventListener('click', async () => {
           const r = found[Number(li.dataset.i)];
           whoList.hidden = true;
@@ -2406,7 +2479,7 @@ function inviteIntro(code: string, name: string) {
     <div class="screen scrim fade-in">
       <div class="grow"></div>
       <div class="wrap stack">
-        <p class="kicker">💛 Vibe Ride</p>
+        <p class="kicker">${icons.heart} Vibe Ride</p>
         <h1 class="title">${esc(name || 'A friend')} is inviting you to ride with them</h1>
         <p class="muted">Ride the campus together, chat as you go. No racing.</p>
         <button class="btn btn-primary" id="yes">Accept</button>
@@ -2527,7 +2600,7 @@ function boardScreen(view: string, back: () => void) {
         <button class="btn btn-link back" id="back">← Back</button>
         <p class="kicker">Leaderboards</p>
         <h1 class="title">${view === 'halls' ? 'Hall Week' : view === 'depts' ? 'Departments' : esc(routes.find(([id]) => id === view)?.[1] ?? 'Leaderboard')}</h1>
-        <div class="board-tabs">${[['halls', '🏫 Halls'] as [string, string], ['depts', '🎓 Departments'] as [string, string], ...routes].map(([id, name]) => `<button class="${id === view ? 'on' : ''}" data-view="${id}">${esc(name)}</button>`).join('')}</div>
+        <div class="board-tabs">${[['halls', 'Halls'] as [string, string], ['depts', 'Departments'] as [string, string], ...routes].map(([id, name]) => `<button class="${id === view ? 'on' : ''}" data-view="${id}">${esc(name)}</button>`).join('')}</div>
         <div id="board" class="card board"><p class="muted small">Loading…</p></div>
         ${cloud.account ? '' : '<p class="muted small">Your times and kilometres appear here once you sign in.</p><button class="btn btn-ghost" id="signIn">Sign in or create an account</button>'}
       </div>
@@ -2636,8 +2709,8 @@ function stepsList(route: Route) {
 }
 
 const KIND_ICON: Record<PlaceKind, [string, string]> = {
-  hall: ['🛏️', 'Hall'], academic: ['🎓', 'Faculty'], landmark: ['⭐', 'Landmark'], food: ['🍽️', 'Food'], bank: ['🏦', 'Bank'],
-  transport: ['🚌', 'Bus stop'], worship: ['🕊️', 'Worship'], sport: ['⚽', 'Sport'], health: ['🏥', 'Health'], other: ['📍', 'Place'],
+  hall: [icons.bed, 'Hall'], academic: [icons.grad, 'Faculty'], landmark: [icons.star, 'Landmark'], food: [icons.food, 'Food'], bank: [icons.bank, 'Bank'],
+  transport: [icons.bus, 'Bus stop'], worship: [icons.church, 'Worship'], sport: [icons.ball, 'Sport'], health: [icons.health, 'Health'], other: [icons.pin, 'Place'],
 };
 
 // Explore options, remembered on this device
@@ -2688,7 +2761,8 @@ function placeCard(place: Place) {
       <div class="row"><span class="kind-icon">${icon}</span><div class="grow"><b>${esc(place.name)}</b><div class="muted small">${label}</div></div></div>
       ${info ? `<p class="small" style="margin-top:8px">${esc(info)}</p>` : ''}
       ${nearby.length ? `<p class="muted small" style="margin-top:8px">Nearby: ${nearby.map((n) => `${KIND_ICON[n.kind][0]} ${esc(n.name.split(' (')[0])}`).join(' · ')}</p>` : ''}
-      ${stop && ends.length ? `<p class="muted small" style="margin-top:6px">🚌 Nearest trotro stop: <b>${esc(stop.name.split(' (')[0])}</b>, ${dm(stopD)} away. Trotros to ${ends.map(esc).join(', ')}.</p>` : ''}
+      ${stop && ends.length ? `<p class="muted small" style="margin-top:6px">${icons.bus} Nearest trotro stop: <b>${esc(stop.name.split(' (')[0])}</b>, ${dm(stopD)} away. Trotros to ${ends.map(esc).join(', ')}.</p>` : ''}
+      <a class="btn btn-link btn-sm gmaps-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${toLatLng(place.x, place.z).map((v) => v.toFixed(6)).join(',')}">${icons.map} View on Google Maps</a>
     </div>`;
 }
 
@@ -2724,17 +2798,17 @@ function explorePicker(fromName?: string, toName = '') {
     <div class="screen scrim fade-in">
       <div class="wrap stack explore">
         <button class="btn btn-link back" id="back">← Back</button>
-        <p class="kicker">🗺️ Explore</p>
+        <p class="kicker">${icons.map} Explore</p>
         <h1 class="title">Find your way</h1>
         <button class="qr-campus solo" data-campus><span>${icons.pin}</span><span class="grow"><small>Campus</small>${esc(campusById(settings.campus).name)}${settings.campus === 'ug' ? ', Legon' : ''}</span><em>▾</em></button>
-        <button class="card selectable tour-card" id="tour"><div class="row"><h3 style="font-weight:800">⭐ FRESHERS' TOUR</h3><span class="grow"></span><span class="badge gold">${TOUR_STOPS.length} places · 3.5 km</span></div><p class="muted small" style="margin-top:4px">One ride past the places you need in week one: ${TOUR_STOPS.map((n) => esc(n.replace(/^The |, .*$/g, ''))).join(', ')}.</p></button>
+        <button class="card selectable tour-card" id="tour"><div class="row"><h3 style="font-weight:800">${icons.star} FRESHERS' TOUR</h3><span class="grow"></span><span class="badge gold">${TOUR_STOPS.length} places · 3.5 km</span></div><p class="muted small" style="margin-top:4px">One ride past the places you need in week one: ${TOUR_STOPS.map((n) => esc(n.replace(/^The |, .*$/g, ''))).join(', ')}.</p></button>
         <p class="kicker" style="margin-top:6px">Or plan your own way</p>
         <p class="muted">Pick where you are and where you need to be. Type a name or what students call it, like Vandals, Pent or JQB.</p>
         <div class="field picker"><label for="from">From</label><input id="from" autocomplete="off" spellcheck="false" placeholder="Your hall, a faculty, a landmark…"><ul class="suggest" id="fromList" hidden></ul></div>
         <button class="btn btn-link swap" id="swap" aria-label="Swap from and to">⇅ Swap</button>
         <div class="field picker"><label for="to">To</label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you need to be?"><ul class="suggest" id="toList" hidden></ul></div>
         <div class="chips">${POPULAR.filter((n) => placeByName(n)).map((n) => `<button class="chip" data-to="${esc(n)}">${esc(n)}</button>`).join('')}</div>
-        <div class="row options">${seg('mode', [['cycle', '🚲 Cycle'], ['walk', '🚶 Walk']], exploreOpts.mode)}${seg('calm', [['1', 'Calm ride'], ['0', 'With traffic']], exploreOpts.calm ? '1' : '0')}</div>
+        <div class="row options">${seg('mode', [['cycle', `${icons.bike} Cycle`], ['walk', `${icons.walk} Walk`]], exploreOpts.mode)}${seg('calm', [['1', 'Calm ride'], ['0', 'With traffic']], exploreOpts.calm ? '1' : '0')}</div>
         <div id="preview" class="stack"></div>
         <p class="muted small">${esc(ATTRIBUTION)}</p>
       </div>

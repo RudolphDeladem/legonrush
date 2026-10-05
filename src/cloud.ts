@@ -189,6 +189,7 @@ export function merge(local: Profile, remote: Profile): Profile {
     gender: who.gender ?? local.gender, department: who.department ?? local.department ?? '',
     snap: who.snap ?? '', snapPublic: who.snapPublic ?? true, look: { ...local.look, ...who.look },
     about: { ...local.about, ...who.about },
+    gear: { helmets: Math.max(local.gear?.helmets ?? 0, remote.gear?.helmets ?? 0), brakes: Math.max(local.gear?.brakes ?? 0, remote.gear?.brakes ?? 0) },
     xp: Math.max(local.xp, remote.xp),
     rides: Math.max(local.rides, remote.rides),
     finishes: Math.max(local.finishes, remote.finishes),

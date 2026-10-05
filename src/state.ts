@@ -34,6 +34,8 @@ export interface Profile {
   missions: MissionDay;
   /** answers from the sign-up steps */
   about: About;
+  /** shop gear: crash helmets left (each saves one crash) and brakes fitted (0 none, 1 rim, 2 disc) */
+  gear: { helmets: number; brakes: number };
 }
 
 export type RiderType = 'racer' | 'explorer' | 'social' | 'speedster' | 'chill';
@@ -93,6 +95,7 @@ export function newProfile(): Profile {
     gender: 'male', department: '', snap: '', snapPublic: true, look: defaultLook(),
     wins: 0, missions: { day: '', km: 0, friends: [], places: [], claimed: [] },
     about: newAbout(),
+    gear: { helmets: 1, brakes: 0 },
   };
 }
 
@@ -104,6 +107,7 @@ export function loadProfile(): Profile | null {
     p.look = { ...defaultLook(), ...p.look };
     p.missions = { ...newProfile().missions, ...p.missions };
     p.about = { ...newAbout(), ...p.about };
+    p.gear = { ...newProfile().gear, ...p.gear };
     return p;
   } catch {
     return null;
@@ -242,9 +246,9 @@ export interface Mission {
   unit?: string;
 }
 export const MISSIONS: Mission[] = [
-  { id: 'km', icon: '🚴', title: 'Ride 5 km', goal: 5, reward: 200, progress: (m) => m.km, unit: 'km' },
-  { id: 'friends', icon: '💛', title: 'Vibe ride with 2 friends', goal: 2, reward: 300, progress: (m) => m.friends.length },
-  { id: 'places', icon: '📍', title: 'Discover 3 new places', goal: 3, reward: 250, progress: (m) => m.places.length },
+  { id: 'km', icon: 'bike' as const, title: 'Ride 5 km', goal: 5, reward: 200, progress: (m) => m.km, unit: 'km' },
+  { id: 'friends', icon: 'heart' as const, title: 'Vibe ride with 2 friends', goal: 2, reward: 300, progress: (m) => m.friends.length },
+  { id: 'places', icon: 'pin' as const, title: 'Discover 3 new places', goal: 3, reward: 250, progress: (m) => m.places.length },
 ];
 
 export function todayMissions(p: Profile) {
@@ -331,3 +335,12 @@ export function clearGhosts() {
     /* ignore */
   }
 }
+
+/** the shop: crash helmets are used up, brakes stay on every bike */
+export const SHOP = {
+  helmet: { price: 150, pack: 3, packPrice: 400 },
+  brakes: [
+    { level: 1, name: 'Rim brakes', text: 'Hold to slow down before a crash.', price: 500 },
+    { level: 2, name: 'Disc brakes', text: 'Stop twice as hard. Made for the Night Circuit.', price: 1200 },
+  ],
+};

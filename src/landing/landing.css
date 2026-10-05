@@ -445,3 +445,10 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
   .race-card > div { padding: 12px 12px 12px 0; }
   .race-img { height: 100%; aspect-ratio: auto; min-height: 130px; }
 }
+/* line icons instead of colour emoji */
+.mode .m-ico { width: 40px; height: 40px; border-radius: 12px; background: var(--gold); display: grid; place-items: center; filter: none; }
+.mode .m-ico svg, .mission-list li > span svg, .safe-list li > span svg, .cd-route svg, .cd-bar svg { width: 22px; height: 22px; fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cd-route svg { width: 15px; height: 15px; vertical-align: -2px; }
+.mission-list li > span { width: 36px; height: 36px; border-radius: 10px; background: #fff7cc; display: grid; place-items: center; flex: none; }
+.safe-list li > span { background: #fff7cc; }
+i.coin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #ffc21a; box-shadow: inset 0 0 0 2px #b07800; vertical-align: -2px; margin-right: 4px; }
