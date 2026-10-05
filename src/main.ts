@@ -920,6 +920,8 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   game.setGear(profile.gear.helmets, brakes);
   // shop gear, difficulty, live campus weather and treasure
   const setup = fx.rideSetup(profile);
+  // prize rides are a level field: no shop items are used up
+  if (money.isPrizeRide(route.id)) { setup.energy = false; setup.repairKits = 0; }
   let kitsLeft = setup.repairKits;
   game.setUpgrades(setup.upgrades);
   game.setRideItems({ energy: setup.energy, repairKits: setup.repairKits });
