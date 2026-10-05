@@ -4,8 +4,9 @@
 // The MTN MoMo ad in the billboard shot is painted over with our own "your brand here"
 // panel: we have no deal with MTN, so the page must not show their ad.
 // Usage: node scripts/landing-photos.mjs path/to/unzipped/photos
+// Only the slots whose source file is in that folder are redone.
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const dir = process.argv[2];
@@ -31,10 +32,12 @@ const slots = {
   ready: ['Sunset Ride Over Campus.png', 351 / 138, 1200, 0.5],
   // the game's menus: home background, mode cards and the sign-up screens
   'app-bg': ['Cycling Toward the Campus Clocktower.png', 16 / 9, 1600, 0.5, 0.55],
-  'mode-explore': ['University of Ghana Campus Gateway.png', 1.5, 520, 0.5],
-  'mode-match': ['Campus Cycling Race at the Finish Line.png', 1.5, 520, 0.3],
-  'mode-challenge': ['Campus Avenue Cycling Race.png', 1.5, 520, 0.55],
-  'mode-vibe': ['Sunlit Campus Cycling Rally.png', 1.5, 520, 0.7],
+  // mode cards and the Quick Ride banner show DELA's wide photos whole (no crop)
+  'mode-explore': ['Sunny Mediterranean Campus Clock Tower Plaza.png', 1933 / 813, 760, 0.5],
+  'mode-match': ['Campus Cycling Race at the Finish Line.png', 1933 / 813, 760, 0.5],
+  'mode-challenge': ['Cyclists Ride Toward the Campus Clocktower.png', 1933 / 813, 760, 0.5],
+  'mode-vibe': ['Cycling Through Campus Life.png', 1933 / 813, 760, 0.5],
+  'qr-ride': ['Cyclists Approaching University of Ghana Gate.png', 1932 / 814, 1400, 0.5],
   'ob-splash': ['Cyclists Approaching University of Ghana Gate.png', 0.6, 720, 0.33],
   'ob-account': ['Cyclists Rally at the Campus Clock Tower.png', 0.78, 640, 0.4],
   'ob-about': ['Cycling Toward the Campus Clocktower.png', 0.78, 640, 0.5],
@@ -53,7 +56,8 @@ const slots = {
 const BILLBOARD = [[941, 136], [1693, 4], [1693, 441], [941, 464]];
 
 const mime = (f) => (f.endsWith('.png') ? 'image/png' : 'image/jpeg');
-const jobs = Object.entries(slots).map(([name, [file, aspect, maxW, fx, fy = 0.5]]) => ({
+// slots whose source isn't in the folder are left as they are
+const jobs = Object.entries(slots).filter(([, [file]]) => existsSync(join(dir, file))).map(([name, [file, aspect, maxW, fx, fy = 0.5]]) => ({
   name, aspect, maxW, fx, fy, brand: name === 'brands',
   src: `data:${mime(file)};base64,${readFileSync(join(dir, file)).toString('base64')}`,
 }));

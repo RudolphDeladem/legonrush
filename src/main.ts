@@ -43,7 +43,7 @@ if ('serviceWorker' in navigator) {
 const app = document.getElementById('app')!;
 // menus use the light look from DELA's mockups; the ride HUD stays dark
 app.classList.add('light');
-for (const [k, v] of Object.entries({ 'app-bg': 'app-bg', 'qr-img': 'mode-explore', 'hall-img': 'hall-tile', 'campus-img': 'lm-tower' })) {
+for (const [k, v] of Object.entries({ 'app-bg': 'app-bg', 'hall-img': 'hall-tile', 'campus-img': 'lm-tower' })) {
   document.documentElement.style.setProperty(`--${k}`, `url('${import.meta.env.BASE_URL}photos/${v}.webp')`);
 }
 const canvas = document.getElementById('world') as HTMLCanvasElement;
@@ -1321,7 +1321,8 @@ const BIKE_ICON = '<svg class="qr-bike" viewBox="0 0 64 40" fill="none" stroke="
 function quickRideCard() {
   const c = campusById(settings.campus);
   return `<button class="qr" id="ride">${BIKE_ICON}
-      <span class="qr-text"><span class="qr-kicker">QUICK RIDE</span><span class="qr-big">RIDE</span><span class="qr-route">${esc(CAMPUS_LOOP.name)} • ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</span></span>
+      <span class="qr-text"><span class="qr-kicker">Quick ride</span><span class="qr-big">Ride now</span><span class="qr-route">${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</span></span>
+      <img class="qr-photo" src="${photo('qr-ride')}" alt="" width="1400" height="590">
       <span class="qr-go">${icons.arrow}</span>
     </button>
     <div class="qr-campus-row"><button class="qr-campus-chip" data-campus>${icons.pin} Campus: ${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)} <em>▾</em></button></div>`;
@@ -1438,22 +1439,23 @@ function home(next: Tab = 'home') {
   const views: Record<Tab, string> = {
     home: `
       <div class="home">
-        <div class="home-bg"></div>
         ${topBar()}
-        <section class="hello">
-          <p class="greet">${greeting()},</p>
-          <h1>${esc(firstName)} 👋</h1>
-          <p>Your campus. Your ride. Your competition.</p>
-        </section>
-        <div class="stat-chips">
-          <div class="stat-chip"><span class="s-ico">👑</span><span><b>${level}</b><small>Level</small></span></div>
-          <div class="stat-chip opt-chip"><span class="s-ico">🚲</span><span><b>${p.rides}</b><small>Rides</small></span></div>
-          <div class="stat-chip"><span class="s-ico">🚩</span><span><b>${(p.totalDistance / 1000).toFixed(1)} km</b><small>Distance</small></span></div>
-          <div class="stat-chip"><span class="s-ico">🏆</span><span><b>${p.wins}</b><small>Races Won</small></span></div>
-          ${daily ? `<button class="stat-chip daily-chip" id="daily"><span class="s-ico">🎁</span><span><b>+${daily.coins}</b><small>Daily reward</small></span></button>` : ''}
+        <div class="home-head">
+          <section class="hello">
+            <p class="greet">${greeting()},</p>
+            <h1>${esc(firstName)} <span class="wave">👋</span></h1>
+            <p class="slogan">Your campus. Your ride. Your competition.</p>
+          </section>
+          <div class="stat-chips">
+            <div class="stat-chip"><span class="s-ico">👑</span><span><b>${level}</b><small>Level</small></span></div>
+            <div class="stat-chip opt-chip"><span class="s-ico">🚲</span><span><b>${p.rides}</b><small>Rides</small></span></div>
+            <div class="stat-chip"><span class="s-ico">🚩</span><span><b>${(p.totalDistance / 1000).toFixed(1)} km</b><small>Distance</small></span></div>
+            <div class="stat-chip"><span class="s-ico">🏆</span><span><b>${p.wins}</b><small>Races won</small></span></div>
+            ${daily ? `<button class="stat-chip daily-chip" id="daily"><span class="s-ico">🎁</span><span><b>+${daily.coins}</b><small>Daily reward</small></span></button>` : ''}
+          </div>
         </div>
         ${quickRideCard()}
-        <div class="modes">${MODES.map((m) => `<button class="mode-card" data-mode="${m.id}" style="--img:url('${m.img}')"><span class="mode-ico">${m.icon}</span><span class="mode-title">${esc(m.title.toUpperCase())}</span><span class="mode-text">${esc(m.text)}</span><span class="mode-go">${icons.arrow}</span></button>`).join('')}</div>
+        <div class="modes">${MODES.map((m) => `<button class="mode-card" data-mode="${m.id}"><img class="mode-img" src="${m.img}" alt="" width="760" height="320"><span class="mode-body"><span class="mode-title"><span class="mode-ico">${m.icon}</span>${esc(m.title)}</span><span class="mode-text">${esc(m.text)}</span></span><span class="mode-go">${icons.arrow}</span></button>`).join('')}</div>
         <div class="home-bottom">
           ${missionsPanel()}
           ${livePanel()}
