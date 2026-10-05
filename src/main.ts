@@ -25,6 +25,7 @@ import * as live from './live';
 import { CAMPUSES, campusById } from './data/campuses';
 import * as fx from './features';
 import * as money from './features/money-ui';
+import * as vb from './features/vibe';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -889,7 +890,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
         ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : '<span class="hud-slot"></span>'}
       </div>
       <canvas class="minimap" id="minimap" width="240" height="240" aria-hidden="true"></canvas>
-      ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="rc-log" id="rcLog"></div>${quickActions()}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
+      ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="rc-log" id="rcLog"></div>${quickActions(true)}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
     </div>`, 'none');
 
   const $ = (id: string) => app.querySelector<HTMLElement>('#' + id)!;
@@ -981,7 +982,8 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     const form = app.querySelector<HTMLFormElement>('#rcForm')!;
     const input = app.querySelector<HTMLInputElement>('#rcSay')!;
     const draw = () => {
-      log.innerHTML = vibe ? vibe.msgs.slice(-4).map(chatLine).join('') : '';
+      log.innerHTML = vibe ? chatHtml(vibe, 4) : '';
+      if (vibe) markSeen(vibe);
     };
     draw();
     vibe.redraw = () => draw();
@@ -1128,6 +1130,13 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       const rw = applyRide(p, result, finishReward(route));
       cloud.record({ hall: p.hall, department: p.department, km: r.distance / 1000 });
       vibe?.msgs.push({ sys: true, text: `${r.finished ? `You reached ${route.to.name}` : 'You stopped'} · ${km(r.distance)} km · +${rw.coins} coins`, at: Date.now() });
+      // a memory card of the ride you shared, with a picture of where you ended up
+      if (vibe && lr.riders[0] && r.distance > 100) {
+        let photo: string | undefined;
+        try { photo = game.capture(); } catch { /* no picture this time */ }
+        vibe.memory = { me: p.name, them: lr.riders[0].name, from: route.from.name, to: route.to.name, km: r.distance / 1000, sunset: route.time === 'sunset', at: Date.now(), photo };
+        vibe.memoryShown = false;
+      }
       return vibeRoom();
     }
     if (lr) setTimeout(() => lr.ch.leave(), 90e3);
@@ -2145,15 +2154,19 @@ interface RiderState {
   jersey: string;
   level: number;
   status: Status;
-  /** what a rider looking for a vibe ride wants: anyone, their hall or their department */
-  want?: VibeWant;
+  /** Vibe Ride match preferences while looking: from where, who and what for (features/vibe.ts) */
+  want?: vb.VibeFrom;
+  who?: vb.VibeWho;
+  mood?: vb.VibeMood;
+  gender?: 'male' | 'female';
+  riderType?: RiderType | '';
   at: number;
 }
-type VibeWant = 'anyone' | 'hall' | 'dept';
 
 const riderState = (status: Status, extra: Partial<RiderState> = {}): RiderState => ({
   id: myId(), name: profile?.name ?? 'Rider', hall: profile?.hall ?? 'none', department: profile?.department ?? '',
-  jersey: profile ? riderLook(profile).jersey : '#f5c518', level: levelFor(profile?.xp ?? 0), status, at: Date.now(), ...extra,
+  jersey: profile ? riderLook(profile).jersey : '#f5c518', level: levelFor(profile?.xp ?? 0), status, at: Date.now(),
+  gender: profile?.gender, riderType: profile?.about.riderType ?? '', ...extra,
 });
 
 let lobby: Promise<live.Channel | null> | null = null;
@@ -2163,6 +2176,8 @@ let online: live.Peer<RiderState>[] = [];
 let myStatus: RiderState = riderState('menu');
 /** set while searching, to hear a pairing or match meant for you */
 let onPair: ((m: { code: string; from: RiderState }) => void) | null = null;
+/** a matched rider's Accept or Skip */
+let onPairAns: ((m: { code: string; from: string; ok: boolean }) => void) | null = null;
 let onMatch: ((m: MatchMsg) => void) | null = null;
 
 /** Joins this campus's lobby once, in the background: who is online, and invites meant for you. */
@@ -2186,6 +2201,9 @@ function connectLobby() {
     });
     ch.on('pair', (m: { to: string; code: string; from: RiderState }) => {
       if (m.to === myId()) onPair?.(m);
+    });
+    ch.on('pairAns', (m: { to: string; code: string; from: string; ok: boolean }) => {
+      if (m.to === myId()) onPairAns?.(m);
     });
     ch.on('match', (m: MatchMsg) => {
       if (m.riders.some((r) => r.id === myId())) onMatch?.(m);
@@ -2248,7 +2266,7 @@ function toast(html: string, actions: [string, () => void, boolean?][] = [], ms 
 const inviteText = (name: string) => `${name} is inviting you to ride with them`;
 
 function gotInvite(n: Notice) {
-  if (notices.some((x) => x.code === n.code) || vibe?.code === n.code) return;
+  if (notices.some((x) => x.code === n.code) || vibe?.code === n.code || vb.isBlocked(n.from.id)) return;
   notices.unshift(n);
   notices = notices.slice(0, 10);
   sfx.coin?.();
@@ -2310,8 +2328,8 @@ function socialView() {
       <p class="muted">Find someone and enjoy the ride together. Get paired with an online rider, or create a private ride and invite someone with a link or code. No racing: just ride, connect and enjoy the campus.</p>
       <div class="card stack" style="gap:10px">
         <b>Find a rider</b>
-        <p class="muted small">We pair you with someone online who wants a ride too.</p>
-        <div class="seg wide" id="want">${(['anyone', 'hall', 'dept'] as VibeWant[]).map((w) => `<button data-v="${w}" class="${w === vibeWant ? 'on' : ''}">${w === 'anyone' ? 'Anyone' : w === 'hall' ? 'My hall' : 'My department'}</button>`).join('')}</div>
+        <p class="muted small">We pair you with someone online who wants a ride too. Choose who you'd like to meet: anyone, male or female riders, your hall or department, and your vibe.</p>
+        <p class="small vx-partner-line">${esc(vb.prefsSummary(vb.loadPrefs(profile!)))}</p>
         <button class="btn btn-primary" id="vibeFind">Find a rider</button>
       </div>
       <div class="card stack" style="gap:10px">
@@ -2326,14 +2344,8 @@ function socialView() {
     </div>`;
 }
 
-let vibeWant: VibeWant = 'anyone';
-
 function bindSocial() {
-  on('#want button', 'click', (_, el) => {
-    vibeWant = el.dataset.v as VibeWant;
-    app.querySelectorAll('#want button').forEach((b) => b.classList.toggle('on', b === el));
-  });
-  on('#vibeFind', 'click', () => vibeFind());
+  on('#vibeFind', 'click', () => vibeSetup());
   on('#vibeNew', 'click', () => void joinVibe(live.newCode(), true));
   on('#vibeJoin', 'click', () => {
     const code = (app.querySelector<HTMLInputElement>('#vibeCode')!.value || '').trim().toUpperCase();
@@ -2345,6 +2357,17 @@ function bindSocial() {
   });
   on('#hallStand', 'click', () => boardScreen('halls', () => home('social')));
   on('#deptStand', 'click', () => boardScreen('depts', () => home('social')));
+}
+
+/** Vibe Ride preferences (who, from where, what vibe), or invite a friend instead */
+function vibeSetup() {
+  if (needsRider()) return;
+  vb.vibeSetup({
+    find: (prefs) => vibeFind(prefs),
+    create: () => void joinVibe(live.newCode(), true),
+    join: (code) => void joinVibe(code, false),
+    back: () => home('social'),
+  });
 }
 
 /** Vibe Ride needs a name others can see, so guests make a rider first. */
@@ -2373,6 +2396,7 @@ let searchTimer = 0;
 function stopSearching() {
   searchTick = null;
   onPair = null;
+  onPairAns = null;
   onMatch = null;
   clearInterval(searchTimer);
 }
@@ -2392,44 +2416,87 @@ function searchScreen(kicker: string, title: string, text: string, fallback: str
     </div>`);
 }
 
-/** Pairs you with someone online who also wants a Vibe Ride. */
-async function vibeFind() {
+/** riders you skipped while looking: not shown again until you start a fresh search */
+const vibeSkipped = new Set<string>();
+
+/**
+ * Pairs you with someone online whose choices fit yours both ways (features/vibe.ts fits()).
+ * Both then see who it is and Accept or Skip; the ride opens once both accept.
+ */
+async function vibeFind(prefs: vb.VibePrefs = vb.loadPrefs(profile!), fresh = true) {
   if (needsRider()) return;
   stopSearching();
-  searchScreen(`${icons.heart} Vibe Ride`, 'Finding a rider', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
+  if (fresh) vibeSkipped.clear();
+  const again = () => vibeFind(prefs, false);
+  searchScreen(`${icons.heart} ${esc(vb.prefsSummary(prefs))}`, prefs.mood === 'date' ? 'Finding your match' : 'Finding a rider', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
+  app.firstElementChild?.classList.add('vibe-warm');
   on('#fallback', 'click', () => { stopSearching(); void joinVibe(live.newCode(), true); });
-  on('#cancel', 'click', () => home('social'));
-  onBack(() => home('social'));
+  on('#cancel', 'click', () => { stopSearching(); setStatus('menu'); vibeSetup(); });
+  onBack(() => { stopSearching(); setStatus('menu'); vibeSetup(); });
   const ch = await connectLobby();
   if (!ch) return searchFailed('You need to be online to find a rider.');
-  const want = vibeWant;
-  setStatus('vibe', { want });
-  const p = profile!;
-  const fits = (s: RiderState) => {
-    const ok = (w: VibeWant | undefined, a: RiderState | Profile, b: { hall: string; department: string }) =>
-      !w || w === 'anyone' || (w === 'hall' && a.hall === b.hall) || (w === 'dept' && !!a.department && a.department === b.department);
-    return s.status === 'vibe' && ok(want, p, s) && ok(s.want, s, p);
-  };
+  setStatus('vibe', { want: prefs.from, who: prefs.who, mood: prefs.mood });
+  const looking = myStatus;
+  const fits = (s: RiderState) => s.status === 'vibe' && !vibeSkipped.has(s.id) && vb.fits(looking, s);
+  const answer = (to: string, code: string, ok: boolean, busy = false) => ch.send('pairAns', { to, code, from: myId(), ok, busy });
   const started = Date.now();
   let done = false;
-  onPair = (m) => {
-    if (done) return;
+
+  // matched: show who they are, and wait for both to accept
+  const preview = (code: string, them: RiderState, host: boolean) => {
     done = true;
-    stopSearching();
-    void joinVibe(m.code, false, m.from.name);
+    clearInterval(searchTimer);
+    searchTick = null;
+    setStatus('room');
+    // someone else asking meanwhile hears you're busy
+    onPair = (m) => answer(m.from.id, m.code, false, true);
+    let mine = false, theirs = false, over = false;
+    const finish = (ok: boolean, why = '', busy = false) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      onPairAns = null;
+      if (ok) return void joinVibe(code, host, them.name, vb.roomMood(prefs.mood, them.mood));
+      if (!busy) vibeSkipped.add(them.id);
+      if (why) toast(esc(why), [], 4000);
+      void again();
+    };
+    const timer = window.setTimeout(() => { answer(them.id, code, false); finish(false, `${them.name} didn't answer. Looking again…`); }, 30e3);
+    onPairAns = (m: { code: string; from: string; ok: boolean; busy?: boolean }) => {
+      if (m.code !== code || m.from !== them.id) return;
+      if (!m.ok) return finish(false, m.busy ? '' : `${them.name} skipped. Looking for someone else…`, m.busy);
+      theirs = true;
+      if (mine) finish(true);
+    };
+    const hall = hallById(them.hall);
+    const waiting = vb.matchPreview({ name: them.name, hallName: hall.name, hallColor: hall.color, riderType: them.riderType, mood: them.mood, level: them.level }, {
+      accept: () => {
+        if (mine || over) return;
+        mine = true;
+        answer(them.id, code, true);
+        waiting();
+        if (theirs) finish(true);
+      },
+      skip: () => { answer(them.id, code, false); finish(false); },
+    });
+  };
+
+  onPair = (m) => {
+    if (done) return answer(m.from.id, m.code, false, true);
+    // check their choices here too: never meet someone whose filter (or yours) leaves you out
+    if (!fits({ ...m.from, status: 'vibe' })) return answer(m.from.id, m.code, false);
+    preview(m.code, m.from, false);
   };
   searchTick = () => {
     if (done) return;
     const match = online.find((o) => fits(o.state));
     const text = app.querySelector('#searchText');
-    if (text) text.textContent = match ? `Found ${match.state.name}. Connecting…` : Date.now() - started > 60e3 ? "Nobody is free right now. Invite a friend, or keep waiting." : `Looking for someone online who wants to ride… ${online.length ? `(${online.length} online)` : ''}`;
-    // the rider whose id sorts first sets up the ride, so both don't
+    if (text) text.textContent = match ? 'Found someone. Connecting…' : Date.now() - started > 60e3 ? 'Nobody who fits your choices is free right now. Invite a friend, or keep waiting.' : `Looking for someone online who wants to ride… ${online.length ? `(${online.length} online)` : ''}`;
+    // the rider whose id sorts first asks, so both don't
     if (match && myId() < match.key) {
-      done = true;
       const code = live.newCode();
-      ch.send('pair', { to: match.key, code, from: riderState('room') });
-      stopSearching();
-      void joinVibe(code, true, match.state.name);
+      ch.send('pair', { to: match.key, code, from: looking });
+      preview(code, match.state, true);
     }
   };
   searchTimer = window.setInterval(() => searchTick?.(), 1000);
@@ -2527,6 +2594,7 @@ async function startLiveRace(m: MatchMsg) {
 }
 
 // ---------- Vibe Ride ----------
+// The room and its chat. Preferences, safety, gifts, icebreakers and the memory card live in features/vibe.ts.
 
 interface ChatMsg {
   from?: string;
@@ -2534,7 +2602,15 @@ interface ChatMsg {
   text?: string;
   react?: string;
   place?: string;
+  /** a suggestion to ride there at sunset */
+  sunset?: boolean;
+  /** an icebreaker card someone tapped */
+  ice?: boolean;
+  gift?: string;
   sys?: boolean;
+  /** your messages are numbered so your partner can say they've seen them */
+  id?: number;
+  seen?: boolean;
   at: number;
 }
 
@@ -2546,11 +2622,23 @@ interface VibeSession {
   msgs: ChatMsg[];
   from: string;
   to: string;
+  /** what the ride is for: Date vibe hides numbers and links and shows the safety tip */
+  mood: vb.VibeMood;
+  /** sunset lighting for the ride, from the Sunset ride suggestion or gift */
+  time: 'day' | 'sunset';
   /** redraws whatever screen shows the ride: the room or the ride HUD */
   redraw: ((what: 'all' | 'chat') => void) | null;
   /** positions from your partner, while riding */
   onPos: ((m: PosMsg) => void) | null;
   joinedAt: number;
+  /** your partner is typing until then */
+  typingUntil: number;
+  /** last message number you sent, and the last of theirs you told them you'd seen */
+  seq: number;
+  seenSent: number;
+  /** the card for the ride you just finished together */
+  memory: vb.Memory | null;
+  memoryShown: boolean;
 }
 
 interface PosMsg {
@@ -2564,8 +2652,12 @@ let vibe: VibeSession | null = null;
 /** an invite accepted before making a rider: joined once the rider exists */
 let pendingVibe: { code: string; name: string } | null = null;
 
-const REACTS: [string, string, string][] = [['wave', '👋', 'waved'], ['heart', '❤️', 'sent a heart'], ['laugh', '😂', 'is laughing'], ['like', '👍', 'liked that']];
+/** quick reactions: id, line icon, what it says */
+const REACTS: [string, string, string][] = [['wave', icons.hand, 'waved'], ['heart', icons.heart, 'sent a heart'], ['laugh', vb.vIcons.laugh, 'is laughing'], ['like', vb.vIcons.like, 'liked that']];
 const VIBE_PLACES = () => [...new Set([...Object.values(HALL_PLACE), ...POPULAR, ...TOUR_STOPS, 'Akuafo Hall', 'Commonwealth Hall'])].filter((n) => placeByName(n)).sort();
+/** where a Sunset ride goes: up to the Great Hall, or the library if you start there */
+const sunsetSpot = (from: string) => (from === 'Great Hall' ? 'The Balme Library' : 'Great Hall');
+const lowerFirst = (t: string) => t.slice(0, 1).toLowerCase() + t.slice(1);
 
 function leaveVibe() {
   vibe?.ch.send('bye', { name: profile?.name });
@@ -2574,13 +2666,13 @@ function leaveVibe() {
 }
 
 /** Opens a Vibe Ride room: as its host (you made it) or as a guest (invite, code or pairing). */
-async function joinVibe(code: string, host: boolean, partnerName = '') {
+async function joinVibe(code: string, host: boolean, partnerName = '', mood: vb.VibeMood = 'friends') {
   if (!profile || needsRider()) return;
   if (vibe?.code === code) return vibeRoom();
   leaveVibe();
   stopSearching();
-  render(`<div class="screen scrim center fade-in"><div class="wrap stack"><p class="kicker">${icons.heart} Vibe Ride</p><h1 class="title">${partnerName ? `Joining ${esc(partnerName)}` : 'Opening the ride'}…</h1></div></div>`);
-  const me = riderState('room');
+  render(`<div class="screen scrim center fade-in vibe-warm"><div class="wrap stack"><p class="kicker">${icons.heart} Vibe Ride</p><h1 class="title">${partnerName ? `Joining ${esc(partnerName)}` : 'Opening the ride'}…</h1></div></div>`);
+  const me = riderState('room', { mood });
   const ch = await live.join(`vibe:${code}`, myId(), { ...me });
   if (!ch) {
     toast("Couldn't connect. Check your data or Wi-Fi and try again.");
@@ -2589,12 +2681,17 @@ async function joinVibe(code: string, host: boolean, partnerName = '') {
   setStatus('room');
   const p = profile;
   const s: VibeSession = {
-    code, host, ch, partner: null, msgs: [], redraw: null, onPos: null, joinedAt: me.at,
+    code, host, ch, partner: null, msgs: [], redraw: null, onPos: null, joinedAt: me.at, mood, time: 'day',
+    typingUntil: 0, seq: 0, seenSent: 0, memory: null, memoryShown: false,
     from: HALL_PLACE[p.hall] && placeByName(HALL_PLACE[p.hall]) ? HALL_PLACE[p.hall] : 'Legon Main Entrance', to: 'The Balme Library',
   };
   vibe = s;
   let goneTimer = 0;
   const say = (m: ChatMsg) => { s.msgs.push(m); s.msgs = s.msgs.slice(-80); s.redraw?.('chat'); };
+  const clean = (t: unknown) => {
+    const text = String(t ?? '').slice(0, 160);
+    return s.mood === 'date' ? vb.maskText(text) : text;
+  };
   ch.onPeers((peers) => {
     if (vibe !== s) return;
     // two riders per ride: anyone who joined after the first two waits outside
@@ -2605,6 +2702,13 @@ async function joinVibe(code: string, host: boolean, partnerName = '') {
       return home('social');
     }
     const partner = peers.sort((a, b) => a.state.at - b.state.at)[0] ?? null;
+    // someone you blocked: never ride with them
+    if (partner && vb.isBlocked(partner.key)) {
+      leaveVibe();
+      toast("You've blocked that rider, so you left the ride.");
+      if (!game.isRiding) home('social');
+      return;
+    }
     // a weak connection drops for a moment: only say they left if they stay gone
     if (!partner && s.partner) {
       clearTimeout(goneTimer);
@@ -2618,33 +2722,56 @@ async function joinVibe(code: string, host: boolean, partnerName = '') {
     }
     clearTimeout(goneTimer);
     if (partner && !s.partner) {
-      say({ sys: true, text: `${partner.state.name} joined the ride 🎉`, at: Date.now() });
+      say({ sys: true, text: `${partner.state.name} joined the ride`, at: Date.now() });
       sfx.finish();
     }
     const changed = (partner?.key ?? '') !== (s.partner?.key ?? '');
     s.partner = partner;
     // the host shares the route with whoever joins
-    if (changed && partner && s.host) ch.send('route', { from: s.from, to: s.to });
+    if (changed && partner && s.host) ch.send('route', { from: s.from, to: s.to, time: s.time });
     if (changed) s.redraw?.('all');
   });
-  ch.on('chat', (m: { name: string; text: string }) => say({ from: 'them', name: m.name, text: String(m.text).slice(0, 160), at: Date.now() }));
+  ch.on('chat', (m: { name: string; text: string; id?: number; ice?: boolean }) => {
+    s.typingUntil = 0;
+    say({ from: 'them', name: m.name, text: clean(m.text), id: Number(m.id) || 0, ice: !!m.ice, at: Date.now() });
+  });
+  ch.on('typing', () => {
+    s.typingUntil = Date.now() + 3500;
+    s.redraw?.('chat');
+    setTimeout(() => { if (vibe === s && Date.now() >= s.typingUntil) s.redraw?.('chat'); }, 3600);
+  });
+  ch.on('seen', (m: { id: number }) => {
+    let any = false;
+    for (const x of s.msgs) if (x.from === 'me' && x.id && x.id <= m.id && !x.seen) { x.seen = true; any = true; }
+    if (any) s.redraw?.('chat');
+  });
   ch.on('react', (m: { name: string; kind: string }) => {
     say({ from: 'them', name: m.name, react: m.kind, at: Date.now() });
-    floatEmoji(REACTS.find((r) => r[0] === m.kind)?.[1] ?? '💛');
+    vb.floatIcon(REACTS.find((r) => r[0] === m.kind)?.[1] ?? icons.heart);
   });
-  ch.on('suggest', (m: { name: string; place: string }) => say({ from: 'them', name: m.name, place: m.place, at: Date.now() }));
-  ch.on('route', (m: { from: string; to: string }) => {
+  ch.on('gift', (m: { name: string; gift: string }) => {
+    const g = vb.giftById(m.gift);
+    if (!g) return;
+    say({ from: 'them', name: m.name, gift: g.id, at: Date.now() });
+    vb.giftBurst(g, `${m.name} ${g.line}`);
+    sfx.coin?.();
+    if (g.id === 'sunset' && s.host) setVibeRoute(s.from, s.to, 'sunset');
+  });
+  ch.on('suggest', (m: { name: string; place: string; sunset?: boolean }) => say({ from: 'them', name: m.name, place: m.place, sunset: !!m.sunset, at: Date.now() }));
+  ch.on('route', (m: { from: string; to: string; time?: string }) => {
     if (placeByName(m.from)) s.from = m.from;
     if (placeByName(m.to)) s.to = m.to;
+    s.time = m.time === 'sunset' ? 'sunset' : 'day';
     s.redraw?.('all');
   });
-  ch.on('start', (m: { from: string; to: string }) => {
+  ch.on('start', (m: { from: string; to: string; time?: string }) => {
     s.from = m.from;
     s.to = m.to;
+    s.time = m.time === 'sunset' ? 'sunset' : 'day';
     if (vibe === s && !game.isRiding) vibeGo();
   });
   ch.on('pos', (m: PosMsg) => s.onPos?.(m));
-  ch.on('done', (m: { name: string; km: number; finished: boolean }) => say({ sys: true, text: m.finished ? `${m.name} arrived 🏁` : `${m.name} stopped riding.`, at: Date.now() }));
+  ch.on('done', (m: { name: string; km: number; finished: boolean }) => say({ sys: true, text: m.finished ? `${m.name} arrived` : `${m.name} stopped riding.`, at: Date.now() }));
   ch.on('bye', (m: { name: string }) => {
     say({ sys: true, text: `${m.name} left the ride.`, at: Date.now() });
     s.partner = null;
@@ -2654,55 +2781,138 @@ async function joinVibe(code: string, host: boolean, partnerName = '') {
   vibeRoom();
 }
 
-function sendChat(text: string) {
-  const t = text.trim().slice(0, 160);
-  if (!t || !vibe) return;
-  vibe.ch.send('chat', { name: profile!.name, text: t });
-  vibe.msgs.push({ from: 'me', name: profile!.name, text: t, at: Date.now() });
-  vibe.redraw?.('chat');
+function sendChat(text: string, ice = false) {
+  const s = vibe;
+  let t = text.trim().slice(0, 160);
+  if (!t || !s) return;
+  if (s.mood === 'date') t = vb.maskText(t);
+  const id = ++s.seq;
+  typingSent = 0;
+  s.ch.send('chat',{ name: profile!.name, text: t, id, ice });
+  s.msgs.push({ from: 'me', name: profile!.name, text: t, id, ice, at: Date.now() });
+  s.redraw?.('chat');
 }
 
 function sendReact(kind: string) {
   if (!vibe) return;
   vibe.ch.send('react', { name: profile!.name, kind });
   vibe.msgs.push({ from: 'me', name: profile!.name, react: kind, at: Date.now() });
-  floatEmoji(REACTS.find((r) => r[0] === kind)?.[1] ?? '💛');
+  vb.floatIcon(REACTS.find((r) => r[0] === kind)?.[1] ?? icons.heart);
   vibe.redraw?.('chat');
 }
 
-function sendSuggest(place: string) {
+function sendSuggest(place: string, sunset = false) {
   if (!vibe) return;
-  vibe.ch.send('suggest', { name: profile!.name, place });
-  vibe.msgs.push({ from: 'me', name: profile!.name, place, at: Date.now() });
+  vibe.ch.send('suggest', { name: profile!.name, place, sunset });
+  vibe.msgs.push({ from: 'me', name: profile!.name, place, sunset, at: Date.now() });
   vibe.redraw?.('chat');
 }
 
-function floatEmoji(e: string) {
-  const el = document.createElement('div');
-  el.className = 'float-emoji';
-  el.textContent = e;
-  el.style.left = `${30 + Math.random() * 40}%`;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1800);
+function sendGift() {
+  const s = vibe;
+  if (!s) return;
+  if (!s.partner) return toast('Gifts can be sent once someone is in the ride with you.', [], 4000);
+  vb.giftSheet(s.partner.state.name, (g) => {
+    if (vibe !== s) return;
+    s.ch.send('gift', { name: profile!.name, gift: g.id });
+    s.msgs.push({ from: 'me', name: profile!.name, gift: g.id, at: Date.now() });
+    vb.giftBurst(g, `You sent ${lowerFirst(g.name)}`);
+    sfx.coin?.();
+    if (g.id === 'sunset' && s.host) setVibeRoute(s.from, s.to, 'sunset');
+    s.redraw?.('chat');
+  });
+}
+
+/** tell your partner you've read their messages, while the chat is on screen */
+function markSeen(s: VibeSession) {
+  if (document.hidden) return;
+  const last = Math.max(0, ...s.msgs.filter((m) => m.from === 'them' && m.id).map((m) => m.id!));
+  if (last > s.seenSent) {
+    s.seenSent = last;
+    s.ch.send('seen', { id: last });
+  }
+}
+
+let typingSent = 0;
+/** "typing…" for your partner, at most every two seconds */
+function sendTyping() {
+  if (!vibe || Date.now() - typingSent < 2000) return;
+  typingSent = Date.now();
+  vibe.ch.send('typing', {});
+}
+
+function reportPartner(reason: string) {
+  const s = vibe;
+  const p = s?.partner;
+  if (!s || !p) return;
+  const r: vb.Report = { id: p.key, name: p.state.name, reason, code: s.code, lines: s.msgs.filter((m) => m.from === 'them' && m.text).slice(-5).map((m) => m.text!), at: Date.now() };
+  vb.saveReport(r);
+  // for moderation later: the lobby hears it, nothing else happens yet
+  void connectLobby()?.then((ch) => ch?.send('report', { reporter: myId(), ...r }));
+}
+
+function blockPartner() {
+  const p = vibe?.partner;
+  if (!p) return;
+  vb.block(p.key, p.state.name);
+  leaveVibe();
+  toast(`You blocked ${esc(p.state.name)}. You won't be matched with them again.`, [], 5000);
+  if (!game.isRiding) home('social');
+  else hideRideChat();
+}
+
+function leaveFromSafety() {
+  leaveVibe();
+  if (!game.isRiding) return home('social');
+  hideRideChat();
+  toast('You left the Vibe Ride. Keep riding solo, or pause to stop.', [], 5000);
+}
+
+function hideRideChat() {
+  const rc = app.querySelector<HTMLElement>('#rideChat');
+  if (rc) rc.hidden = true;
+}
+
+function safety() {
+  const p = vibe?.partner;
+  if (!p) return leaveFromSafety();
+  vb.safetySheet(p.state.name, { onReport: reportPartner, onBlock: blockPartner, onLeave: leaveFromSafety });
 }
 
 function chatLine(m: ChatMsg) {
   if (m.sys) return `<div class="msg sys">${esc(m.text ?? '')}</div>`;
   const mine = m.from === 'me';
   const who = mine ? 'You' : esc(m.name ?? '');
+  if (m.gift) {
+    const g = vb.giftById(m.gift);
+    return `<div class="msg gift${mine ? ' me' : ''}"><span class="vx-gift-ico">${g?.icon ?? icons.gift}</span><span>${mine ? `You sent ${esc(lowerFirst(g?.name ?? 'a gift'))}` : `<b>${who}</b> ${esc(g?.line ?? 'sent you a gift')}`}</span></div>`;
+  }
   if (m.react) {
     const r = REACTS.find((x) => x[0] === m.react);
-    return `<div class="msg react${mine ? ' me' : ''}"><span class="big-emoji">${r?.[1] ?? '💛'}</span> ${who} ${r?.[2] ?? ''}</div>`;
+    return `<div class="msg react${mine ? ' me' : ''}"><span class="vx-react-ico">${r?.[1] ?? icons.heart}</span> ${who} ${r?.[2] ?? ''}</div>`;
   }
   if (m.place) {
     const canGo = vibe?.host && !game.isRiding;
-    return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>${icons.pin} Let's go to ${esc(m.place)}</span>${canGo ? `<button class="btn btn-ghost btn-sm" data-goto="${esc(m.place)}">Go there</button>` : ''}</div>`;
+    return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>${m.sunset ? vb.vIcons.sunset : icons.pin} ${m.sunset ? `Sunset ride to ${esc(m.place)}?` : `Let's go to ${esc(m.place)}`}</span>${canGo ? `<button class="btn btn-ghost btn-sm" data-goto="${esc(m.place)}" ${m.sunset ? 'data-sunset="1"' : ''}>Go there</button>` : ''}</div>`;
   }
-  return `<div class="msg${mine ? ' me' : ''}"><b>${who}</b><span>${esc(m.text ?? '')}</span></div>`;
+  const ticks = mine && m.id ? `<small class="vx-seen${m.seen ? ' on' : ''}">${m.seen ? `${vb.vIcons.ticks} Seen` : icons.check}</small>` : '';
+  return `<div class="msg${mine ? ' me' : ''}${m.ice ? ' ice' : ''}"><b>${who}</b><span>${m.ice ? vb.vIcons.ice : ''}${esc(m.text ?? '')}</span>${ticks}</div>`;
 }
 
-/** the quick actions under the chat: 👋 ❤️ 😂 👍 📍 💬 */
-const quickActions = () => `<div class="quick-acts">${REACTS.map(([k, e]) => `<button data-react="${k}" aria-label="${k}">${e}</button>`).join('')}<button data-suggest aria-label="Suggest a place">📍</button><button data-chat aria-label="Chat">💬</button></div>`;
+/** the chat log, with "typing…" at the end while your partner types */
+function chatHtml(s: VibeSession, last = 0) {
+  const msgs = last ? s.msgs.slice(-last) : s.msgs;
+  const typing = s.partner && Date.now() < s.typingUntil ? `<div class="vx-typing">${esc(s.partner.state.name)} is typing <i></i><i></i><i></i></div>` : '';
+  return msgs.map(chatLine).join('') + typing;
+}
+
+/** the quick actions under the chat: wave, heart, laugh, like, a place, a gift; on the ride also safety and the keyboard */
+const quickActions = (ride = false) => `<div class="quick-acts">${REACTS.filter(([k]) => !ride || k !== 'like').map(([k, ico]) => `<button data-react="${k}" aria-label="${k}">${ico}</button>`).join('')}<button data-suggest aria-label="Suggest a place">${icons.pin}</button><button data-gift aria-label="Send a gift">${icons.gift}</button>${ride ? `<button data-safety aria-label="Safety">${icons.shield}</button><button data-chat aria-label="Chat">${icons.chat}</button>` : ''}</div>`;
+
+/** icebreaker cards and sweet replies: tap to send */
+const prompts = (mood: vb.VibeMood) => `
+  <div class="vx-ice" aria-label="Icebreakers">${vb.icebreakers(mood).map((q) => `<button data-ice="${esc(q)}"><small>Icebreaker</small>${esc(q)}</button>`).join('')}</div>
+  <div class="vx-sweet">${vb.sweetReplies(mood).map((q) => `<button data-sweet="${esc(q)}">${esc(q)}</button>`).join('')}</div>`;
 
 function placeMenu(onPick: (place: string) => void) {
   const ov = document.createElement('div');
@@ -2716,11 +2926,16 @@ function placeMenu(onPick: (place: string) => void) {
   ov.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => b.addEventListener('click', () => { close(); onPick(b.dataset.p!); }));
 }
 
-/** wires the chat box and quick actions inside root */
+/** wires the chat box, prompts and quick actions inside root */
 function bindChat(root: HTMLElement, log: HTMLElement, input: HTMLInputElement, onChatBtn: () => void) {
   root.querySelectorAll<HTMLElement>('[data-react]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); sendReact(b.dataset.react!); }));
-  root.querySelector('[data-suggest]')?.addEventListener('click', (e) => { e.stopPropagation(); placeMenu(sendSuggest); });
+  root.querySelector('[data-suggest]')?.addEventListener('click', (e) => { e.stopPropagation(); placeMenu((p) => sendSuggest(p)); });
+  root.querySelector('[data-gift]')?.addEventListener('click', (e) => { e.stopPropagation(); sendGift(); });
+  root.querySelector('[data-safety]')?.addEventListener('click', (e) => { e.stopPropagation(); safety(); });
   root.querySelector('[data-chat]')?.addEventListener('click', (e) => { e.stopPropagation(); onChatBtn(); });
+  root.querySelectorAll<HTMLElement>('[data-ice]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); sendChat(b.dataset.ice!, true); }));
+  root.querySelectorAll<HTMLElement>('[data-sweet]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); sendChat(b.dataset.sweet!); }));
+  input.addEventListener('input', () => { if (input.value.trim()) sendTyping(); });
   const form = input.form!;
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -2729,15 +2944,16 @@ function bindChat(root: HTMLElement, log: HTMLElement, input: HTMLInputElement, 
   });
   log.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-goto]');
-    if (b && vibe?.host) setVibeRoute(vibe.from, b.dataset.goto!);
+    if (b && vibe?.host) setVibeRoute(vibe.from, b.dataset.goto!, b.dataset.sunset ? 'sunset' : vibe.time);
   });
 }
 
-function setVibeRoute(from: string, to: string) {
+function setVibeRoute(from: string, to: string, time: 'day' | 'sunset' = vibe?.time ?? 'day') {
   if (!vibe || !placeByName(from) || !placeByName(to)) return;
   vibe.from = from;
   vibe.to = to === from ? vibe.to : to;
-  vibe.ch.send('route', { from: vibe.from, to: vibe.to });
+  vibe.time = time;
+  vibe.ch.send('route', { from: vibe.from, to: vibe.to, time });
   vibe.redraw?.('all');
 }
 
@@ -2752,18 +2968,21 @@ function vibeRoom() {
   game.showcase();
   applyLook();
   const partner = s.partner?.state;
+  const date = s.mood === 'date';
   const places = VIBE_PLACES();
   const select = (id: string, value: string) => `<div class="select-wrap"><select id="${id}" ${s.host ? '' : 'disabled'}>${places.map((n) => `<option ${n === value ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>`;
   const link = vibeLink(s.code);
-  const msg = `${inviteText(profile.name)} on LEGONRUSH 🚴💛 Tap to join: ${link}`;
+  const msg = `${inviteText(profile.name)} on LEGONRUSH. Tap to join: ${link}`;
+  const sunset = s.time === 'sunset';
   render(`
-    <div class="screen solid vibe-room fade-in">
+    <div class="screen solid vibe-room vibe-warm${date ? ' date' : ''} fade-in">
       <div class="wrap stack">
         <div class="row"><button class="btn btn-link back" id="leave">← Leave ride</button><span class="grow"></span><span class="badge gold">Code ${esc(s.code)}</span></div>
-        <p class="kicker">${icons.heart} Vibe Ride</p>
+        <p class="kicker">${icons.heart} ${date ? 'Date vibe' : 'Vibe Ride'}</p>
         <h1 class="title">${partner ? `Riding with ${esc(partner.name)}` : 'Waiting for your friend'}</h1>
+        ${s.memory ? `<button class="vx-mem-btn" id="vxMem"><span class="vx-gift-ico">${icons.camera}</span><span class="grow"><b>Your ride memory</b><small>${esc(s.memory.them)} and you · ${s.memory.km.toFixed(1)} km. Tap to share.</small></span></button>` : ''}
         ${partner
-          ? `<div class="card row partner"><span class="avatar sm" style="background:${hallById(partner.hall).color}">${esc(partner.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(partner.name)}</b><small class="muted">${esc(hallById(partner.hall).name)}${partner.department ? ` · ${esc(partner.department)}` : ''}</small></span><span class="badge gold">● Here</span></div>`
+          ? `<div class="card row partner"><span class="avatar sm" style="background:${hallById(partner.hall).color}">${esc(partner.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(partner.name)}</b><small class="vx-partner-line">${esc(vb.vibeLine(partner, hallById(partner.hall).name))}</small></span><span class="badge gold">● Here</span><button class="vx-icon-btn" id="vxSafety" aria-label="Report or block">${icons.shield}</button></div>`
           : `<div class="card stack invite-card" style="gap:10px">
               <b>Invite someone</b>
               <p class="muted small">They'll see "<b>${esc(inviteText(profile.name))}</b>". Share it on Snapchat, WhatsApp or anywhere, or give them the code <b>${esc(s.code)}</b>.</p>
@@ -2773,10 +2992,12 @@ function vibeRoom() {
               ${cloud.account ? `<div class="field picker"><label for="who">Invite by username or Snapchat</label><input id="who" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="@username"><ul class="suggest" id="whoList" hidden></ul></div>` : '<p class="muted small">Sign in to invite riders by their username.</p>'}
             </div>
             <div class="card stack" style="gap:8px"><div class="row"><b>Riders online</b><span class="grow"></span><span class="badge gold" id="onlineCount"></span></div><div id="onlineList" class="online-list">${onlineRows()}</div></div>`}
+        ${date ? `<p class="vx-tip">${icons.shield} ${vb.SAFETY_TIP}</p>` : ''}
         <div class="card stack" style="gap:8px">
           <b>Where to?</b>
           <div class="field"><label for="vFrom">From</label>${select('vFrom', s.from)}</div>
           <div class="field"><label for="vTo">To</label>${select('vTo', s.to)}</div>
+          <button class="vx-sunset${sunset ? ' on' : ''}" id="vxSunset">${vb.vIcons.sunset}<span class="grow"><b>${sunset ? 'Sunset ride is on' : 'Sunset ride'}</b><small>${sunset ? `Golden-hour light for this ride.${s.host ? ' Tap to ride in daylight.' : ''}` : s.host ? `Ride to ${esc(sunsetSpot(s.from))} in golden-hour light.` : 'Suggest a golden-hour ride.'}</small></span></button>
           ${s.host
             ? `<button class="btn btn-primary" id="vGo" ${partner ? '' : 'disabled'}>${partner ? 'Start the ride' : 'Waiting for your friend'}</button>`
             : `<p class="muted small">${partner ? `${esc(partner.name)} picks the route and starts the ride. Suggest a place with the pin button.` : 'Waiting for the host…'}</p>`}
@@ -2784,7 +3005,9 @@ function vibeRoom() {
         </div>
         <div class="card stack chat-card">
           <div class="row"><b>${icons.chat} Chat</b><span class="grow"></span><span class="muted small">Be kind. Leave anytime.</span></div>
+          ${date ? '<p class="vx-filter-note">Phone numbers and links are hidden in Date vibe.</p>' : ''}
           <div class="chat-log" id="log"></div>
+          ${prompts(s.mood)}
           ${quickActions()}
           <form class="chat-form"><input id="say" maxlength="160" autocomplete="off" placeholder="${partner ? `Message ${esc(partner.name)}…` : 'Say something…'}"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form>
         </div>
@@ -2793,8 +3016,9 @@ function vibeRoom() {
   const log = app.querySelector<HTMLElement>('#log')!;
   const input = app.querySelector<HTMLInputElement>('#say')!;
   const drawLog = () => {
-    log.innerHTML = s.msgs.map(chatLine).join('') || '<p class="muted small">No messages yet. Say hi 👋</p>';
+    log.innerHTML = chatHtml(s) || '<p class="muted small">No messages yet. Say hi, or tap an icebreaker.</p>';
     log.scrollTop = log.scrollHeight;
+    markSeen(s);
   };
   drawLog();
   bindChat(app.querySelector('.chat-card')!, log, input, () => input.focus());
@@ -2810,16 +3034,23 @@ function vibeRoom() {
   on('[data-invite]', 'click', (_, el) => inviteOnline(el.dataset.invite!));
   on('#leave', 'click', () => { leaveVibe(); home('social'); });
   onBack(() => { leaveVibe(); home('social'); });
+  on('#vxSafety', 'click', () => safety());
+  on('#vxMem', 'click', () => s.memory && void vb.memorySheet(s.memory));
   on('#vFrom', 'change', (_, el) => setVibeRoute((el as HTMLSelectElement).value, s.to));
   on('#vTo', 'change', (_, el) => setVibeRoute(s.from, (el as HTMLSelectElement).value));
+  on('#vxSunset', 'click', () => {
+    if (!s.host) return sendSuggest(s.to, true);
+    if (s.time === 'sunset') return setVibeRoute(s.from, s.to, 'day');
+    setVibeRoute(s.from, sunsetSpot(s.from), 'sunset');
+  });
   on('#vGo', 'click', () => {
     if (!s.partner) return;
-    s.ch.send('start', { from: s.from, to: s.to });
+    s.ch.send('start', { from: s.from, to: s.to, time: s.time });
     vibeGo();
   });
   on('#vSolo', 'click', () => vibeGo());
   const note = app.querySelector<HTMLElement>('#inviteNote');
-  on('#shareInvite', 'click', () => note && share(`${inviteText(profile!.name)} on LEGONRUSH 🚴💛`, link, note));
+  on('#shareInvite', 'click', () => note && share(`${inviteText(profile!.name)} on LEGONRUSH`, link, note));
   on('#copy', 'click', async () => {
     try {
       await navigator.clipboard.writeText(msg);
@@ -2844,7 +3075,7 @@ function vibeRoom() {
           const r = found[Number(li.dataset.i)];
           whoList.hidden = true;
           who.value = '';
-          // online now: they get it straight away; either way it waits for them in their 🔔
+          // online now: they get it straight away; either way it waits for them in their bell
           lobbyCh?.send('invite', { to: r.id, code: s.code, from: riderState('room') });
           const saved = await cloud.sendInvite(r.id, s.code);
           s.msgs.push({ sys: true, text: online.some((o) => o.key === r.id) || saved ? `Invite sent to ${r.name}.` : `Couldn't reach ${r.name}. Share the link instead.`, at: Date.now() });
@@ -2852,6 +3083,11 @@ function vibeRoom() {
         }));
       }, 250);
     });
+  }
+  // just back from a ride together: show the memory card once
+  if (s.memory && !s.memoryShown) {
+    s.memoryShown = true;
+    void vb.memorySheet(s.memory);
   }
   showUpdate('menu');
 }
@@ -2865,6 +3101,7 @@ function vibeGo() {
   if (!from || !to || from === to) return toast('Pick two different places.');
   const route = exploreRoute(from, to, 'cycle');
   if (!route) return toast("Couldn't find a way between those places. Pick another.");
+  if (s.time === 'sunset') route.time = 'sunset';
   const partner = s.partner?.state;
   play(false, route, { live: { ch: s.ch, kind: 'vibe', riders: partner ? [{ id: partner.id, name: partner.name, jersey: partner.jersey }] : [] } });
 }
