@@ -15,7 +15,8 @@ import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
 import { MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, normalizeProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
-import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
+import { music, setAmbience, setMusicVolume, setSound, sfx, startAmbience, stopAmbience, unlockAudio } from './audio';
+import { marketProximity } from './game/life';
 import { icons } from './ui/icons';
 import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
 import * as cloud from './cloud';
@@ -746,6 +747,24 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     : opts.rivals ?? (opts.mission?.friend ? [opts.mission.friend] : ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
   game.setRivals(rivals);
   game.setGear(profile.gear.helmets, profile.gear.brakes);
+  // shop gear, difficulty, live campus weather and treasure
+  const setup = fx.rideSetup(profile);
+  let kitsLeft = setup.repairKits;
+  game.setUpgrades(setup.upgrades);
+  game.setRideItems({ energy: setup.energy, repairKits: setup.repairKits });
+  game.setDifficulty(settings.difficulty ?? 'normal');
+  const raining = !!weather?.rain && !lr;
+  game.setWeather(raining ? 'rain' : 'clear');
+  game.setTreasure(opts.treasure?.count ?? 0, opts.treasure?.seed ?? 1);
+  const flash = (head: string, text: string, ms = 1600) => {
+    prompt.innerHTML = `<small>${head}</small>${text}`;
+    setTimeout(() => { if (prompt.textContent?.startsWith(head)) prompt.innerHTML = ''; }, ms);
+  };
+  game.onNearMiss = () => { fx.track(profile!, 'nearMiss'); flash('NEAR MISS', '+2 coins', 900); };
+  game.onJump = () => fx.track(profile!, 'jumps');
+  game.onDraft = (on) => { if (on) flash('DRAFTING', 'Riding in their slipstream', 1200); };
+  game.onRepair = (left) => { kitsLeft = left; flash('REPAIR KIT USED', `${left} kit${left === 1 ? '' : 's'} left`, 2200); };
+  game.onTreasure = (found) => { fx.treasureFound(profile!, 1); flash('TREASURE FOUND', `${found} of ${opts.treasure?.count ?? found}`, 1800); };
   const helmetsEl = app.querySelector<HTMLElement>('#helmets');
   const brakeBtn = app.querySelector<HTMLButtonElement>('#brakeBtn');
   game.onHelmet = (left) => {
@@ -870,6 +889,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
 
   game.onEnd = (r) => {
     cleanup();
+    fx.useRideItems(profile!, { energy: setup.energy, repairKits: setup.repairKits - kitsLeft });
     const result: RideResult = { routeId: routeKey(route), ...r };
     const run = game.lastRun;
     const event = opts.event && eventStatus(opts.event).live ? opts.event : undefined;
@@ -907,7 +927,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
   // controls
   const keyMap: Record<string, Action> = {
     ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-    ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', KeyB: 'boost', ShiftLeft: 'boost', ShiftRight: 'boost',
+    ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', KeyB: 'boost', ShiftLeft: 'boost', ShiftRight: 'boost', KeyE: 'pedal',
   };
   keyHandler = (e) => {
     // typing in the ride chat
@@ -960,6 +980,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     if (game.paused) return resume();
     game.paused = true;
     music(false);
+    stopAmbience();
     const ov = document.createElement('div');
     ov.className = 'overlay fade-in';
     ov.id = 'pauseOverlay';
@@ -968,6 +989,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
         <h2 class="title">Paused</h2>
         <button class="btn btn-primary" data-p="continue">Continue</button>
         ${lr ? '' : '<button class="btn btn-ghost" data-p="restart">Restart</button>'}
+        ${lr ? '' : `<button class="btn btn-ghost" data-p="photo">${icons.camera} Photo mode</button>`}
         <button class="btn btn-ghost" data-p="sound">Sound: ${settings.sound ? 'On' : 'Off'}</button>
         <p class="muted small" style="margin:6px 0">${isTouch ? 'Swipe left/right to change lanes, up to jump, tap to boost.' : `← → or A D to steer, ↑ W or Space to jump, B or Shift to boost${profile!.gear.brakes ? ', hold S or ↓ to brake' : ''}, Esc to pause.`}</p>
         <button class="btn btn-link" data-p="exit">Exit ride</button>
@@ -983,11 +1005,43 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
         b.textContent = `Sound: ${settings.sound ? 'On' : 'Off'}`;
       }
       if (p === 'exit') { cleanup(); leave(); }
+      if (p === 'photo') photoMode();
     }));
+  };
+  // photo mode: drag to turn the camera around your rider, then save the picture
+  const photoMode = () => {
+    app.querySelector('#pauseOverlay')?.remove();
+    game.paused = false;
+    game.setPhotoMode(true);
+    const ov = document.createElement('div');
+    ov.className = 'photo-ui';
+    ov.id = 'pauseOverlay';
+    ov.innerHTML = `<p class="photo-hint">Drag to move the camera</p><div class="photo-bar"><button class="btn btn-ghost" data-ph="back">Back</button><button class="btn btn-primary" data-ph="save">${icons.camera} Save photo</button></div>`;
+    app.appendChild(ov);
+    let px = 0, py = 0, drag = false;
+    ov.addEventListener('pointerdown', (e) => { if ((e.target as HTMLElement).closest('button')) return; drag = true; px = e.clientX; py = e.clientY; });
+    ov.addEventListener('pointermove', (e) => { if (!drag) return; game.orbitPhoto(e.clientX - px, e.clientY - py); px = e.clientX; py = e.clientY; });
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) ov.addEventListener(ev, () => (drag = false));
+    const back = () => { game.setPhotoMode(false); ov.remove(); game.paused = false; togglePause(); };
+    onBack(back);
+    ov.querySelector('[data-ph="back"]')!.addEventListener('click', back);
+    ov.querySelector('[data-ph="save"]')!.addEventListener('click', async () => {
+      const url = game.capture();
+      try {
+        const blob = await (await fetch(url)).blob();
+        const file = new File([blob], 'legonrush-ride.png', { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) return await navigator.share({ files: [file], title: 'My LEGONRUSH ride' });
+      } catch { /* fall back to download */ }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'legonrush-ride.png';
+      a.click();
+    });
   };
   const resume = () => {
     game.paused = false;
     music(true);
+    startAmbience(ambience());
     app.querySelector('#pauseOverlay')?.remove();
     onBack(togglePause);
   };
@@ -1000,6 +1054,9 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     }
     leaveSolo();
   };
+  const night = (route.time ?? 'day') === 'night';
+  const ambience = () => ({ night, rain: raining, market: marketProximity(...game.riderXZ) });
+  const ambTimer = setInterval(() => { if (!game.paused) setAmbience(ambience()); }, 1000);
   const leaveSolo = () => (opts.mission ? fx.missionsScreen() : route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
@@ -1007,6 +1064,10 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
 
   function cleanup() {
     music(false);
+    stopAmbience();
+    clearInterval(ambTimer);
+    game.onNearMiss = game.onJump = () => {};
+    game.onDraft = game.onRepair = game.onTreasure = () => {};
     if (keyHandler) removeEventListener('keydown', keyHandler);
     keyHandler = null;
     if (brakeDown) removeEventListener('keydown', brakeDown);
@@ -1032,6 +1093,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
   };
   game.start(bike, tutorial);
   music(true);
+  startAmbience(ambience());
   showUpdate('ride');
   onBack(togglePause);
 }
@@ -1286,7 +1348,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
     };
     requestAnimationFrame(tick);
   });
-  on('#again', 'click', () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route) } : x.opts)));
+  on('#again', 'click', () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route, 3, settings.difficulty ?? 'normal') } : x.opts)));
   on('#getHelmet', 'click', () => garageScreen());
   on('#challenge', 'click', () => share(`Can you beat my ${clock(r.time)} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, x.run, r.time), app.querySelector('#shareNote')!));
   on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
@@ -1342,7 +1404,7 @@ function topBar() {
 }
 
 /** Legon's weather now, for the top bar; quietly absent when offline */
-let weather: { icon: string; temp: number; word: string; at: number } | null = null;
+let weather: { icon: string; temp: number; word: string; at: number; rain?: boolean } | null = null;
 const WEATHER: [number, string, string][] = [[0, icons.sun, 'Sunny'], [2, icons.cloudSun, 'Partly cloudy'], [3, icons.cloud, 'Cloudy'], [48, icons.fog, 'Hazy'], [67, icons.rain, 'Rain'], [82, icons.rain, 'Showers'], [99, icons.storm, 'Storm']];
 async function fillWeather() {
   const show = () => {
@@ -1359,7 +1421,7 @@ async function fillWeather() {
     const code = Number(j.current.weather_code);
     const [, icon, word] = WEATHER.find(([max]) => code <= max) ?? WEATHER[0];
     const night = new Date().getHours() >= 19 || new Date().getHours() < 6;
-    weather = { icon: night && code <= 2 ? icons.moon : icon, temp: Math.round(j.current.temperature_2m), word: night && code <= 2 ? 'Clear' : word, at: Date.now() };
+    weather = { icon: night && code <= 2 ? icons.moon : icon, temp: Math.round(j.current.temperature_2m), word: night && code <= 2 ? 'Clear' : word, at: Date.now(), rain: code >= 51 && code < 70 || code >= 80 };
     show();
   } catch {
     /* offline: no weather */
@@ -2082,7 +2144,7 @@ async function quickMatch() {
     const pool = [CAMPUS_LOOP, ...RACES.filter((r) => level >= r.level).map(raceRoute)];
     const route = pool[Math.floor(Math.random() * pool.length)];
     if (note) toast(note, [], 5000);
-    play(false, route, { rivals: botRivals(route) });
+    play(false, route, { rivals: botRivals(route, 3, settings.difficulty ?? 'normal') });
   };
   searchScreen(`${icons.flag} Quick Match`, 'Finding riders', 'Looking for riders online…', 'Race bots now');
   on('#fallback', 'click', () => bots());
@@ -2126,7 +2188,7 @@ async function startLiveRace(m: MatchMsg) {
   const route = routeById(m.route) ?? CAMPUS_LOOP;
   const ch = await live.join(`race:${m.code}`, myId(), { name: profile!.name });
   const others = m.riders.filter((r) => r.id !== myId());
-  if (!ch) return play(false, route, { rivals: botRivals(route) });
+  if (!ch) return play(false, route, { rivals: botRivals(route, 3, settings.difficulty ?? 'normal') });
   // start together: once everyone is in, or after a few seconds
   let started = false;
   const start = () => {
@@ -2145,7 +2207,7 @@ async function startLiveRace(m: MatchMsg) {
     ch.send('go', {});
     start();
   }, 4000);
-  setTimeout(() => { if (!started) { ch.leave(); play(false, route, { rivals: botRivals(route) }); } }, 9000);
+  setTimeout(() => { if (!started) { ch.leave(); play(false, route, { rivals: botRivals(route, 3, settings.difficulty ?? 'normal') }); } }, 9000);
 }
 
 // ---------- Vibe Ride ----------
