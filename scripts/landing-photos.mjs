@@ -29,6 +29,25 @@ const slots = {
   together: ['Cyclists Rally at the Campus Clock Tower.png', 183 / 90, 800, 0.5],
   brands: ['Sunny Campus Street with MTN MoMo Billboard.png', 431 / 141, 1400, 0.5],
   ready: ['Sunset Ride Over Campus.png', 351 / 138, 1200, 0.5],
+  // the game's menus: home background, mode cards and the sign-up screens
+  'app-bg': ['Cycling Toward the Campus Clocktower.png', 16 / 9, 1600, 0.5, 0.55],
+  'mode-explore': ['University of Ghana Campus Gateway.png', 1.5, 520, 0.5],
+  'mode-match': ['Campus Cycling Race at the Finish Line.png', 1.5, 520, 0.3],
+  'mode-challenge': ['Campus Avenue Cycling Race.png', 1.5, 520, 0.55],
+  'mode-vibe': ['Sunlit Campus Cycling Rally.png', 1.5, 520, 0.7],
+  'ob-splash': ['Cyclists Approaching University of Ghana Gate.png', 0.6, 720, 0.33],
+  'ob-account': ['Cyclists Rally at the Campus Clock Tower.png', 0.78, 640, 0.4],
+  'ob-about': ['Cycling Toward the Campus Clocktower.png', 0.78, 640, 0.5],
+  'ob-uni': ['University of Ghana Campus Gateway.png', 0.78, 640, 0.5],
+  'ob-social': ['Cycling Through Campus Life.png', 0.78, 640, 0.72],
+  'ob-ride': ['Campus Avenue Cycling Race.png', 0.78, 640, 0.5],
+  'ob-welcome': ['Golden Hour Campus Bike Ride.png', 0.6, 720, 0.62],
+  'hall-tile': ['images (1).jfif', 1.3, 360, 0.5, 0.6],
+  'type-racer': ['Campus Avenue Cycling Race.png', 1.3, 300, 0.55],
+  'type-explorer': ['Sunny Palm-Lined Campus Boulevard.png', 1.3, 300, 0.3],
+  'type-social': ['Cyclists Rally at the Campus Clock Tower.png', 1.3, 300, 0.4],
+  'type-speedster': ['Campus Cycling Race at the Finish Line.png', 1.3, 300, 0.3],
+  'type-chill': ['Golden Hour Campus Bike Ride.png', 1.3, 300, 0.62],
 };
 // billboard face in the source image (pixels): TL, TR, BR, BL
 const BILLBOARD = [[941, 136], [1693, 4], [1693, 441], [941, 464]];

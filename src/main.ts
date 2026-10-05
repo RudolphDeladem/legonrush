@@ -2,7 +2,10 @@ import '@fontsource/sora/400.css';
 import '@fontsource/sora/600.css';
 import '@fontsource/sora/700.css';
 import '@fontsource/sora/800.css';
+import '@fontsource/barlow-condensed/800.css';
+import '@fontsource/barlow-condensed/800-italic.css';
 import './style.css';
+import './light.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
 import { BIKES, GARAGE_BIKES, HALLS, HALL_PLACE, bikeById, hallById, type BikeSpec } from './data/campus';
@@ -11,7 +14,7 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { MISSIONS, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { MISSIONS, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setMusicVolume, setSound, sfx, unlockAudio } from './audio';
 import { icons } from './ui/icons';
 import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
@@ -38,6 +41,11 @@ if ('serviceWorker' in navigator) {
 }
 
 const app = document.getElementById('app')!;
+// menus use the light look from DELA's mockups; the ride HUD stays dark
+app.classList.add('light');
+for (const [k, v] of Object.entries({ 'app-bg': 'app-bg', 'qr-img': 'mode-explore', 'hall-img': 'hall-tile', 'campus-img': 'lm-tower' })) {
+  document.documentElement.style.setProperty(`--${k}`, `url('${import.meta.env.BASE_URL}photos/${v}.webp')`);
+}
 const canvas = document.getElementById('world') as HTMLCanvasElement;
 // in-world signs are drawn with Sora, so wait for it (but never block the game on it)
 await Promise.race([document.fonts.load('700 56px Sora'), new Promise((r) => setTimeout(r, 1500))]).catch(() => {});
@@ -158,21 +166,32 @@ function ensureProfile() {
   saveProfile(profile);
 }
 
+// ---------- welcome + sign-up, one question per screen ----------
+
+/** dev only: fills the current sign-up step with sample answers and moves on (for screenshots) */
+let obAuto: (() => string | void) | null = null;
+if (import.meta.env.DEV) (window as unknown as { __obNext: () => string | void }).__obNext = () => obAuto?.();
+
 function welcome() {
   game.showcase();
   render(`
-    <div class="screen scrim fade-in">
-      <div class="grow"></div>
-      <div class="wrap stack" style="text-align:center">
-        <div class="title" style="font-size:clamp(34px,10vw,52px)">Your campus.<br>Your ride.<br><span style="color:var(--gold)">Your world.</span></div>
-        <p class="kicker" style="margin:6px 0 18px">Ride. Race. Connect.</p>
-        <button class="btn btn-primary" id="start">Get started</button>
-        <button class="btn btn-ghost" id="guest">Continue as guest</button>
-        <button class="btn btn-link" id="signIn">I have an account · Sign in</button>
+    <div class="ob-splash light-ui fade-in" style="--ob-img:url('${photo('ob-splash')}');--ob-desk:url('${photo('app-bg')}')">
+      <div class="brand-mark">LEGON<em>RUSH</em></div>
+      <p class="s-tag">YOUR CAMPUS. YOUR RIDE.</p>
+      <div class="top-right">University of Ghana, Legon</div>
+      <div>
+        <div class="big">Your campus.<br>Your <em>ride.</em></div>
+        <p class="lede">Ride the real Legon campus, race your friends, explore every hall and meet new people on the way.</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="start">Get Started</button>
+          <button class="btn btn-ghost" id="signIn">I already have an account</button>
+          <button class="btn btn-link" id="guest">Just ride as a guest</button>
+        </div>
       </div>
     </div>`);
   onBack(null);
-  on('#start', 'click', () => createRider(newProfile()));
+  obAuto = () => app.querySelector<HTMLElement>('#start')!.click();
+  on('#start', 'click', () => onboard());
   on('#signIn', 'click', () => authScreen('in', () => welcome()));
   on('#guest', 'click', () => {
     profile = newProfile();
@@ -181,6 +200,306 @@ function welcome() {
     applyLook();
     play(true);
   });
+}
+
+interface Signup { draft: Profile; email: string; pass: string; step: number }
+
+const OB_STEPS: { img: string; side: string; line: string }[] = [
+  { img: 'ob-account', side: 'Ride <em>Explore</em> Connect', line: 'Your account keeps your rides, times and coins on any phone.' },
+  { img: 'ob-about', side: 'Ride <em>Explore</em> Connect', line: 'Other riders see your name when you race or vibe ride.' },
+  { img: 'ob-uni', side: 'Same campus.<br><em>Bigger</em> adventures.', line: 'Ride where you study, with the people you see every day.' },
+  { img: 'hall-tile', side: 'Ride for your <em>hall</em>', line: 'Every kilometre you ride counts for your hall in Hall Week.' },
+  { img: 'ob-social', side: 'A stronger <em>campus</em> together.', line: 'Riders you meet can find you after the ride.' },
+  { img: 'ob-ride', side: 'Ride your <em>way</em>', line: 'We use this to suggest modes and missions for you.' },
+  { img: 'ob-ride', side: 'Make it <em>yours</em>', line: '' },
+  { img: 'ob-ride', side: 'Your first ride.<br><em>Many more</em> to come.', line: 'Win races and events to unlock more bikes in the garage.' },
+  { img: 'ob-welcome', side: 'See you on <em>campus</em>', line: 'Ride safe, ride fair, and have fun.' },
+];
+
+const RIDER_TYPES: [RiderType, string, string, string][] = [
+  ['racer', '🏁', 'Racer', 'I love competition and winning.'],
+  ['explorer', '🧭', 'Explorer', 'I love discovering new places.'],
+  ['social', '👥', 'Social Rider', 'I love riding with friends.'],
+  ['speedster', '⚡', 'Speedster', 'I live for speed and thrill.'],
+  ['chill', '😎', 'Chill Rider', 'I ride to relax and enjoy.'],
+];
+const STATUSES: [StudentStatus, string, string][] = [['student', '🎓', 'UG Student'], ['alumni', '🏛️', 'Alumni'], ['staff', '💼', 'Staff'], ['visitor', '👋', 'Visitor / Guest']];
+
+/** a side-on bike drawing in the bike's colour */
+const bikeArt = (color: string) => `<svg viewBox="0 0 220 120" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="50" cy="80" r="32" stroke="#0b1530" stroke-width="7"/><circle cx="170" cy="80" r="32" stroke="#0b1530" stroke-width="7"/>
+  <circle cx="50" cy="80" r="4" fill="#0b1530"/><circle cx="170" cy="80" r="4" fill="#0b1530"/>
+  <path d="M50 80l38-46h66l16 46M88 34l26 46H50M114 80l40-46" stroke="${color}" stroke-width="8"/>
+  <path d="M78 22h24M146 34l-6-14h16" stroke="#0b1530" stroke-width="6"/><circle cx="114" cy="80" r="8" stroke="#0b1530" stroke-width="5"/></svg>`;
+
+function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', guest: false }, email: '', pass: '', step: 0 }): void {
+  const d = s.draft;
+  const A = d.about;
+  if (s.step === 6) {
+    obAuto = () => app.querySelector<HTMLElement>('#go')!.click();
+    return dressRider(d, false, { next: () => onboard({ ...s, step: 7 }), back: () => onboard({ ...s, step: 5 }), step: 7, of: OB_STEPS.length });
+  }
+  game.showcase();
+  applyLook(d);
+  const meta = OB_STEPS[s.step];
+  const field = (icon: string, label: string, input: string, extra = '') => `<label class="ob-field"><span class="ico">${icon}</span><span class="grow"><span class="ob-l">${label}</span>${input}</span>${extra}</label>`;
+  const bike = bikeById(d.bike);
+  const bodies: (() => [string, string, string])[] = [
+    () => ['Create your <em>account</em>', 'Join thousands of riders on campus.', `
+      ${field('✉️', 'Email address', `<input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="you@st.ug.edu.gh" value="${esc(s.email)}">`)}
+      ${field('🔒', 'Password', `<input id="pass" type="password" autocomplete="new-password" placeholder="Create a password" value="${esc(s.pass)}">`, '<button type="button" class="eye" id="eye">Show</button>')}
+      <div class="rules" id="rules"><span data-r="len">At least 8 characters</span><span data-r="num">Contains a number</span><span data-r="sym">Contains a special character</span></div>
+      ${field('@', 'Username', `<input id="user" maxlength="20" autocapitalize="off" placeholder="rudolphrides" value="${esc(d.username)}">`)}
+      <button class="btn btn-link" id="skipAcct">Skip for now and save on this phone only</button>`],
+    () => ['Tell us about <em>you</em>', 'This helps us personalise your experience.', `
+      <div class="ob-avatar" id="avatar" style="background:#ffd21f">${esc((d.name || '?')[0].toUpperCase())}<i>📷</i></div>
+      ${field('👤', 'Display name', `<input id="name" maxlength="18" autocomplete="nickname" placeholder="Rudolph" value="${esc(d.name)}">`)}
+      <p class="ob-label">Gender</p>
+      <div class="opt-grid two" id="gender">${(['male', 'female'] as const).map((g) => `<button class="opt row ${d.gender === g ? 'on' : ''}" data-v="${g}">${g === 'male' ? 'Male' : 'Female'}</button>`).join('')}</div>
+      ${field('🎂', 'Date of birth (optional)', `<input id="dob" type="date" max="${new Date().toISOString().slice(0, 10)}" value="${esc(A.dob)}">`)}`],
+    () => ['Your <em>university</em>', 'Connect with your campus community.', `
+      ${field('🏫', 'University', `<select id="uni">${CAMPUSES.map((c) => `<option value="${c.id}" ${A.campus === c.id ? 'selected' : ''} ${c.open ? '' : 'disabled'}>${esc(c.name)}${c.open ? '' : ' (coming soon)'}</option>`).join('')}</select>`, '<em class="muted">▾</em>')}
+      <p class="ob-label">Student status</p>
+      <div class="opt-grid two" id="status">${STATUSES.map(([v, i, t]) => `<button class="opt ${A.status === v ? 'on' : ''}" data-v="${v}"><span class="o-ico">${i}</span>${t}</button>`).join('')}</div>
+      <div id="progWrap" ${A.status === 'staff' || A.status === 'visitor' ? 'hidden' : ''}>
+      ${field('📘', 'Programme / Department', `<input id="dept" list="depts" autocomplete="off" placeholder="Start typing, like Computer Science" value="${esc(d.department === OTHER_DEPARTMENT ? '' : d.department)}">`)}
+      <datalist id="depts">${DEPARTMENTS.flatMap((g) => g.departments.map((x) => `<option value="${esc(x)}" label="${esc(g.college)}"></option>`)).join('')}</datalist></div>`],
+    () => ['Choose your <em>hall</em>', 'Represent your hall and earn points together.', `
+      <div class="hall-tiles" id="halls">${HALLS.filter((h) => h.id !== 'none').map((h) => `<button class="hall-t ${d.hall === h.id ? 'on' : ''}" data-v="${h.id}" style="--hc:${h.color}">${esc(h.name)}</button>`).join('')}</div>
+      <button class="opt row ${d.hall === 'none' ? 'on' : ''}" data-v="none" id="nonRes">I don't live in a hall (non-resident)</button>`],
+    () => ['Connect your <em>social</em>', 'Let riders you meet find you. All optional.', `
+      <div class="social-row"><span class="s-logo" style="background:#fffc00;color:#0b1530">👻</span><input id="snap" maxlength="15" autocapitalize="off" placeholder="Snapchat username" value="${esc(d.snap)}"></div>
+      <div class="social-row"><span class="s-logo" style="background:#f1f3f8;color:#0b1530">👁️</span><span class="grow">Who can see your Snapchat?</span>
+        <select id="snapVis"><option value="all" ${d.snapPublic ? 'selected' : ''}>Everyone</option><option value="me" ${d.snapPublic ? '' : 'selected'}>Only me</option></select></div>
+      <div class="social-row"><span class="s-logo" style="background:linear-gradient(45deg,#f9a825,#e91e63,#7b1fa2)">📷</span><input id="insta" maxlength="30" autocapitalize="off" placeholder="Instagram username" value="${esc(A.instagram)}"></div>
+      <div class="social-row"><span class="s-logo" style="background:#0b1530">♪</span><input id="tiktok" maxlength="24" autocapitalize="off" placeholder="TikTok username" value="${esc(A.tiktok)}"></div>`],
+    () => ['What kind of <em>rider</em> are you?', 'Choose the style that fits you best.', `
+      <div class="types" id="types">${RIDER_TYPES.map(([v, i, t, x]) => `<button class="type ${A.riderType === v ? 'on' : ''}" data-v="${v}"><img src="${photo('type-' + v)}" alt="" loading="lazy"><span class="t-ico">${i}</span><span><b>${t}</b><small>${x}</small></span></button>`).join('')}</div>`],
+    () => ['', '', ''],
+    () => ['Choose your first <em>ride</em>', 'You can unlock more bikes as you ride.', `
+      <div class="bike-hero">${bikeArt(bike.color)}<span class="b-name">${esc(bike.name)}</span><span class="b-sel">Selected</span></div>
+      <div class="bike-thumbs" id="bikes">${BIKES.map((b) => `<button class="${b.id === d.bike ? 'on' : ''}" data-v="${b.id}" aria-label="${esc(b.name)}">${bikeArt(b.color)}<small>${esc(b.name)}</small></button>`).join('')}</div>
+      <div class="bike-stats">${(['speed', 'handling', 'acceleration'] as const).map((k) => `<div><span>${k[0].toUpperCase() + k.slice(1)}</span><i><b style="width:${bike[k] * 20}%"></b></i></div>`).join('')}</div>`],
+    () => ['Almost <em>there!</em>', 'Please review and accept to continue.', `
+      <div class="terms">
+        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Terms of Service<button type="button" class="lnk" data-doc="terms">Read Terms of Service</button></span></label>
+        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Privacy Policy<button type="button" class="lnk" data-doc="privacy">Read Privacy Policy</button></span></label>
+        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Community Guidelines<button type="button" class="lnk" data-doc="rules">Read Community Guidelines</button></span></label>
+        <label class="term"><input type="checkbox" id="news" ${A.newsOptIn ? 'checked' : ''}><span>Send me news, events and updates about LEGONRUSH <span class="muted">(optional)</span></span></label>
+      </div>
+      <p class="small auth-note good" id="mailNote" hidden></p>`],
+  ];
+  const [title, sub, body] = bodies[s.step]();
+  const last = s.step === OB_STEPS.length - 1;
+  render(`
+    <div class="ob light-ui fade-in" style="--ob-img:url('${photo(meta.img)}')">
+      <div class="ob-main">
+        <div class="ob-top"><button class="ob-back" id="back" aria-label="Back">‹</button><div class="brand-mark">LEGON<em>RUSH</em></div>
+          <div class="ob-progress">${OB_STEPS.map((_, i) => `<i class="${i <= s.step ? 'on' : ''}"></i>`).join('')}</div><span class="ob-count">${s.step + 1}/${OB_STEPS.length}</span></div>
+        <h1>${title}</h1>
+        <p class="ob-sub">${sub}</p>
+        <div class="ob-body">${body}</div>
+        <p class="small auth-note" id="note" role="status" hidden></p>
+        <div class="ob-foot">
+          <button class="btn btn-link desk-back" id="back2">‹ Back</button>
+          ${s.step === 4 ? '<button class="btn btn-link" id="skip">Skip for now</button>' : ''}
+          <button class="btn btn-primary" id="next">${last ? (s.email ? 'Create Account' : 'Finish') : 'Continue'}</button>
+        </div>
+      </div>
+      <div class="ob-side"><h2>${meta.side}</h2>${meta.line ? `<p>${meta.line}</p>` : ''}</div>
+    </div>`);
+  const $ = <T extends HTMLElement>(id: string) => app.querySelector<T>('#' + id)!;
+  const v = (id: string) => ($<HTMLInputElement>(id)?.value ?? '').trim();
+  const say = (t: string, focus?: string) => {
+    const n = $('note');
+    n.hidden = false;
+    n.textContent = t;
+    if (focus) $(focus).focus();
+  };
+  app.querySelectorAll('input, select').forEach((i) => i.addEventListener('input', () => ($('note').hidden = true)));
+  const go = (step: number) => onboard({ ...s, step });
+  const pick = (sel: string, fn: (v: string) => void) => on(`${sel} [data-v]`, 'click', (_, el) => {
+    app.querySelectorAll(`${sel} [data-v]`).forEach((b) => b.classList.toggle('on', b === el));
+    fn(el.dataset.v!);
+  });
+  const back = () => (s.step === 0 ? welcome() : go(s.step - 1));
+  on('#back', 'click', back);
+  on('#back2', 'click', back);
+  onBack(back);
+  const handle = (raw: string) => raw.trim().replace(/^@/, '');
+
+  const steps: (() => boolean | void)[] = [
+    () => {
+      s.email = v('email');
+      s.pass = $<HTMLInputElement>('pass').value;
+      d.username = v('user').replace(/^@/, '').replace(/[^a-zA-Z0-9_.]/g, '');
+      if (!/^\S+@\S+\.\S+$/.test(s.email)) return say('Enter your email address.', 'email');
+      if (!(s.pass.length >= 8 && /\d/.test(s.pass) && /[^A-Za-z0-9]/.test(s.pass))) return say('Your password needs 8 characters, a number and a special character like ! or #.', 'pass');
+      if (d.username.length < 2) return say('Choose a username of at least 2 letters or numbers.', 'user');
+      return true;
+    },
+    () => {
+      d.name = v('name');
+      A.dob = v('dob');
+      if (!d.name) return say('Add a display name.', 'name');
+      return true;
+    },
+    () => {
+      A.campus = v('uni') || 'ug';
+      if (!A.status) return say('Choose your student status.');
+      if (A.status === 'staff' || A.status === 'visitor') { d.department = OTHER_DEPARTMENT; return true; }
+      const typed = v('dept');
+      const dept = ALL_DEPARTMENTS.find((x) => x.toLowerCase() === typed.toLowerCase());
+      if (!dept) return say(typed ? 'Pick your programme from the list.' : 'Choose your programme or department.', 'dept');
+      d.department = dept;
+      return true;
+    },
+    () => (d.hall ? true : say('Choose your hall, or tap "I don\'t live in a hall".')),
+    () => {
+      const snap = handle(v('snap'));
+      if (snap && !/^[A-Za-z][A-Za-z0-9._-]{2,14}$/.test(snap)) return say('That Snapchat username doesn\'t look right. It has 3 to 15 letters, numbers, dots, dashes or underscores.', 'snap');
+      d.snap = snap;
+      d.snapPublic = v('snapVis') !== 'me';
+      A.instagram = handle(v('insta')).replace(/[^A-Za-z0-9._]/g, '');
+      A.tiktok = handle(v('tiktok')).replace(/[^A-Za-z0-9._]/g, '');
+      return true;
+    },
+    () => (A.riderType ? true : say('Pick the rider type that fits you best.')),
+    () => true,
+    () => true,
+    () => {
+      if ([...app.querySelectorAll<HTMLInputElement>('.must')].some((c) => !c.checked)) return say('Tick the three boxes to agree before you start.');
+      A.newsOptIn = $<HTMLInputElement>('news').checked;
+      A.termsAt = new Date().toISOString().slice(0, 10);
+      return true;
+    },
+  ];
+
+  // step-specific controls
+  if (s.step === 0) {
+    const rules = () => {
+      const p = $<HTMLInputElement>('pass').value;
+      const ok = { len: p.length >= 8, num: /\d/.test(p), sym: /[^A-Za-z0-9]/.test(p) };
+      app.querySelectorAll<HTMLElement>('#rules [data-r]').forEach((r) => r.classList.toggle('ok', ok[r.dataset.r as keyof typeof ok]));
+    };
+    $('pass').addEventListener('input', rules);
+    rules();
+    on('#eye', 'click', (e, el) => {
+      e.preventDefault();
+      const p = $<HTMLInputElement>('pass');
+      p.type = p.type === 'password' ? 'text' : 'password';
+      el.textContent = p.type === 'password' ? 'Show' : 'Hide';
+    });
+    on('#skipAcct', 'click', () => {
+      s.email = '';
+      s.pass = '';
+      d.username = v('user').replace(/^@/, '').replace(/[^a-zA-Z0-9_.]/g, '');
+      go(1);
+    });
+  }
+  if (s.step === 1) {
+    pick('#gender', (g) => { d.gender = g as Profile['gender']; applyLook(d); });
+    $('name').addEventListener('input', () => { $('avatar').firstChild!.textContent = (v('name') || '?')[0].toUpperCase(); });
+  }
+  if (s.step === 2) pick('#status', (x) => { A.status = x as StudentStatus; $('progWrap').hidden = x === 'staff' || x === 'visitor'; });
+  if (s.step === 3) {
+    on('#halls [data-v], #nonRes', 'click', (_, el) => {
+      d.hall = el.dataset.v!;
+      app.querySelectorAll('#halls [data-v], #nonRes').forEach((b) => b.classList.toggle('on', b === el));
+      $('note').hidden = true;
+      applyLook(d);
+    });
+  }
+  if (s.step === 4) on('#skip', 'click', () => go(5));
+  if (s.step === 5) pick('#types', (x) => { A.riderType = x as RiderType; $('note').hidden = true; });
+  if (s.step === 7) on('#bikes [data-v]', 'click', (_, el) => { d.bike = el.dataset.v!; go(7); });
+  on('[data-doc]', 'click', (e, el) => { e.preventDefault(); docSheet(el.dataset.doc as DocId); });
+
+  on('#next', 'click', async (_, el) => {
+    if (!steps[s.step]()) return;
+    if (!last) return go(s.step + 1);
+    const btn = el as HTMLButtonElement;
+    let confirmMail = false;
+    if (s.email) {
+      btn.disabled = true;
+      btn.textContent = 'Creating your account…';
+      const r = await cloud.signUp(s.email, s.pass);
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+      if (r.ok === false) return say(r.error);
+      confirmMail = r.ok === 'confirm';
+    }
+    d.guest = false;
+    profile = d;
+    saveProfile(profile);
+    if (cloud.account) { resetLobby(); void loadInvites(); }
+    sfx.finish();
+    welcomeDone(confirmMail ? s.email : '');
+  });
+
+  // dev: sample answers for the screenshot run
+  obAuto = () => {
+    const set = (id: string, val: string) => { const i = app.querySelector<HTMLInputElement>('#' + id); if (i) { i.value = val; i.dispatchEvent(new Event('input')); } };
+    if (s.step === 0) { set('email', 'rider@st.ug.edu.gh'); set('pass', 'Legon#2026'); set('user', 'rudolph'); app.querySelector<HTMLElement>('#skipAcct')!.click(); return; }
+    if (s.step === 1) set('name', 'Rudolph');
+    if (s.step === 2) { app.querySelector<HTMLElement>('#status [data-v="student"]')!.click(); set('dept', 'Computer Science'); }
+    if (s.step === 3) app.querySelector<HTMLElement>('#halls [data-v="volta"]')?.click();
+    if (s.step === 5) app.querySelector<HTMLElement>('#types [data-v="explorer"]')!.click();
+    if (s.step === 8) app.querySelectorAll<HTMLInputElement>('.must').forEach((c) => (c.checked = true));
+    $('next').click();
+  };
+}
+
+function welcomeDone(mailedTo: string) {
+  const name = profile?.name || 'Rider';
+  render(`
+    <div class="ob-welcome light-ui fade-in" style="--ob-img:url('${photo('ob-welcome')}')">
+      <div>
+        <div class="brand-mark" style="font-size:28px">LEGON<em>RUSH</em></div>
+        <h1 style="margin-top:18px">Welcome to<br><em>LEGONRUSH</em>,<br>${esc(name)}!</h1>
+        <p>Your campus. Your ride. Your competition.</p>
+        ${mailedTo ? `<p class="small auth-note good" style="margin-top:12px">We sent a link to ${esc(mailedTo)}. Open it on this phone to finish your account. You can ride now.</p>` : ''}
+      </div>
+      <button class="btn btn-primary" id="first">Start First Ride</button>
+    </div>`);
+  onBack(null);
+  obAuto = () => 'end';
+  on('#first', 'click', () => {
+    applyLook();
+    play(!profile!.tutorialDone);
+  });
+}
+
+type DocId = 'terms' | 'privacy' | 'rules';
+const DOCS: Record<DocId, [string, string]> = {
+  terms: ['Terms of Service', `
+    <p>LEGONRUSH is a free game made by a University of Ghana student. By using it you agree to these simple terms.</p>
+    <h3>Playing fair</h3><ul><li>Don't cheat, hack or use tools to change your times or coins.</li><li>One account per person.</li><li>We can remove times that look impossible, and close accounts that break these terms.</li></ul>
+    <h3>Rush Coins</h3><p>Coins and bikes are only for the game. They have no money value and can't be sold or swapped for cash.</p>
+    <h3>Real life</h3><p>LEGONRUSH is a game. Never play it while riding a real bike, driving or walking on a road.</p>
+    <h3>Changes</h3><p>We may update the game and these terms. We'll tell you in the app when something important changes.</p>`],
+  privacy: ['Privacy Policy', `
+    <p>We keep as little about you as we can.</p>
+    <h3>What we keep</h3><ul><li>Your email and password (stored safely by our sign-in provider, Supabase).</li><li>Your rider: name, username, hall, programme, look and bike.</li><li>Your rides, race times, coins and missions.</li><li>Your social usernames, only if you add them.</li></ul>
+    <h3>What other riders see</h3><p>Your name, username, hall, level and race times. Your Snapchat only if you choose "Everyone". Your date of birth is never shown.</p>
+    <h3>What we never do</h3><p>We never sell your data, and we never track your real location.</p>
+    <h3>Deleting</h3><p>Write to legonrush@gmail.com and we'll delete your account and everything in it.</p>`],
+  rules: ['Community Guidelines', `
+    <p>LEGONRUSH is for everyone on campus. Keep it friendly.</p>
+    <ul><li>Be kind in chat. No insults, bullying, hate or threats.</li><li>No sexual messages or pictures.</li><li>Don't share someone else's private details.</li><li>Don't spam invites.</li><li>Respect "no". If someone leaves a ride, let them go.</li></ul>
+    <p>Riders who break these rules can lose chat or their account. Report a problem to legonrush@gmail.com.</p>`],
+};
+
+function docSheet(id: DocId) {
+  const [title, html] = DOCS[id];
+  const ov = document.createElement('div');
+  ov.className = 'overlay sheet-overlay fade-in';
+  ov.innerHTML = `<div class="sheet light-ui doc-sheet" role="dialog" aria-label="${title}">
+    <div class="row"><h2 class="title" style="font-size:22px">${title}</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>${html}</div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('[data-close]')!.addEventListener('click', close);
 }
 
 // ---------- onboarding ----------
@@ -268,7 +587,9 @@ const OUTFITS: [Outfit, string][] = [['jersey', 'Jersey'], ['hall-tee', 'Hall T-
 const ACCESSORIES: [Accessory, string, string][] = [['helmet', '⛑️', 'Helmet'], ['sunglasses', '🕶️', 'Sunglasses'], ['backpack', '🎒', 'Backpack'], ['watch', '⌚', 'Watch'], ['gloves', '🧤', 'Gloves']];
 
 /** Step 2: dress the rider, with the 3D rider turning above the options. */
-function dressRider(draft: Profile, editing = false) {
+interface DressFlow { next: () => void; back: () => void; step: number; of: number }
+
+function dressRider(draft: Profile, editing = false, flow?: DressFlow) {
   game.dressView();
   applyLook(draft);
   const L = draft.look;
@@ -278,10 +599,10 @@ function dressRider(draft: Profile, editing = false) {
   const prev = app.querySelector('.dress-panel');
   const prevScroll = prev?.scrollTop ?? 0;
   render(`
-    <div class="screen dress${prev ? '' : ' fade-in'}">
+    <div class="screen dress light-ui${prev ? '' : ' fade-in'}">
       <div class="wrap dress-head">
-        <p class="kicker">${editing ? 'Your look' : 'Step 2 of 2'}</p>
-        <h1 class="title">Dress your rider</h1>
+        ${flow ? `<div class="ob-top"><button class="ob-back" id="back" aria-label="Back">‹</button><div class="ob-progress">${Array.from({ length: flow.of }, (_, i) => `<i class="${i < flow.step ? 'on' : ''}"></i>`).join('')}</div><span class="ob-count">${flow.step}/${flow.of}</span></div>` : `<p class="kicker">${editing ? 'Your look' : 'Step 2 of 2'}</p>`}
+        <h1 class="title">${flow ? 'Create your <em>rider</em>' : 'Dress your rider'}</h1>
       </div>
       <div class="grow"></div>
       <div class="dress-panel">
@@ -292,15 +613,15 @@ function dressRider(draft: Profile, editing = false) {
           ${L.outfit === 'kente' ? '' : `<div class="dress-row col"><b>${L.outfit === 'hall-tee' ? 'T-shirt' : L.outfit === 'hoodie' ? 'Hoodie' : 'Jersey'} colour</b>${swatches('jersey', JERSEY_COLORS, L.jersey, ['', hall.color])}</div>`}
           <div class="dress-row col"><b>Accessories</b><div class="chips-row" id="acc">${ACCESSORIES.map(([v, icon, label]) => `<button data-v="${v}" class="chip-btn ${L.accessories.includes(v) ? 'on' : ''}" aria-pressed="${L.accessories.includes(v)}">${icon} ${label}</button>`).join('')}</div></div>
           ${L.accessories.includes('helmet') ? `<div class="dress-row col"><b>Helmet colour</b>${swatches('helmet', HELMET_COLORS, L.helmet)}</div>` : ''}
-          ${editing ? '' : `<div class="dress-row col"><b>Starter bike</b><div class="chips-row" id="bike">${BIKES.map((b) => `<button data-v="${b.id}" class="chip-btn ${draft.bike === b.id ? 'on' : ''}"><span class="dot" style="background:${b.color}"></span>${b.name} · ${b.tagline}</button>`).join('')}</div></div>`}
-          <button class="btn btn-primary" id="go">${editing ? 'Save' : "Let's go"}</button>
+          ${editing || flow ? '' : `<div class="dress-row col"><b>Starter bike</b><div class="chips-row" id="bike">${BIKES.map((b) => `<button data-v="${b.id}" class="chip-btn ${draft.bike === b.id ? 'on' : ''}"><span class="dot" style="background:${b.color}"></span>${b.name} · ${b.tagline}</button>`).join('')}</div></div>`}
+          <button class="btn btn-primary" id="go">${editing ? 'Save' : flow ? 'Continue' : "Let's go"}</button>
           ${editing ? '<button class="btn btn-link" id="cancel">Cancel</button>' : ''}
         </div>
       </div>
     </div>`);
   const panel = app.querySelector<HTMLElement>('.dress-panel')!;
   panel.scrollTop = prevScroll;
-  const redraw = () => dressRider(draft, editing);
+  const redraw = () => dressRider(draft, editing, flow);
   on('#body [data-v]', 'click', (_, el) => { L.body = el.dataset.v as Look['body']; redraw(); });
   on('#skin [data-v]', 'click', (_, el) => { L.skin = el.dataset.v!; redraw(); });
   on('#outfit [data-v]', 'click', (_, el) => { L.outfit = el.dataset.v as Outfit; redraw(); });
@@ -313,6 +634,7 @@ function dressRider(draft: Profile, editing = false) {
     redraw();
   });
   on('#go', 'click', () => {
+    if (flow) return flow.next();
     profile = draft;
     saveProfile(profile);
     game.showcase();
@@ -322,10 +644,12 @@ function dressRider(draft: Profile, editing = false) {
   });
   const back = () => {
     game.showcase();
+    if (flow) return flow.back();
     if (editing) return home('you');
     createRider(draft);
   };
   on('#cancel', 'click', back);
+  on('#back', 'click', back);
   onBack(back);
 }
 
@@ -903,35 +1227,40 @@ function shell(content: string) {
   return `
     <div class="shell">
       <nav class="nav">
-        <div class="nav-brand">LEGON<span>RUSH</span></div>
-        ${NAV.map(([id, label, icon, phone]) => `<button class="nav-item${tab === id ? ' active' : ''}${phone ? '' : ' desk-only'}" data-nav="${id}">${icon}<span>${id === 'you' ? '<i class="phone-only">You</i><i class="desk-only">Profile</i>' : label}</span></button>`).join('')}
-        <button class="card selectable nav-campus" data-campus><small class="muted">Riding on</small><b>${esc(c.name)}</b><span class="small" style="color:var(--gold)">Change campus ›</span></button>
+        <div class="nav-brand"><div class="brand-mark">LEGON<span>RUSH</span></div></div>
+        ${NAV.map(([id, label, icon, phone]) => `<button class="nav-item${tab === id ? ' active' : ''}${phone ? '' : ' desk-only'}" data-nav="${id}">${icon}<span>${id === 'you' ? '<i class="phone-only">You</i><i class="desk-only">Profile</i>' : id === 'social' ? '<i class="phone-only">Social</i><i class="desk-only">Community</i>' : label}</span></button>`).join('')}
+        <button class="nav-campus" data-campus><small>📍 Riding on</small><b>${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)}</b><span class="small">Change campus →</span></button>
       </nav>
-      <main class="content scrim fade-in tab-${tab}">${topBar()}${content}</main>
+      <main class="content fade-in tab-${tab}">${tab === 'home' ? content : topBar() + content}</main>
     </div>`;
 }
 
 function topBar() {
   const p = profile!;
   const c = campusById(settings.campus);
+  const level = levelFor(p.xp);
+  const lo = xpForLevel(level), hi = xpForLevel(level + 1);
   return `<header class="topbar">
-    <button class="campus-btn" data-campus aria-label="Choose campus">${icons.pin}<span><small>Campus</small>${esc(c.id === 'ug' ? 'UG · Legon' : c.short)}</span><em>▾</em></button>
+    <button class="campus-btn" data-campus aria-label="Choose campus">${icons.pin}<span>${esc(c.id === 'ug' ? 'UG · Legon' : c.short)}</span><em>▾</em></button>
+    <div class="weather-pill" id="weather" hidden></div>
     <span class="grow"></span>
-    <span class="weather" id="weather" hidden></span>
-    <span class="chip">${icons.coin} ${fmt(p.coins)}</span>
+    <span class="coin-pill">${icons.coin} ${fmt(p.coins)}</span>
     <button class="icon-btn" id="bell" aria-label="Invites">${icons.bell}${notices.length ? `<i class="dot-badge">${notices.length}</i>` : ''}</button>
-    <button class="me-btn" data-nav="you" aria-label="Your profile"><span class="avatar sm" style="background:${hallById(p.hall).color}">${esc(p.name.slice(0, 1).toUpperCase())}</span><span class="lv">Lv ${levelFor(p.xp)}</span></button>
+    <button class="me-btn" data-nav="you" aria-label="Your profile"><span class="avatar sm" style="background:${hallById(p.hall).color}">${esc(p.name.slice(0, 1).toUpperCase())}</span><span class="lv-wrap"><span class="lv">Lv ${level}</span><span class="lv-bar"><i style="width:${((p.xp - lo) / (hi - lo)) * 100}%"></i></span></span></button>
     <button class="icon-btn desk-only" id="settingsTop" aria-label="Settings">${icons.gear}</button>
   </header>`;
 }
 
 /** Legon's weather now, for the top bar; quietly absent when offline */
-let weather: { text: string; at: number } | null = null;
+let weather: { icon: string; temp: number; word: string; at: number } | null = null;
 const WEATHER: [number, string, string][] = [[0, '☀️', 'Sunny'], [2, '⛅', 'Partly cloudy'], [3, '☁️', 'Cloudy'], [48, '🌫️', 'Hazy'], [67, '🌧️', 'Rain'], [82, '🌦️', 'Showers'], [99, '⛈️', 'Storm']];
 async function fillWeather() {
   const show = () => {
     const el = app.querySelector<HTMLElement>('#weather');
-    if (el && weather) { el.textContent = weather.text; el.hidden = false; }
+    if (!el || !weather) return;
+    const now = new Date();
+    el.innerHTML = `<span class="w-icon">${weather.icon}</span><span><b>${weather.temp}°C</b><small>${weather.word}</small></span><span class="w-sep"></span><span><b>${now.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase()}</b><small>${now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</small></span>`;
+    el.hidden = false;
   };
   if (weather && Date.now() - weather.at < 30 * 60e3) return show();
   try {
@@ -940,7 +1269,7 @@ async function fillWeather() {
     const code = Number(j.current.weather_code);
     const [, icon, word] = WEATHER.find(([max]) => code <= max) ?? WEATHER[0];
     const night = new Date().getHours() >= 19 || new Date().getHours() < 6;
-    weather = { text: `${night && code <= 2 ? '🌙' : icon} ${Math.round(j.current.temperature_2m)}°C ${night && code <= 2 ? 'Clear' : word}`, at: Date.now() };
+    weather = { icon: night && code <= 2 ? '🌙' : icon, temp: Math.round(j.current.temperature_2m), word: night && code <= 2 ? 'Clear' : word, at: Date.now() };
     show();
   } catch {
     /* offline: no weather */
@@ -952,7 +1281,7 @@ function campusSheet(after: () => void) {
   const ov = document.createElement('div');
   ov.className = 'overlay sheet-overlay fade-in';
   ov.innerHTML = `
-    <div class="sheet" role="dialog" aria-label="Choose campus">
+    <div class="sheet light-ui" role="dialog" aria-label="Choose campus">
       <div class="row"><h2 class="title" style="font-size:22px">Choose campus</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
       <p class="muted small">We're starting with the University of Ghana. More campuses are on the way.</p>
       <p class="small campus-note" id="campusNote" hidden></p>
@@ -979,59 +1308,69 @@ function campusSheet(after: () => void) {
   }));
 }
 
+const photo = (name: string) => `${import.meta.env.BASE_URL}photos/${name}.webp`;
 const MODES = [
-  { id: 'explore', icon: '🗺️', title: 'Explore', text: 'Discover the campus your way. Ride freely, find hidden routes and shortcuts, and visit iconic landmarks.', img: import.meta.env.BASE_URL + 'photos/lm-aerial.webp' },
-  { id: 'match', icon: '🏁', title: 'Quick Match', text: 'Race against riders online. Get matched and jump straight into a live race.', img: import.meta.env.BASE_URL + 'photos/sc-night.webp' },
-  { id: 'challenge', icon: '⚡', title: 'Challenge', text: 'Create or join a personal challenge. Beat their time and claim the top spot.', img: import.meta.env.BASE_URL + 'photos/sc-sunset.webp' },
-  { id: 'vibe', icon: '💛', title: 'Vibe Ride', text: 'Find someone and enjoy the ride together. No racing, just ride and connect.', img: import.meta.env.BASE_URL + 'photos/together.webp' },
+  { id: 'explore', icon: '🗺️', title: 'Explore', text: 'Discover campus, hidden routes and iconic locations.', img: photo('mode-explore') },
+  { id: 'match', icon: '🏁', title: 'Quick Match', text: 'Get matched with riders online and race now.', img: photo('mode-match') },
+  { id: 'challenge', icon: '🏆', title: 'Challenge', text: 'Create or join a challenge and beat your friends.', img: photo('mode-challenge') },
+  { id: 'vibe', icon: '❤️', title: 'Vibe Ride', text: 'Meet someone, ride together and enjoy the ride.', img: photo('mode-vibe') },
 ];
+
+const BIKE_ICON = '<svg class="qr-bike" viewBox="0 0 64 40" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="27" r="10"/><circle cx="51" cy="27" r="10"/><path d="M13 27l10-16h18l10 16M23 11l9 16h-19M32 27l9-16M20 6h8M41 11l-2-6h6"/></svg>';
 
 function quickRideCard() {
   const c = campusById(settings.campus);
-  const best = profile!.bestTimes[CAMPUS_LOOP.id];
-  return `<div class="quick-ride">
-    <button class="qr-main" id="ride">
-      <span class="qr-tag">🚴 Quick Ride</span>
-      <span class="qr-route">${esc(CAMPUS_LOOP.name)} · ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</span>
-      <span class="qr-sub">Just ride. No competition. Ride at your own pace, dodge obstacles, collect rewards${best ? ` and beat your best of ${clock(best)}` : ' and set your personal best'}.</span>
-      <span class="qr-go">Ride now ${icons.arrow}</span>
+  return `<button class="qr" id="ride">${BIKE_ICON}
+      <span class="qr-text"><span class="qr-kicker">QUICK RIDE</span><span class="qr-big">RIDE</span><span class="qr-route">${esc(CAMPUS_LOOP.name)} • ${(CAMPUS_LOOP.length / 1000).toFixed(1)} km</span></span>
+      <span class="qr-go">${icons.arrow}</span>
     </button>
-    <button class="qr-campus" data-campus><span>${icons.pin}</span><span class="grow"><small>Campus</small>${esc(c.name)}${c.id === 'ug' ? ', Legon' : ''}</span><em>▾</em></button>
-  </div>`;
+    <div class="qr-campus-row"><button class="qr-campus-chip" data-campus>${icons.pin} Campus: ${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)} <em>▾</em></button></div>`;
 }
 
-function missionsCard() {
+function missionsPanel() {
   const m = todayMissions(profile!);
-  return `<div class="card stack missions" style="gap:10px">
-    <div class="row"><b>Daily missions</b><span class="grow"></span><span class="muted small">Resets at midnight</span></div>
-    ${MISSIONS.map((x) => {
+  return `<div class="panel">
+    <div class="panel-head"><span>🎯</span><b>Daily Missions</b><span class="muted small" style="margin-left:auto">Resets at midnight</span></div>
+    <div class="mission-list">${MISSIONS.map((x) => {
       const got = Math.min(x.goal, x.progress(m));
       const done = got >= x.goal;
       const claimed = m.claimed.includes(x.id);
       return `<div class="mission${claimed ? ' claimed' : ''}">
         <span class="m-icon">${x.icon}</span>
-        <div class="grow"><div class="row small"><b>${esc(x.title)}</b><span class="grow"></span><span class="muted">${x.unit ? got.toFixed(1) : got}/${x.goal}</span></div><div class="xpbar"><div style="width:${(got / x.goal) * 100}%"></div></div></div>
-        ${claimed ? '<span class="badge">Done ✓</span>' : done ? `<button class="btn btn-primary btn-sm" data-mission="${x.id}">+${x.reward}</button>` : `<span class="badge gold">${x.reward} ${icons.coin}</span>`}
+        <div class="grow"><div class="small" style="font-weight:600">${esc(x.title)}</div><div class="xpbar"><div style="width:${(got / x.goal) * 100}%"></div></div></div>
+        <span class="m-count">${x.unit ? got.toFixed(1) : got} / ${x.goal}</span>
+        ${claimed ? '<span class="m-reward">✓</span>' : done ? `<button class="btn btn-primary btn-sm" data-mission="${x.id}">+${x.reward}</button>` : `<span class="m-reward">${icons.coin} ${x.reward}</span>`}
       </div>`;
-    }).join('')}
+    }).join('')}</div>
   </div>`;
 }
 
-function liveEventCard() {
+function livePanel() {
   const live = EVENTS.find((e) => eventStatus(e).live);
   const e = live ?? [...EVENTS].sort((a, b) => eventStatus(a).next!.getTime() - eventStatus(b).next!.getTime())[0];
   const st = eventStatus(e);
-  return `<div class="card stack event-mini${live ? ' live' : ''}" style="gap:8px">
-    <div class="row"><span class="badge${live ? ' gold live-badge' : ''}">${live ? '● Live event' : 'Next event'}</span><span class="grow"></span><span class="muted small">${live ? `ends ${hourText(st.ends!)}` : `starts ${hourText(st.next)}`}</span></div>
-    <h3 style="font-weight:800">${e.icon} ${esc(e.name.toUpperCase())}</h3>
-    <p class="muted small">${live ? '2× coins' : esc(e.blurb)} · win the ${esc(bikeById(e.prize).name)}</p>
-    <div class="row"><button class="btn ${live ? 'btn-primary' : 'btn-ghost'} btn-sm" data-event="${e.id}">${live ? 'Join now' : 'Practise'}</button><button class="btn btn-link" data-nav="events">All events ›</button></div>
+  const [first, ...rest] = e.name.toUpperCase().split(' ');
+  return `<button class="live-panel" data-event="${e.id}" style="--ev-img:url('${photo(e.id.includes('night') ? 'ev-night' : 'ev-sunset')}')">
+    <span class="lp-tag"><i class="${live ? '' : 'off'}"></i>${live ? 'Live Event' : 'Next Event'}</span>
+    <span class="lp-join">${live ? 'Join Now' : 'Practise'}</span>
+    <h3>${esc(first)} <span>${esc(rest.join(' '))}</span></h3>
+    <p>${live ? `2× coins and the ${esc(bikeById(e.prize).name)} until ${hourText(st.ends!)}.` : esc(e.blurb)}</p>
+    <span class="lp-meta"><span>📅 ${live ? 'Now' : `Today · ${hourText(st.next)}`}</span><span>📍 ${esc(routeById(e.race)?.name ?? 'Campus')}</span></span>
+  </button>`;
+}
+
+function onlinePanel() {
+  return `<div class="panel online-panel">
+    <div class="panel-head"><span>👥</span><b>Riders Online</b><span class="small" style="margin-left:auto;font-weight:600"><span class="dot-live"></span> <span id="onlineCount">${onlineCountText()}</span></span></div>
+    <div id="onlineList" class="online-list">${onlineRows()}</div>
   </div>`;
 }
 
+const onlineCountText = () => (lobbyState === 'on' ? `${online.length + 1} online` : lobbyState === 'off' ? 'Offline' : 'Connecting…');
+
 function onlineCard() {
   return `<div class="card stack online-card" style="gap:8px">
-    <div class="row"><b>Riders online</b><span class="grow"></span><span class="badge gold" id="onlineCount">${lobbyState === 'on' ? `● ${online.length + 1} online` : lobbyState === 'off' ? 'Offline' : 'Connecting…'}</span></div>
+    <div class="row"><b>Riders online</b><span class="grow"></span><span class="small" style="font-weight:600"><span class="dot-live"></span> <span id="onlineCount">${onlineCountText()}</span></span></div>
     <div id="onlineList" class="online-list">${onlineRows()}</div>
   </div>`;
 }
@@ -1041,6 +1380,7 @@ function onlineRows() {
   if (!online.length) return `<p class="muted small">${lobbyState === 'on' ? "You're the only one riding right now. Invite a friend to Vibe Ride." : 'Looking for riders…'}</p>`;
   const STATUS: Record<string, string> = { menu: 'Online', riding: 'Riding', vibe: 'Looking for a vibe ride', match: 'Looking for a race', room: 'In a vibe ride' };
   return online.slice(0, 8).map((r) => `<div class="online-row">
+    <span class="on-dot"></span>
     <span class="avatar xs" style="background:${hallById(r.state.hall).color}">${esc(r.state.name.slice(0, 1).toUpperCase())}</span>
     <span class="grow"><b>${esc(r.state.name)}</b><small class="muted">${esc(hallById(r.state.hall).short)} · ${STATUS[r.state.status] ?? 'Online'}</small></span>
     <button class="btn btn-ghost btn-sm" data-invite="${esc(r.key)}">Invite</button>
@@ -1097,29 +1437,27 @@ function home(next: Tab = 'home') {
 
   const views: Record<Tab, string> = {
     home: `
-      <div class="dash">
+      <div class="home">
+        <div class="home-bg"></div>
+        ${topBar()}
         <section class="hello">
-          <p class="kicker">${greeting()}</p>
-          <h1 class="title">${esc(firstName)} 👋</h1>
-          <p class="muted">Ready to ride ${esc(campusById(settings.campus).short)} today?</p>
+          <p class="greet">${greeting()},</p>
+          <h1>${esc(firstName)} 👋</h1>
+          <p>Your campus. Your ride. Your competition.</p>
         </section>
-        <div class="stat-row">
-          <div><b>${level}</b><span>Level</span></div>
-          <div><b>${p.rides}</b><span>Rides</span></div>
-          <div><b>${(p.totalDistance / 1000).toFixed(1)}</b><span>Km ridden</span></div>
-          <div><b>${p.wins}</b><span>Races won</span></div>
+        <div class="stat-chips">
+          <div class="stat-chip"><span class="s-ico">👑</span><span><b>${level}</b><small>Level</small></span></div>
+          <div class="stat-chip opt-chip"><span class="s-ico">🚲</span><span><b>${p.rides}</b><small>Rides</small></span></div>
+          <div class="stat-chip"><span class="s-ico">🚩</span><span><b>${(p.totalDistance / 1000).toFixed(1)} km</b><small>Distance</small></span></div>
+          <div class="stat-chip"><span class="s-ico">🏆</span><span><b>${p.wins}</b><small>Races Won</small></span></div>
+          ${daily ? `<button class="stat-chip daily-chip" id="daily"><span class="s-ico">🎁</span><span><b>+${daily.coins}</b><small>Daily reward</small></span></button>` : ''}
         </div>
-        ${daily ? `<button class="card selectable daily-card" id="daily"><div class="row"><span class="daily-icon">🎁</span><div class="grow"><b>Daily reward · Day ${daily.day}</b><p class="muted small">${daily.day > 1 ? `${daily.day} days in a row. ` : ''}Come back tomorrow for more.</p></div><span class="badge gold">+${daily.coins} ${icons.coin}</span></div></button>` : ''}
-        <div class="dash-grid">
-          <div class="dash-main">
-            ${quickRideCard()}
-            <div class="modes">${MODES.map((m) => `<button class="mode-card" data-mode="${m.id}" style="--img:url('${m.img}')"><span class="mode-title">${m.icon} ${esc(m.title.toUpperCase())}</span><span class="mode-text">${esc(m.text)}</span><span class="mode-go">${icons.arrow}</span></button>`).join('')}</div>
-          </div>
-          <aside class="dash-side">
-            ${missionsCard()}
-            ${liveEventCard()}
-            ${onlineCard()}
-          </aside>
+        ${quickRideCard()}
+        <div class="modes">${MODES.map((m) => `<button class="mode-card" data-mode="${m.id}" style="--img:url('${m.img}')"><span class="mode-ico">${m.icon}</span><span class="mode-title">${esc(m.title.toUpperCase())}</span><span class="mode-text">${esc(m.text)}</span><span class="mode-go">${icons.arrow}</span></button>`).join('')}</div>
+        <div class="home-bottom">
+          ${missionsPanel()}
+          ${livePanel()}
+          ${onlinePanel()}
         </div>
       </div>`,
     ride: `
@@ -1400,7 +1738,7 @@ function setStatus(status: Status, extra: Partial<RiderState> = {}) {
 function refreshOnline() {
   const list = app.querySelector<HTMLElement>('#onlineList');
   const count = app.querySelector<HTMLElement>('#onlineCount');
-  if (count) count.textContent = lobbyState === 'on' ? `● ${online.length + 1} online` : lobbyState === 'off' ? 'Offline' : 'Connecting…';
+  if (count) count.textContent = onlineCountText();
   if (list) {
     list.innerHTML = onlineRows();
     list.querySelectorAll<HTMLElement>('[data-invite]').forEach((b) => b.addEventListener('click', () => inviteOnline(b.dataset.invite!)));
@@ -1467,7 +1805,7 @@ function acceptNotice(n: Notice) {
 function noticesSheet() {
   const ov = document.createElement('div');
   ov.className = 'overlay sheet-overlay fade-in';
-  ov.innerHTML = `<div class="sheet">
+  ov.innerHTML = `<div class="sheet light-ui">
     <div class="row"><h2 class="title" style="font-size:22px">Invites</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
     ${notices.length ? notices.map((n, i) => `<div class="online-row"><span class="avatar xs" style="background:${hallById(n.from.hall).color}">${esc(n.from.name.slice(0, 1).toUpperCase())}</span><span class="grow"><b>${esc(inviteText(n.from.name))}</b><small class="muted">Vibe Ride · code ${esc(n.code)}</small></span><button class="btn btn-primary btn-sm" data-yes="${i}">Accept</button><button class="btn btn-link" data-no="${i}">✕</button></div>`).join('') : '<p class="muted">No invites right now. When someone invites you to a Vibe Ride, it shows up here.</p>'}
   </div>`;
@@ -1896,7 +2234,7 @@ const quickActions = () => `<div class="quick-acts">${REACTS.map(([k, e]) => `<b
 function placeMenu(onPick: (place: string) => void) {
   const ov = document.createElement('div');
   ov.className = 'overlay sheet-overlay fade-in';
-  ov.innerHTML = `<div class="sheet"><div class="row"><h2 class="title" style="font-size:20px">Suggest a place</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
+  ov.innerHTML = `<div class="sheet light-ui"><div class="row"><h2 class="title" style="font-size:20px">Suggest a place</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
     <div class="place-list">${VIBE_PLACES().map((n) => `<button class="chip" data-p="${esc(n)}">${esc(n)}</button>`).join('')}</div></div>`;
   document.body.appendChild(ov);
   const close = () => ov.remove();

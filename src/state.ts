@@ -32,7 +32,25 @@ export interface Profile {
   wins: number;
   /** today's missions: progress and which rewards were claimed */
   missions: MissionDay;
+  /** answers from the sign-up steps */
+  about: About;
 }
+
+export type RiderType = 'racer' | 'explorer' | 'social' | 'speedster' | 'chill';
+export type StudentStatus = 'student' | 'alumni' | 'staff' | 'visitor';
+export interface About {
+  /** YYYY-MM-DD, optional */
+  dob: string;
+  campus: string;
+  status: StudentStatus | '';
+  riderType: RiderType | '';
+  instagram: string;
+  tiktok: string;
+  newsOptIn: boolean;
+  /** when the rider accepted the terms (ISO date), empty if never */
+  termsAt: string;
+}
+export const newAbout = (): About => ({ dob: '', campus: 'ug', status: '', riderType: '', instagram: '', tiktok: '', newsOptIn: false, termsAt: '' });
 
 export interface MissionDay {
   day: string;
@@ -74,6 +92,7 @@ export function newProfile(): Profile {
     ownedBikes: [], week: { id: '', km: 0, claimed: false },
     gender: 'male', department: '', snap: '', snapPublic: true, look: defaultLook(),
     wins: 0, missions: { day: '', km: 0, friends: [], places: [], claimed: [] },
+    about: newAbout(),
   };
 }
 
@@ -84,6 +103,7 @@ export function loadProfile(): Profile | null {
     const p = { ...newProfile(), ...JSON.parse(raw) } as Profile;
     p.look = { ...defaultLook(), ...p.look };
     p.missions = { ...newProfile().missions, ...p.missions };
+    p.about = { ...newAbout(), ...p.about };
     return p;
   } catch {
     return null;

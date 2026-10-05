@@ -109,18 +109,6 @@ revealables.forEach((el) => {
   seen.observe(el);
 });
 
-// gameplay clips download and play only when they're on screen
-const clips = new IntersectionObserver((entries) => {
-  for (const e of entries) {
-    const v = e.target as HTMLVideoElement;
-    if (e.isIntersecting) {
-      if (!v.src) v.src = v.dataset.src!;
-      v.play().catch(() => { /* autoplay blocked: the poster still shows */ });
-    } else v.pause();
-  }
-}, { rootMargin: '120px' });
-if (!still) document.querySelectorAll<HTMLVideoElement>('video.clip').forEach((v) => clips.observe(v));
-
 // ---------- fastest on campus ----------
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, '0')}`;
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
