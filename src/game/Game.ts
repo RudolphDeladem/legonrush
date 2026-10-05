@@ -8,6 +8,8 @@ import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
 import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES, ROAD_HALF } from './world';
 import { buildingAt } from './campusmap';
+import { setNightLights } from './life';
+import { createWeatherFx, type WeatherFx } from './weatherfx';
 
 /** 'pedal' is one tap of the pedal; see Game.pedal() for press/release */
 export type Action = 'left' | 'right' | 'jump' | 'boost' | 'pedal';
@@ -451,6 +453,7 @@ export class Game {
   }
 
   setTimeOfDay(t: TimeOfDay) {
+    setNightLights(t === 'night');
     const k = SKIES[t];
     const mat = this.sky.material as THREE.ShaderMaterial;
     mat.uniforms.top.value.set(k.top);
@@ -628,6 +631,18 @@ export class Game {
   /** rain: slippery steering and puddles that slow you */
   setWeather(w: Weather) {
     this.weather = w === 'rain' ? 'rain' : 'clear';
+    this.weatherFx().set(this.weather === 'rain');
+  }
+
+  private wfx: WeatherFx | null = null;
+  private weatherFx() {
+    return (this.wfx ??= createWeatherFx(this.scene));
+  }
+
+  /** where the rider is on the campus map, for sound */
+  get riderXZ(): [number, number] {
+    const p = this.rider.root.position;
+    return [p.x, p.z];
   }
 
   /** gold treasure placed at spots along the route picked from the seed (the same seed gives the same spots) */
@@ -1605,6 +1620,7 @@ export class Game {
     const here = this.rider.root.position;
     this.sun.position.set(here.x + this.sunOffset.x, this.sunOffset.y, here.z + this.sunOffset.z);
     this.sun.target.position.set(here.x, 0, here.z);
+    this.wfx?.update(dt, cam);
     this.renderer.render(this.scene, cam);
   }
   private camTarget = new THREE.Vector3();
