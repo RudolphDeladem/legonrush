@@ -14,10 +14,11 @@ import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './g
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
 import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
-import { MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, normalizeProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
+import { PROFILE_REWARD, profileComplete, profileTodo, MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, normalizeProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setAmbience, setMusicVolume, setSound, sfx, startAmbience, stopAmbience, unlockAudio } from './audio';
 import { marketProximity } from './game/life';
 import { icons } from './ui/icons';
+import { buzz, countUp, hookHaptics, randomFact, setFeedback, tapSounds } from './ui/feedback';
 import { ALL_DEPARTMENTS, DEPARTMENTS, OTHER_DEPARTMENT, collegeOf } from './data/departments';
 import * as cloud from './cloud';
 import * as live from './live';
@@ -61,10 +62,15 @@ function applySettings() {
   setMusicVolume(settings.musicVolume);
   if (!settings.sound || settings.musicVolume <= 0) music(false);
   game.reducedMotion = settings.reducedMotion;
-  document.documentElement.classList.toggle('reduce-motion', settings.reducedMotion);
+  const root = document.documentElement.classList;
+  root.toggle('reduce-motion', settings.reducedMotion);
+  root.toggle('big-ui', settings.bigButtons);
+  root.toggle('night', settings.nightMenus);
+  setFeedback(settings);
   game.setQuality(settings.graphics === 'low' || (settings.graphics === 'auto' && settings.slowDevice) ? 'low' : 'high');
 }
 applySettings();
+hookHaptics();
 const changeSettings = (patch: Partial<typeof settings>) => {
   Object.assign(settings, patch);
   saveSettings(settings);
@@ -91,9 +97,16 @@ const dots = (n: number) => '●'.repeat(n) + '○'.repeat(5 - n);
 const PLAY_URL = `${location.origin}${import.meta.env.BASE_URL}play/`;
 const isTouch = matchMedia('(pointer: coarse)').matches;
 
-function render(html: string) {
+/** how a new screen comes in: a fade, or a slide forward/back through steps */
+type Enter = 'fade' | 'next' | 'back' | 'none';
+function render(html: string, enter: Enter = 'fade') {
   app.innerHTML = html;
+  const first = app.firstElementChild;
+  if (!first || enter === 'fade' || settings.reducedMotion) return;
+  first.classList.remove('fade-in');
+  if (enter !== 'none') first.classList.add(`enter-${enter}`);
 }
+tapSounds(app);
 
 // The phone's back button steps back inside the app instead of closing it.
 let backAction: (() => void) | null = null;
@@ -126,14 +139,23 @@ function applyLook(p: Profile | null = profile) {
 
 // ---------- splash + welcome ----------
 
+/** a campus fact or tip under a loading bar */
+const factBox = () => {
+  const [kind, text] = randomFact();
+  return `<div class="fact"><span class="fact-k">${kind === 'Tip' ? icons.bolt : icons.pillars} ${kind}</span><p>${esc(text)}</p></div>`;
+};
+
 function splash() {
   game.showcase();
+  // someone who already rides never needs the welcome screens
+  if (profile && !settings.onboarded) changeSettings({ onboarded: true });
   render(`
-    <div class="screen solid center fade-in">
+    <div class="screen solid center fade-in splash">
       <div class="logo">LEGON<span>RUSH</span></div>
       <p class="tag" style="margin-top:12px">The Campus Lifestyle Reimagined.</p>
       <p class="kicker" style="margin-top:22px">Ride. Race. Connect.</p>
       <div class="splash-bar"><div></div></div>
+      ${factBox()}
     </div>`);
   setTimeout(() => {
     // a shared route link opens straight into Explore, even for someone new
@@ -156,8 +178,63 @@ function splash() {
       return explorePicker(link.get('from') ?? undefined, link.get('to')!);
     }
     if (profile) home();
+    else if (!settings.onboarded) intro();
     else welcome();
   }, 1400);
+}
+
+// ---------- first visit: three welcome screens, then straight into a ride ----------
+
+const INTRO: { img: string; kicker: string; title: string; text: string; icon: string }[] = [
+  { img: 'hero', kicker: 'Welcome to LEGONRUSH', title: 'Ride the real <em>Legon</em> campus', text: 'Cycle past the Balme Library, the halls and the Great Hall, on roads drawn from the real campus map.', icon: icons.bike },
+  { img: 'race', kicker: 'Race and earn', title: 'Race friends and your <em>hall</em>', text: 'Beat your friends, ride for your hall in Hall Week and earn Rush Coins for bikes and gear.', icon: icons.trophy },
+  { img: 'connect', kicker: 'New on campus?', title: 'Learn the campus as you <em>ride</em>', text: 'Explore mode guides you turn by turn to lecture halls, banks, food and every place freshers need.', icon: icons.compass },
+];
+
+function intro(i = 0, enter: Enter = 'fade') {
+  game.showcase();
+  const it = INTRO[i];
+  const last = i === INTRO.length - 1;
+  render(`
+    <div class="intro light-ui fade-in">
+      <div class="intro-top"><div class="brand-mark">LEGON<em>RUSH</em></div>${last ? '' : '<button class="btn btn-link" id="guest">Skip</button>'}</div>
+      <div class="intro-photo"><img src="${photo(it.img)}" alt="" width="640" height="560"><span class="intro-ico">${it.icon}</span></div>
+      <div class="intro-text">
+        <p class="kicker">${it.kicker}</p>
+        <h1>${it.title}</h1>
+        <p class="intro-lede">${it.text}</p>
+        <div class="intro-dots">${INTRO.map((_, j) => `<button class="${j === i ? 'on' : ''}" data-dot="${j}" aria-label="Screen ${j + 1} of ${INTRO.length}"></button>`).join('')}</div>
+        <div class="intro-actions">
+          <button class="btn btn-primary" id="${last ? 'guest' : 'next'}">${last ? `Let's ride ${icons.arrow}` : 'Next'}</button>
+          ${last ? '<button class="btn btn-link" id="signIn">I already have an account</button>' : ''}
+        </div>
+      </div>
+    </div>`, enter);
+  const go = (j: number) => { if (j >= 0 && j < INTRO.length && j !== i) intro(j, j > i ? 'next' : 'back'); };
+  on('#next', 'click', () => go(i + 1));
+  on('[data-dot]', 'click', (_, el) => go(Number(el.dataset.dot)));
+  on('#guest', 'click', () => firstRide());
+  on('#signIn', 'click', () => { changeSettings({ onboarded: true }); authScreen('in', () => intro(INTRO.length - 1)); });
+  onBack(i ? () => go(i - 1) : null);
+  // swipe between the screens
+  const box = app.querySelector<HTMLElement>('.intro')!;
+  let x0 = 0, y0 = 0;
+  box.addEventListener('pointerdown', (e) => { x0 = e.clientX; y0 = e.clientY; });
+  box.addEventListener('pointerup', (e) => {
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(i + (dx < 0 ? 1 : -1));
+  });
+  obAuto = () => (last ? app.querySelector<HTMLElement>('#guest')!.click() : go(i + 1));
+}
+
+/** a new rider's first ride: as a guest, with tips; the account comes after */
+function firstRide() {
+  changeSettings({ onboarded: true });
+  profile = newProfile();
+  profile.name = 'Guest';
+  saveProfile(profile);
+  applyLook();
+  play(true);
 }
 
 /** someone opening a shared link plays straight away as a guest */
@@ -195,28 +272,32 @@ function welcome() {
   obAuto = () => app.querySelector<HTMLElement>('#start')!.click();
   on('#start', 'click', () => onboard());
   on('#signIn', 'click', () => authScreen('in', () => welcome()));
-  on('#guest', 'click', () => {
-    profile = newProfile();
-    profile.name = 'Guest';
-    saveProfile(profile);
-    applyLook();
-    play(true);
-  });
+  on('#guest', 'click', () => firstRide());
 }
 
-interface Signup { draft: Profile; email: string; pass: string; step: number }
+/** sign-up asks only what a rider needs; the rest waits in "Complete your profile" */
+type ObStep = 'account' | 'about' | 'hall' | 'look' | 'terms' | 'birthday' | 'uni' | 'social' | 'type';
+const SIGNUP_STEPS: ObStep[] = ['account', 'about', 'hall', 'look', 'terms'];
+const PROFILE_STEPS: ObStep[] = ['birthday', 'uni', 'social', 'type'];
+interface Signup { draft: Profile; email: string; pass: string; step: number; flow: 'signup' | 'complete' }
 
-const OB_STEPS: { img: string; side: string; line: string }[] = [
-  { img: 'ob-account', side: 'Ride <em>Explore</em> Connect', line: 'Your account keeps your rides, times and coins on any phone.' },
-  { img: 'ob-about', side: 'Ride <em>Explore</em> Connect', line: 'Other riders see your name when you race or vibe ride.' },
-  { img: 'ob-uni', side: 'Same campus.<br><em>Bigger</em> adventures.', line: 'Ride where you study, with the people you see every day.' },
-  { img: 'hall-tile', side: 'Ride for your <em>hall</em>', line: 'Every kilometre you ride counts for your hall in Hall Week.' },
-  { img: 'ob-social', side: 'A stronger <em>campus</em> together.', line: 'Riders you meet can find you after the ride.' },
-  { img: 'ob-ride', side: 'Ride your <em>way</em>', line: 'We use this to suggest modes and missions for you.' },
-  { img: 'ob-ride', side: 'Make it <em>yours</em>', line: '' },
-  { img: 'ob-ride', side: 'Your first ride.<br><em>Many more</em> to come.', line: 'Win races and events to unlock more bikes in the garage.' },
-  { img: 'ob-welcome', side: 'See you on <em>campus</em>', line: 'Ride safe, ride fair, and have fun.' },
-];
+/** a new sign-up; a guest keeps the coins and rides they already have */
+function newSignup(): Signup {
+  const base = profile?.guest ? structuredClone(profile) : newProfile();
+  return { draft: { ...base, name: base.name === 'Guest' || base.name === 'Rider' ? '' : base.name, hall: '', guest: false }, email: '', pass: '', step: 0, flow: 'signup' };
+}
+
+const OB_META: Record<ObStep, { img: string; side: string; line: string }> = {
+  account: { img: 'ob-account', side: 'Ride <em>Explore</em> Connect', line: 'Your account keeps your rides, times and coins on any phone.' },
+  about: { img: 'ob-about', side: 'Ride <em>Explore</em> Connect', line: 'Other riders see your name when you race or vibe ride.' },
+  hall: { img: 'hall-tile', side: 'Ride for your <em>hall</em>', line: 'Every kilometre you ride counts for your hall in Hall Week.' },
+  look: { img: 'ob-ride', side: 'Make it <em>yours</em>', line: '' },
+  terms: { img: 'ob-welcome', side: 'See you on <em>campus</em>', line: 'Ride safe, ride fair, and have fun.' },
+  birthday: { img: 'ob-about', side: 'Tell us about <em>you</em>', line: 'Your birthday is never shown to other riders.' },
+  uni: { img: 'ob-uni', side: 'Same campus.<br><em>Bigger</em> adventures.', line: 'Ride where you study, with the people you see every day.' },
+  social: { img: 'ob-social', side: 'A stronger <em>campus</em> together.', line: 'Riders you meet can find you after the ride.' },
+  type: { img: 'ob-ride', side: 'Ride your <em>way</em>', line: 'We use this to suggest modes and missions for you.' },
+};
 
 const RIDER_TYPES: [RiderType, string, string, string][] = [
   ['racer', icons.flag, 'Racer', 'I love competition and winning.'],
@@ -227,89 +308,83 @@ const RIDER_TYPES: [RiderType, string, string, string][] = [
 ];
 const STATUSES: [StudentStatus, string, string][] = [['student', icons.grad, 'UG Student'], ['alumni', icons.pillars, 'Alumni'], ['staff', icons.briefcase, 'Staff'], ['visitor', icons.hand, 'Visitor / Guest']];
 
-/** a side-on bike drawing in the bike's colour */
-const bikeArt = (color: string) => `<svg viewBox="0 0 220 120" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="50" cy="80" r="32" stroke="#0b1530" stroke-width="7"/><circle cx="170" cy="80" r="32" stroke="#0b1530" stroke-width="7"/>
-  <circle cx="50" cy="80" r="4" fill="#0b1530"/><circle cx="170" cy="80" r="4" fill="#0b1530"/>
-  <path d="M50 80l38-46h66l16 46M88 34l26 46H50M114 80l40-46" stroke="${color}" stroke-width="8"/>
-  <path d="M78 22h24M146 34l-6-14h16" stroke="#0b1530" stroke-width="6"/><circle cx="114" cy="80" r="8" stroke="#0b1530" stroke-width="5"/></svg>`;
-
-function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', guest: false }, email: '', pass: '', step: 0 }): void {
+function onboard(s: Signup = newSignup(), enter: Enter = 'fade'): void {
   const d = s.draft;
   const A = d.about;
-  if (s.step === 6) {
+  const order = s.flow === 'signup' ? SIGNUP_STEPS : PROFILE_STEPS;
+  const id = order[s.step];
+  const go = (step: number) => onboard({ ...s, step }, step < s.step ? 'back' : 'next');
+  const leave = () => (s.flow === 'complete' ? home('you') : profile ? home() : welcome());
+  if (id === 'look') {
     obAuto = () => app.querySelector<HTMLElement>('#go')!.click();
-    return dressRider(d, false, { next: () => onboard({ ...s, step: 7 }), back: () => onboard({ ...s, step: 5 }), step: 7, of: OB_STEPS.length });
+    return dressRider(d, false, { next: () => go(s.step + 1), back: () => go(s.step - 1), step: s.step + 1, of: order.length });
   }
   game.showcase();
   applyLook(d);
-  const meta = OB_STEPS[s.step];
+  const meta = OB_META[id];
   const field = (icon: string, label: string, input: string, extra = '') => `<label class="ob-field"><span class="ico">${icon}</span><span class="grow"><span class="ob-l">${label}</span>${input}</span>${extra}</label>`;
-  const bike = bikeById(d.bike);
-  const bodies: (() => [string, string, string])[] = [
-    () => ['Create your <em>account</em>', 'Join thousands of riders on campus.', `
+  const bodies: Record<ObStep, () => [string, string, string]> = {
+    account: () => ['Save your <em>progress</em>', `Create your account to keep ${d.coins ? `your ${fmt(d.coins)} coins and ` : ''}every ride.`, `
       ${field(icons.mail, 'Email address', `<input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="you@st.ug.edu.gh" value="${esc(s.email)}">`)}
       ${field(icons.lock, 'Password', `<input id="pass" type="password" autocomplete="new-password" placeholder="Create a password" value="${esc(s.pass)}">`, '<button type="button" class="eye" id="eye">Show</button>')}
       <div class="rules" id="rules"><span data-r="len">At least 8 characters</span><span data-r="num">Contains a number</span><span data-r="sym">Contains a special character</span></div>
       ${field('@', 'Username', `<input id="user" maxlength="20" autocapitalize="off" placeholder="rudolphrides" value="${esc(d.username)}">`)}
       <button class="btn btn-link" id="skipAcct">Skip for now and save on this phone only</button>`],
-    () => ['Tell us about <em>you</em>', 'This helps us personalise your experience.', `
+    about: () => ['Tell us about <em>you</em>', 'Other riders see this when you race.', `
       <div class="ob-avatar" id="avatar" style="background:#ffd21f">${esc((d.name || '?')[0].toUpperCase())}<i>${icons.camera}</i></div>
       ${field(icons.user, 'Display name', `<input id="name" maxlength="18" autocomplete="nickname" placeholder="Rudolph" value="${esc(d.name)}">`)}
       <p class="ob-label">Gender</p>
-      <div class="opt-grid two" id="gender">${(['male', 'female'] as const).map((g) => `<button class="opt row ${d.gender === g ? 'on' : ''}" data-v="${g}">${g === 'male' ? 'Male' : 'Female'}</button>`).join('')}</div>
-      ${field(icons.cake, 'Date of birth (optional)', `<input id="dob" type="date" max="${new Date().toISOString().slice(0, 10)}" value="${esc(A.dob)}">`)}`],
-    () => ['Your <em>university</em>', 'Connect with your campus community.', `
+      <div class="opt-grid two" id="gender">${(['male', 'female'] as const).map((g) => `<button class="opt row ${d.gender === g ? 'on' : ''}" data-v="${g}">${g === 'male' ? 'Male' : 'Female'}</button>`).join('')}</div>`],
+    hall: () => ['Choose your <em>hall</em>', 'Represent your hall and earn points together.', `
+      <div class="hall-tiles" id="halls">${HALLS.filter((h) => h.id !== 'none').map((h) => `<button class="hall-t ${d.hall === h.id ? 'on' : ''}" data-v="${h.id}" style="--hc:${h.color}">${esc(h.name)}</button>`).join('')}</div>
+      <button class="opt row ${d.hall === 'none' ? 'on' : ''}" data-v="none" id="nonRes">I don't live in a hall (non-resident)</button>`],
+    look: () => ['', '', ''],
+    terms: () => ['Almost <em>there!</em>', 'Please review and accept to continue.', `
+      <div class="terms">
+        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Terms of Service<button type="button" class="lnk" data-doc="terms">Read Terms of Service</button></span></label>
+        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Privacy Policy<button type="button" class="lnk" data-doc="privacy">Read Privacy Policy</button></span></label>
+        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Community Guidelines<button type="button" class="lnk" data-doc="rules">Read Community Guidelines</button></span></label>
+        <label class="term"><input type="checkbox" id="news" ${A.newsOptIn ? 'checked' : ''}><span>Send me news, events and updates about LEGONRUSH <span class="muted">(optional)</span></span></label>
+      </div>`],
+    birthday: () => ['When is your <em>birthday</em>?', 'Optional. It is never shown to other riders.', `
+      ${field(icons.cake, 'Date of birth', `<input id="dob" type="date" max="${new Date().toISOString().slice(0, 10)}" value="${esc(A.dob)}">`)}`],
+    uni: () => ['Your <em>university</em>', 'Connect with your campus community.', `
       ${field(icons.pillars, 'University', `<select id="uni">${CAMPUSES.map((c) => `<option value="${c.id}" ${A.campus === c.id ? 'selected' : ''} ${c.open ? '' : 'disabled'}>${esc(c.name)}${c.open ? '' : ' (coming soon)'}</option>`).join('')}</select>`, '<em class="muted">▾</em>')}
       <p class="ob-label">Student status</p>
       <div class="opt-grid two" id="status">${STATUSES.map(([v, i, t]) => `<button class="opt ${A.status === v ? 'on' : ''}" data-v="${v}"><span class="o-ico">${i}</span>${t}</button>`).join('')}</div>
       <div id="progWrap" ${A.status === 'staff' || A.status === 'visitor' ? 'hidden' : ''}>
       ${field(icons.book, 'Programme / Department', `<input id="dept" list="depts" autocomplete="off" placeholder="Start typing, like Computer Science" value="${esc(d.department === OTHER_DEPARTMENT ? '' : d.department)}">`)}
       <datalist id="depts">${DEPARTMENTS.flatMap((g) => g.departments.map((x) => `<option value="${esc(x)}" label="${esc(g.college)}"></option>`)).join('')}</datalist></div>`],
-    () => ['Choose your <em>hall</em>', 'Represent your hall and earn points together.', `
-      <div class="hall-tiles" id="halls">${HALLS.filter((h) => h.id !== 'none').map((h) => `<button class="hall-t ${d.hall === h.id ? 'on' : ''}" data-v="${h.id}" style="--hc:${h.color}">${esc(h.name)}</button>`).join('')}</div>
-      <button class="opt row ${d.hall === 'none' ? 'on' : ''}" data-v="none" id="nonRes">I don't live in a hall (non-resident)</button>`],
-    () => ['Connect your <em>social</em>', 'Let riders you meet find you. All optional.', `
+    social: () => ['Connect your <em>social</em>', 'Let riders you meet find you. All optional.', `
       <div class="social-row"><span class="s-logo" style="background:#fffc00;color:#0b1530">${icons.ghost}</span><input id="snap" maxlength="15" autocapitalize="off" placeholder="Snapchat username" value="${esc(d.snap)}"></div>
       <div class="social-row"><span class="s-logo" style="background:#f1f3f8;color:#0b1530">${icons.eye}</span><span class="grow">Who can see your Snapchat?</span>
         <select id="snapVis"><option value="all" ${d.snapPublic ? 'selected' : ''}>Everyone</option><option value="me" ${d.snapPublic ? '' : 'selected'}>Only me</option></select></div>
       <div class="social-row"><span class="s-logo" style="background:linear-gradient(45deg,#f9a825,#e91e63,#7b1fa2)">${icons.camera}</span><input id="insta" maxlength="30" autocapitalize="off" placeholder="Instagram username" value="${esc(A.instagram)}"></div>
       <div class="social-row"><span class="s-logo" style="background:#0b1530">${icons.music}</span><input id="tiktok" maxlength="24" autocapitalize="off" placeholder="TikTok username" value="${esc(A.tiktok)}"></div>`],
-    () => ['What kind of <em>rider</em> are you?', 'Choose the style that fits you best.', `
+    type: () => ['What kind of <em>rider</em> are you?', 'Choose the style that fits you best.', `
       <div class="types" id="types">${RIDER_TYPES.map(([v, i, t, x]) => `<button class="type ${A.riderType === v ? 'on' : ''}" data-v="${v}"><img src="${photo('type-' + v)}" alt="" loading="lazy"><span class="t-ico">${i}</span><span><b>${t}</b><small>${x}</small></span></button>`).join('')}</div>`],
-    () => ['', '', ''],
-    () => ['Choose your first <em>ride</em>', 'You can unlock more bikes as you ride.', `
-      <div class="bike-hero">${bikeArt(bike.color)}<span class="b-name">${esc(bike.name)}</span><span class="b-sel">Selected</span></div>
-      <div class="bike-thumbs" id="bikes">${BIKES.map((b) => `<button class="${b.id === d.bike ? 'on' : ''}" data-v="${b.id}" aria-label="${esc(b.name)}">${bikeArt(b.color)}<small>${esc(b.name)}</small></button>`).join('')}</div>
-      <div class="bike-stats">${(['speed', 'handling', 'acceleration'] as const).map((k) => `<div><span>${k[0].toUpperCase() + k.slice(1)}</span><i><b style="width:${bike[k] * 20}%"></b></i></div>`).join('')}</div>`],
-    () => ['Almost <em>there!</em>', 'Please review and accept to continue.', `
-      <div class="terms">
-        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Terms of Service<button type="button" class="lnk" data-doc="terms">Read Terms of Service</button></span></label>
-        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Privacy Policy<button type="button" class="lnk" data-doc="privacy">Read Privacy Policy</button></span></label>
-        <label class="term"><input type="checkbox" class="must" ${A.termsAt ? 'checked' : ''}><span>I agree to the Community Guidelines<button type="button" class="lnk" data-doc="rules">Read Community Guidelines</button></span></label>
-        <label class="term"><input type="checkbox" id="news" ${A.newsOptIn ? 'checked' : ''}><span>Send me news, events and updates about LEGONRUSH <span class="muted">(optional)</span></span></label>
-      </div>
-      <p class="small auth-note good" id="mailNote" hidden></p>`],
-  ];
-  const [title, sub, body] = bodies[s.step]();
-  const last = s.step === OB_STEPS.length - 1;
+  };
+  const [title, sub, body] = bodies[id]();
+  const last = s.step === order.length - 1;
+  const done = s.flow === 'complete' ? 'Finish' : s.email ? 'Create Account' : 'Finish';
   render(`
     <div class="ob light-ui fade-in" style="--ob-img:url('${photo(meta.img)}')">
       <div class="ob-main">
         <div class="ob-top"><button class="ob-back" id="back" aria-label="Back">‹</button><div class="brand-mark">LEGON<em>RUSH</em></div>
-          <div class="ob-progress">${OB_STEPS.map((_, i) => `<i class="${i <= s.step ? 'on' : ''}"></i>`).join('')}</div><span class="ob-count">${s.step + 1}/${OB_STEPS.length}</span></div>
+          <div class="ob-progress">${order.map((_, i) => `<i class="${i <= s.step ? 'on' : ''}"></i>`).join('')}</div><span class="ob-count">${s.step + 1}/${order.length}</span></div>
+        ${s.flow === 'complete' ? `<p class="kicker ob-kick">Complete your profile · +${PROFILE_REWARD} ${icons.coin}</p>` : ''}
         <h1>${title}</h1>
         <p class="ob-sub">${sub}</p>
         <div class="ob-body">${body}</div>
         <p class="small auth-note" id="note" role="status" hidden></p>
         <div class="ob-foot">
           <button class="btn btn-link desk-back" id="back2">‹ Back</button>
-          ${s.step === 4 ? '<button class="btn btn-link" id="skip">Skip for now</button>' : ''}
-          <button class="btn btn-primary" id="next">${last ? (s.email ? 'Create Account' : 'Finish') : 'Continue'}</button>
+          ${s.flow === 'complete' || id === 'social' ? '<button class="btn btn-link" id="skip">Skip for now</button>' : ''}
+          <button class="btn btn-primary" id="next">${last ? done : 'Continue'}</button>
         </div>
       </div>
       <div class="ob-side"><h2>${meta.side}</h2>${meta.line ? `<p>${meta.line}</p>` : ''}</div>
-    </div>`);
+    </div>`, enter);
   const $ = <T extends HTMLElement>(id: string) => app.querySelector<T>('#' + id)!;
   const v = (id: string) => ($<HTMLInputElement>(id)?.value ?? '').trim();
   const say = (t: string, focus?: string) => {
@@ -319,19 +394,19 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
     if (focus) $(focus).focus();
   };
   app.querySelectorAll('input, select').forEach((i) => i.addEventListener('input', () => ($('note').hidden = true)));
-  const go = (step: number) => onboard({ ...s, step });
   const pick = (sel: string, fn: (v: string) => void) => on(`${sel} [data-v]`, 'click', (_, el) => {
     app.querySelectorAll(`${sel} [data-v]`).forEach((b) => b.classList.toggle('on', b === el));
     fn(el.dataset.v!);
   });
-  const back = () => (s.step === 0 ? welcome() : go(s.step - 1));
+  const back = () => (s.step === 0 ? leave() : go(s.step - 1));
   on('#back', 'click', back);
   on('#back2', 'click', back);
   onBack(back);
   const handle = (raw: string) => raw.trim().replace(/^@/, '');
 
-  const steps: (() => boolean | void)[] = [
-    () => {
+  // each step checks its answers; false keeps the rider on the step
+  const check: Record<ObStep, () => boolean | void> = {
+    account: () => {
       s.email = v('email');
       s.pass = $<HTMLInputElement>('pass').value;
       d.username = v('user').replace(/^@/, '').replace(/[^a-zA-Z0-9_.]/g, '');
@@ -340,13 +415,24 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
       if (d.username.length < 2) return say('Choose a username of at least 2 letters or numbers.', 'user');
       return true;
     },
-    () => {
+    about: () => {
       d.name = v('name');
-      A.dob = v('dob');
       if (!d.name) return say('Add a display name.', 'name');
       return true;
     },
-    () => {
+    hall: () => (d.hall ? true : say('Choose your hall, or tap "I don\'t live in a hall".')),
+    look: () => true,
+    terms: () => {
+      if ([...app.querySelectorAll<HTMLInputElement>('.must')].some((c) => !c.checked)) return say('Tick the three boxes to agree before you start.');
+      A.newsOptIn = $<HTMLInputElement>('news').checked;
+      A.termsAt = new Date().toISOString().slice(0, 10);
+      return true;
+    },
+    birthday: () => {
+      A.dob = v('dob');
+      return true;
+    },
+    uni: () => {
       A.campus = v('uni') || 'ug';
       if (!A.status) return say('Choose your student status.');
       if (A.status === 'staff' || A.status === 'visitor') { d.department = OTHER_DEPARTMENT; return true; }
@@ -356,8 +442,7 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
       d.department = dept;
       return true;
     },
-    () => (d.hall ? true : say('Choose your hall, or tap "I don\'t live in a hall".')),
-    () => {
+    social: () => {
       const snap = handle(v('snap'));
       if (snap && !/^[A-Za-z][A-Za-z0-9._-]{2,14}$/.test(snap)) return say('That Snapchat username doesn\'t look right. It has 3 to 15 letters, numbers, dots, dashes or underscores.', 'snap');
       d.snap = snap;
@@ -366,19 +451,11 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
       A.tiktok = handle(v('tiktok')).replace(/[^A-Za-z0-9._]/g, '');
       return true;
     },
-    () => (A.riderType ? true : say('Pick the rider type that fits you best.')),
-    () => true,
-    () => true,
-    () => {
-      if ([...app.querySelectorAll<HTMLInputElement>('.must')].some((c) => !c.checked)) return say('Tick the three boxes to agree before you start.');
-      A.newsOptIn = $<HTMLInputElement>('news').checked;
-      A.termsAt = new Date().toISOString().slice(0, 10);
-      return true;
-    },
-  ];
+    type: () => (A.riderType ? true : say('Pick the rider type that fits you best.')),
+  };
 
   // step-specific controls
-  if (s.step === 0) {
+  if (id === 'account') {
     const rules = () => {
       const p = $<HTMLInputElement>('pass').value;
       const ok = { len: p.length >= 8, num: /\d/.test(p), sym: /[^A-Za-z0-9]/.test(p) };
@@ -399,12 +476,12 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
       go(1);
     });
   }
-  if (s.step === 1) {
+  if (id === 'about') {
     pick('#gender', (g) => { d.gender = g as Profile['gender']; applyLook(d); });
     $('name').addEventListener('input', () => { $('avatar').firstChild!.textContent = (v('name') || '?')[0].toUpperCase(); });
   }
-  if (s.step === 2) pick('#status', (x) => { A.status = x as StudentStatus; $('progWrap').hidden = x === 'staff' || x === 'visitor'; });
-  if (s.step === 3) {
+  if (id === 'uni') pick('#status', (x) => { A.status = x as StudentStatus; $('progWrap').hidden = x === 'staff' || x === 'visitor'; });
+  if (id === 'hall') {
     on('#halls [data-v], #nonRes', 'click', (_, el) => {
       d.hall = el.dataset.v!;
       app.querySelectorAll('#halls [data-v], #nonRes').forEach((b) => b.classList.toggle('on', b === el));
@@ -412,14 +489,29 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
       applyLook(d);
     });
   }
-  if (s.step === 4) on('#skip', 'click', () => go(5));
-  if (s.step === 5) pick('#types', (x) => { A.riderType = x as RiderType; $('note').hidden = true; });
-  if (s.step === 7) on('#bikes [data-v]', 'click', (_, el) => { d.bike = el.dataset.v!; go(7); });
+  if (id === 'type') pick('#types', (x) => { A.riderType = x as RiderType; $('note').hidden = true; });
   on('[data-doc]', 'click', (e, el) => { e.preventDefault(); docSheet(el.dataset.doc as DocId); });
 
+  const finishProfile = () => {
+    profile = d;
+    let reward = 0;
+    if (profileComplete(d) && !d.about.completedAt) {
+      d.about.completedAt = new Date().toISOString().slice(0, 10);
+      d.coins += PROFILE_REWARD;
+      reward = PROFILE_REWARD;
+    }
+    saveProfile(d);
+    if (reward) {
+      sfx.finish();
+      celebrate(icons.check, 'Profile complete', `+${reward} coins for telling us about you.`, () => home('you'));
+    } else home('you');
+  };
+  on('#skip', 'click', () => (last ? (s.flow === 'complete' ? finishProfile() : null) : go(s.step + 1)));
+
   on('#next', 'click', async (_, el) => {
-    if (!steps[s.step]()) return;
+    if (!check[id]()) return;
     if (!last) return go(s.step + 1);
+    if (s.flow === 'complete') return finishProfile();
     const btn = el as HTMLButtonElement;
     let confirmMail = false;
     if (s.email) {
@@ -442,14 +534,33 @@ function onboard(s: Signup = { draft: { ...newProfile(), name: '', hall: '', gue
   // dev: sample answers for the screenshot run
   obAuto = () => {
     const set = (id: string, val: string) => { const i = app.querySelector<HTMLInputElement>('#' + id); if (i) { i.value = val; i.dispatchEvent(new Event('input')); } };
-    if (s.step === 0) { set('email', 'rider@st.ug.edu.gh'); set('pass', 'Legon#2026'); set('user', 'rudolph'); app.querySelector<HTMLElement>('#skipAcct')!.click(); return; }
-    if (s.step === 1) set('name', 'Rudolph');
-    if (s.step === 2) { app.querySelector<HTMLElement>('#status [data-v="student"]')!.click(); set('dept', 'Computer Science'); }
-    if (s.step === 3) app.querySelector<HTMLElement>('#halls [data-v="volta"]')?.click();
-    if (s.step === 5) app.querySelector<HTMLElement>('#types [data-v="explorer"]')!.click();
-    if (s.step === 8) app.querySelectorAll<HTMLInputElement>('.must').forEach((c) => (c.checked = true));
+    if (id === 'account') { set('email', 'rider@st.ug.edu.gh'); set('pass', 'Legon#2026'); set('user', 'rudolph'); app.querySelector<HTMLElement>('#skipAcct')!.click(); return; }
+    if (id === 'about') set('name', 'Rudolph');
+    if (id === 'uni') { app.querySelector<HTMLElement>('#status [data-v="student"]')!.click(); set('dept', 'Computer Science'); }
+    if (id === 'hall') app.querySelector<HTMLElement>('#halls [data-v="volta"]')?.click();
+    if (id === 'type') app.querySelector<HTMLElement>('#types [data-v="explorer"]')!.click();
+    if (id === 'terms') app.querySelectorAll<HTMLInputElement>('.must').forEach((c) => (c.checked = true));
     $('next').click();
   };
+}
+
+/** a big moment: level up, profile complete */
+function celebrate(icon: string, title: string, text: string, then: () => void, extra = '') {
+  const ov = document.createElement('div');
+  ov.className = 'overlay celebrate light-ui fade-in';
+  ov.innerHTML = `<div class="cele-card" role="dialog" aria-label="${esc(title)}">
+    <div class="cele-burst" aria-hidden="true">${Array.from({ length: 12 }, (_, i) => `<i style="--a:${i * 30}deg"></i>`).join('')}</div>
+    <div class="cele-ico">${icon}</div>
+    <h2>${title}</h2>
+    <p>${text}</p>
+    ${extra}
+    <button class="btn btn-primary" data-close>Awesome</button>
+  </div>`;
+  app.appendChild(ov);
+  buzz([30, 40, 30, 40, 90]);
+  const close = () => { ov.remove(); then(); };
+  ov.querySelector('[data-close]')!.addEventListener('click', close);
+  onBack(close);
 }
 
 function welcomeDone(mailedTo: string) {
@@ -462,12 +573,16 @@ function welcomeDone(mailedTo: string) {
         <p>Your campus. Your ride. Your competition.</p>
         ${mailedTo ? `<p class="small auth-note good" style="margin-top:12px">We sent a link to ${esc(mailedTo)}. Open it on this phone to finish your account. You can ride now.</p>` : ''}
       </div>
-      <button class="btn btn-primary" id="first">Start First Ride</button>
+      <div class="ob-welcome-foot">
+        ${profile?.rides ? `<p class="small">Finish your profile on the You tab for <b>+${PROFILE_REWARD} coins</b>.</p>` : ''}
+        <button class="btn btn-primary" id="first">${profile?.rides ? "Let's go" : 'Start First Ride'}</button>
+      </div>
     </div>`);
   onBack(null);
   obAuto = () => 'end';
   on('#first', 'click', () => {
     applyLook();
+    if (profile!.rides) return home();
     play(!profile!.tutorialDone);
   });
 }
@@ -691,45 +806,100 @@ interface LiveRide {
   riders: { id: string; name: string; jersey: string }[];
 }
 
+// "Continue where you left off": the last solo ride, remembered on this phone
+const LAST_KEY = 'legonrush.last.v1';
+interface LastRide { id: string; name: string; from?: string; to?: string; mode?: TravelMode }
+function saveLastRide(route: Route) {
+  const last: LastRide = route.id === 'explore'
+    ? { id: 'explore', name: `To ${route.to.name}`, from: route.from.name, to: route.to.name, mode: exploreOpts.mode }
+    : { id: route.id, name: route.name };
+  try { localStorage.setItem(LAST_KEY, JSON.stringify(last)); } catch { /* private mode */ }
+}
+function lastRide(): { last: LastRide; route: () => Route | null } | null {
+  try {
+    const last = JSON.parse(localStorage.getItem(LAST_KEY) ?? 'null') as LastRide | null;
+    if (!last?.id) return null;
+    const route = () => {
+      if (last.id === 'freshers-tour') return freshersTour();
+      if (last.id !== 'explore') return routeById(last.id);
+      const from = placeByName(last.from ?? ''), to = placeByName(last.to ?? '');
+      return from && to ? exploreRoute(from, to, last.mode ?? 'cycle') : null;
+    };
+    return { last, route };
+  } catch {
+    return null;
+  }
+}
+
+/** km/h for the speedometer. The game's own figure (HudState.kmh) replaces this when it lands. */
+
+/** a new route takes a moment to build: show a campus fact meanwhile */
 function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}) {
   if (!profile) return;
-  if (game.currentRoute !== route) game.setRoute(route);
+  if (game.currentRoute === route) return ride(tutorial, route, opts);
+  render(`
+    <div class="screen solid center loading light-ui fade-in">
+      <div class="brand-mark">LEGON<em>RUSH</em></div>
+      <p class="kicker" style="margin-top:18px">Loading</p>
+      <h1 class="title">${esc(route.id === 'explore' ? `To ${route.to.name}` : route.name)}</h1>
+      <div class="splash-bar"><div></div></div>
+      ${factBox()}
+    </div>`);
+  // let the loading screen paint before the world is built
+  setTimeout(() => {
+    game.setRoute(route);
+    setTimeout(() => ride(tutorial, route, opts), 500);
+  }, 60);
+}
+
+function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
+  if (!profile) return;
   applyLook();
+  if (!opts.live && !opts.rivals && !opts.challenge) saveLastRide(route);
   const bike = bikeById(profile.bike);
+  // the first ride lends rim brakes, so the brake tip has something to teach
+  const brakes = tutorial ? Math.max(1, profile.gear.brakes) : profile.gear.brakes;
+  const RING = 2 * Math.PI * 52;
   render(`
     <div class="hud${settings.leftHanded ? ' lefty' : ''}">
       <div class="touch-layer" id="touch"></div>
       <div class="boosting-vignette" id="vignette"></div>
-      <div class="hud-top" style="position:relative">
-        <div class="hud-pill"><small>DISTANCE</small><span id="dist">0.00</span> KM</div>
-        <div class="hud-progress">
+      <div class="hud-top">
+        <div class="hud-route">
+          <div class="hr-name">${esc(route.id === 'explore' ? `To ${route.to.name}` : route.name)}</div>
           <div class="xpbar"><div id="prog" style="width:0%"></div></div>
-          <p class="muted">${esc((route.id === 'explore' ? `To ${route.to.name}` : route.name).toUpperCase())}</p>
-          <div class="row" style="gap:6px;justify-content:center${opts.live?.kind === 'vibe' ? ';display:none' : ''}"><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
+          <div class="hr-dist"><span id="dist">0.00</span> / ${km(route.length)} km</div>
+          <div class="hr-race"${opts.live?.kind === 'vibe' ? ' hidden' : ''}><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
         </div>
-        <div class="row">
-          ${route.kind === 'explore' ? '' : `<div class="hud-pill helmet-pill" id="helmetPill" title="Crash helmets: each one saves you from a crash">${icons.helmet} <span id="helmets">${profile.gear.helmets}</span></div>`}
-          <div class="hud-pill">${icons.coin} <span id="coins">0</span></div>
-          <button class="pause-btn" id="pause" aria-label="Pause">${icons.pause}</button>
-        </div>
+        <div class="hud-pill coin-hud" id="coinPill">${icons.coin} <span id="coins">0</span></div>
+        <button class="pause-btn" id="pause" aria-label="Pause">${icons.pause}</button>
       </div>
       <div class="turn-banner" id="turn" hidden><span class="turn-arrow" id="turnArrow"></span><div><b id="turnDist"></b><span id="turnText"></span></div></div>
       <div class="prompt" id="prompt"></div>
-      <div class="hud-bottom" style="position:relative">
-        ${profile.gear.brakes ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : ''}
-        <div class="boost" id="boostWrap"><label>BOOST${isTouch ? '' : ' · B / SHIFT'}</label><div class="xpbar"><div id="boost" style="width:0%"></div></div></div>
-        ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : ''}
+      <div class="tip" id="tip" hidden></div>
+      <div class="hud-bottom">
+        ${brakes ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : '<span class="hud-slot"></span>'}
+        <div class="speedo" id="speedo">
+          <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="sp-track" cx="60" cy="60" r="52"/><circle class="sp-boost" id="boostArc" cx="60" cy="60" r="52" stroke-dasharray="${RING}" stroke-dashoffset="${RING}"/></svg>
+          <b id="kmh">0</b><small>KM/H</small>
+          <span class="sp-label" id="boostLabel">${isTouch ? 'BOOST' : 'B · BOOST'}</span>
+          ${route.kind === 'explore' ? '' : `<span class="sp-helmets" title="Crash helmets: each one saves you from a crash">${icons.helmet}<span id="helmets">${profile.gear.helmets}</span></span>`}
+        </div>
+        ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : '<span class="hud-slot"></span>'}
       </div>
       <canvas class="minimap" id="minimap" width="240" height="240" aria-hidden="true"></canvas>
       ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="rc-log" id="rcLog"></div>${quickActions()}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
-    </div>`);
+    </div>`, 'none');
 
   const $ = (id: string) => app.querySelector<HTMLElement>('#' + id)!;
   const dist = $('dist');
   const prog = $('prog');
   const coins = $('coins');
-  const boost = $('boost');
-  const boostWrap = $('boostWrap');
+  const coinPill = $('coinPill');
+  const boostArc = $('boostArc');
+  const speedo = $('speedo');
+  const kmhEl = $('kmh');
+  const tipEl = $('tip');
   const prompt = $('prompt');
   const vignette = $('vignette');
   const boostBtn = app.querySelector<HTMLButtonElement>('#boostBtn');
@@ -746,7 +916,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     ? [{ run: opts.challenge.run, name: opts.challenge.name, color: '#ffd21f', ghostly: false }]
     : opts.rivals ?? (opts.mission?.friend ? [opts.mission.friend] : ghost ? [{ run: ghost, name: 'Best run', color: '#9fd8ff', ghostly: true }] : []);
   game.setRivals(rivals);
-  game.setGear(profile.gear.helmets, profile.gear.brakes);
+  game.setGear(profile.gear.helmets, brakes);
   // shop gear, difficulty, live campus weather and treasure
   const setup = fx.rideSetup(profile);
   let kitsLeft = setup.repairKits;
@@ -771,6 +941,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     profile!.gear.helmets = left;
     saveProfile(profile!);
     if (helmetsEl) helmetsEl.textContent = String(left);
+    if (tutorial && !helmetTipShown) return helmetTip(true);
     prompt.innerHTML = `<small>HELMET SAVED YOU</small>${left ? `${left} helmet${left === 1 ? '' : 's'} left` : 'No helmets left. Ride carefully!'}`;
     setTimeout(() => { if (prompt.textContent?.startsWith('HELMET')) prompt.innerHTML = ''; }, 2200);
   };
@@ -816,34 +987,73 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     });
   }
 
-  // tutorial: teach through play, one move at a time
-  const steps: { action: Action; text: string }[] = [
-    { action: 'left', text: isTouch ? 'Swipe left' : 'Press ←' },
-    { action: 'right', text: isTouch ? 'Swipe right' : 'Press →' },
-    { action: 'jump', text: isTouch ? 'Swipe up to jump' : 'Press ↑ or Space to jump' },
-    { action: 'boost', text: isTouch ? 'Tap boost' : 'Press B to boost' },
-  ];
-  let step = tutorial ? 0 : -1;
-  let countdownShown = false;
-  const showStep = () => {
-    if (step < 0) return;
-    if (step >= steps.length) {
-      prompt.innerHTML = `You've got it.`;
-      game.releaseSpawns();
-      step = -1;
-      setTimeout(() => { if (prompt.textContent === `You've got it.`) prompt.innerHTML = ''; }, 1600);
-      return;
-    }
-    if (steps[step].action === 'boost') game.giveBoost(1);
-    prompt.innerHTML = `<small>TUTORIAL</small>${steps[step].text}`;
+  // first ride: four short tips, each at the moment it's needed
+  const TIPS = {
+    steer: [icons.steer, 'Steer', isTouch ? 'Swipe left or right to change lanes. Swipe up to jump.' : 'Press ← → to change lanes, ↑ or Space to jump.'],
+    boost: [icons.bolt, 'Boost', isTouch ? 'Your boost is full. Tap the screen or BOOST to fly and smash through barriers.' : 'Your boost is full. Press B or Shift to fly and smash through barriers.'],
+    brake: [icons.brake, 'Brake', `${isTouch ? 'Hold BRAKE' : 'Hold S or ↓'} to slow down before a crash. These rim brakes are on loan for your first ride.`],
+    helmet: [icons.helmet, 'Helmets', 'Each crash helmet saves you from one crash, then it is used up. Get more in the Garage.'],
+  } as const;
+  type TipId = keyof typeof TIPS;
+  const ORDER: TipId[] = ['steer', 'boost', 'brake', 'helmet'];
+  let tipNow: TipId | null = null;
+  let tipTimer = 0;
+  let helmetTipShown = false;
+  const showTip = (id: TipId | null, ms = 0, lead = '') => {
+    clearTimeout(tipTimer);
+    tipNow = id;
+    tipEl.hidden = !id;
+    if (!id) return;
+    const [icon, title, text] = TIPS[id];
+    tipEl.innerHTML = `<span class="tip-ico">${icon}</span><span class="grow"><small>TIP ${ORDER.indexOf(id) + 1} OF ${ORDER.length}</small><b>${lead || title}</b><span>${text}</span></span>`;
+    tipEl.classList.remove('pop');
+    void tipEl.offsetWidth;
+    tipEl.classList.add('pop');
+    if (ms) tipTimer = window.setTimeout(() => { if (tipNow === id) showTip(null); }, ms);
   };
+  const helmetTip = (saved: boolean) => {
+    helmetTipShown = true;
+    showTip('helmet', 6000, saved ? 'Your helmet saved you!' : '');
+  };
+  let tutStage: 'wait' | 'steer' | 'boost' | 'brake' | 'free' | 'off' = tutorial ? 'wait' : 'off';
+  let brakeAt = 0;
+  const nextStage = () => {
+    if (tutStage === 'steer') {
+      tutStage = 'boost';
+      game.giveBoost(1);
+      setTimeout(() => showTip('boost'), 400);
+    } else if (tutStage === 'boost') {
+      tutStage = 'brake';
+      showTip(null);
+      // the brake tip waits until the boost has worn off
+      brakeAt = performance.now() + 3500;
+    } else if (tutStage === 'brake') {
+      tutStage = 'free';
+      showTip(null);
+      game.releaseSpawns();
+      prompt.innerHTML = `You've got it.`;
+      setTimeout(() => { if (prompt.textContent === `You've got it.`) prompt.innerHTML = ''; }, 1600);
+    }
+  };
+  let countdownShown = false;
 
   game.onAction = (a) => {
-    if (step >= 0 && steps[step].action === a) {
-      step++;
-      setTimeout(showStep, 350);
-    }
+    if (tutStage === 'steer' && (a === 'left' || a === 'right' || a === 'jump')) setTimeout(nextStage, 700);
+    if (tutStage === 'boost' && a === 'boost') nextStage();
   };
+  const tutorialTick = (h: HudState) => {
+    if (tutStage === 'wait' && !h.countdown) { tutStage = 'steer'; showTip('steer'); }
+    if (tutStage === 'brake' && brakeAt && performance.now() > brakeAt) {
+      brakeAt = 0;
+      showTip('brake');
+      // a rider who never brakes moves on after a while
+      setTimeout(() => { if (tutStage === 'brake') nextStage(); }, 9000);
+    }
+    if (tutStage === 'brake' && !brakeAt && h.braking) setTimeout(() => { if (tutStage === 'brake') nextStage(); }, 600);
+    // no crash yet by mid-route: explain helmets anyway
+    if (tutStage === 'free' && !helmetTipShown && route.kind !== 'explore' && h.distance > h.routeLength * 0.45) helmetTip(false);
+  };
+  let lastCoins = 0;
 
   game.onHud = (h: HudState) => {
     missionTick?.(h);
@@ -870,11 +1080,20 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
       ghostGap.textContent = `${gapName} ${behind ? '+' : '−'}${Math.abs(h.ghostGap).toFixed(1)} s`;
       ghostGap.classList.toggle('behind', behind);
     }
-    coins.textContent = String(h.coins);
-    boost.style.width = `${h.boost * 100}%`;
+    if (h.coins !== lastCoins) {
+      lastCoins = h.coins;
+      coins.textContent = String(h.coins);
+      coinPill.classList.remove('pop');
+      void coinPill.offsetWidth;
+      coinPill.classList.add('pop');
+    }
+    kmhEl.textContent = String(h.kmh);
+    boostArc.style.strokeDashoffset = String(RING * (1 - h.boost));
     const ready = h.boost >= 0.25 && !h.boosting;
-    boostWrap.classList.toggle('ready', ready);
+    speedo.classList.toggle('ready', ready);
+    speedo.classList.toggle('boosting', h.boosting);
     if (boostBtn) boostBtn.disabled = !ready;
+    if (tutStage !== 'off') tutorialTick(h);
     vignette.classList.toggle('on', h.boosting);
     brakeBtn?.classList.toggle('on', h.braking);
     if (h.countdown) {
@@ -883,7 +1102,6 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     } else if (countdownShown) {
       countdownShown = false;
       prompt.innerHTML = '';
-      showStep();
     }
   };
 
@@ -1080,6 +1298,7 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
     game.onAction = () => {};
     game.paused = false;
     clearInterval(stream);
+    clearTimeout(tipTimer);
     if (vibe) { vibe.onPos = null; vibe.redraw = null; }
   }
 
@@ -1290,6 +1509,28 @@ function liveStandings(lr: LiveRide, r: RideResult) {
   draw();
 }
 
+/** after a ride, one clear next step: what most riders would want to do now */
+interface NextStep { label: string; run: () => void }
+function nextStep(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras, again: () => void): NextStep {
+  const p = profile!;
+  const explore = isExplore(route);
+  if (x.opts.live) return { label: 'Race again', run: again };
+  if (x.opts.challenge) return { label: r.finished && r.time < x.opts.challenge.time ? 'Ride again' : 'Try again', run: again };
+  if (explore) return { label: 'Go somewhere else', run: () => explorePicker(route.id === 'explore' ? route.to.name : undefined) };
+  if (!r.finished) {
+    // out of helmets and able to buy one: the shop is the fix
+    if (!p.gear.helmets && p.coins >= SHOP.helmet.price) return { label: `Get a helmet · ${fmt(SHOP.helmet.price)} coins`, run: () => garageScreen() };
+    return { label: 'Retry', run: again };
+  }
+  const level = levelFor(p.xp);
+  const next = RACES.find((d) => d.id !== route.id && level >= d.level && p.bestTimes[d.id] === undefined);
+  if (next) return { label: `Next race: ${next.name}`, run: () => play(false, raceRoute(next)) };
+  const bike = GARAGE_BIKES.find((b) => b.price && !p.ownedBikes.includes(b.id) && p.coins >= b.price);
+  const brake = SHOP.brakes.find((b) => b.level > p.gear.brakes && p.coins >= b.price);
+  if (bike || brake) return { label: `Shop: ${bike ? bike.name : brake!.name}`, run: () => garageScreen() };
+  return { label: 'Ride again', run: again };
+}
+
 function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) {
   const p = profile!;
   const hadGhost = x.hadGhost;
@@ -1304,8 +1545,12 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
   const unlocked = RACES.filter((x) => x.level > rw.levelBefore && x.level <= rw.levelAfter);
   const explore = isExplore(route);
   const headline = r.finished ? (explore ? 'You made it' : 'Finish!') : 'Wiped out';
+  const again = () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route, 3, settings.difficulty ?? 'normal') } : x.opts));
+  // a guest has just had their first taste: now is the moment to save it
+  const invite = p.guest && !x.opts.live;
+  const step = nextStep(r, rw, route, x, again);
   render(`
-    <div class="screen scrim fade-in">
+    <div class="screen scrim fade-in results">
       <div class="grow"></div>
       <div class="wrap stack">
         <p class="kicker">${esc(route.name)}</p>
@@ -1321,42 +1566,47 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
           <div class="reward-row"><span>XP</span><b>+<span data-count="${rw.xp}">0</span></b></div>
         </div>
         ${x.feature ?? ''}
-        ${!r.finished && !explore && !p.gear.helmets ? `<button class="card selectable helmet-tip" id="getHelmet"><span class="gear-ico">${icons.helmet}</span><span class="grow"><b>Out of helmets</b><span class="muted small">A crash helmet saves you from your next crash. ${fmt(SHOP.helmet.price)} coins in the Garage.</span></span>${icons.arrow}</button>` : ''}
-        ${levelUp ? `<div class="levelup">${icons.star} Level up! You're now level ${rw.levelAfter}</div>` : ''}
-        ${unlocked.map((x) => `<button class="card selectable unlock-card" data-race="${x.id}"><div class="row"><b>${icons.unlock} New race: ${esc(x.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(x.blurb)}</p></button>`).join('')}
+        ${!r.finished && !explore && !p.gear.helmets && !invite && p.coins < SHOP.helmet.price ? `<div class="card helmet-tip"><span class="gear-ico">${icons.helmet}</span><span class="grow"><b>Out of helmets</b><span class="muted small">A crash helmet saves you from your next crash. ${fmt(SHOP.helmet.price)} coins in the Garage.</span></span></div>` : ''}
         ${verdict ? `<div class="levelup">${verdict}</div>` : ''}
         ${table.length > 1 ? `<div class="card standings" id="standings">${table.map((t, i) => `<div class="reward-row${t.me ? ' me' : ''}"><span>${ordinal(i + 1)} · ${esc(t.name)}</span><b>${Number.isFinite(t.time) ? clock(t.time) : 'DNF'}</b></div>`).join('')}</div>` : ''}
         ${x.event ? `<p class="muted small">${eventIcon(x.event)} ${esc(x.event.name)} is live: coins doubled.</p>` : ''}
         ${prizeBike ? `<div class="levelup">${icons.trophy} You won the ${esc(prizeBike.name)}! Equip it in the Garage.</div>` : ''}
-        ${route.kind === 'race' && r.finished && !hadGhost && !x.rivals.length ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
-        ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="challenge">${ch ? `Send ${esc(ch.name)} your answer` : 'Challenge a friend to beat this'}</button><p class="muted small" id="shareNote" hidden></p>` : ''}
-        ${route.kind === 'race' && r.finished ? `<button class="btn btn-ghost" id="board">${cloud.account ? 'See the leaderboard' : 'Leaderboard · sign in to post your time'}</button>` : ''}
-        ${p.guest ? `<div class="card stack"><p><b>Save your progress</b></p><p class="muted small">Create your rider to pick your hall and keep your stats.</p><button class="btn btn-ghost" id="create">Create rider</button></div>` : ''}
-        <button class="btn btn-primary" id="again">Ride again</button>
-        ${explore ? '<button class="btn btn-ghost" id="explore">Go somewhere else</button>' : ''}
-        <button class="btn btn-ghost" id="home">Home</button>
+        ${route.kind === 'race' && r.finished && !hadGhost && !x.rivals.length && !invite ? `<p class="muted small">Next time on this route, a ghost of this run rides with you. Beat it.</p>` : ''}
+        ${invite ? `<div class="card invite-card stack">
+            <div class="row"><span class="gear-ico">${icons.user}</span><span class="grow"><b>Save your progress</b><span class="muted small">Create your account to keep your ${fmt(p.coins)} coins, pick your hall and race your friends.</span></span></div>
+            <button class="btn btn-primary" id="create">Create my account</button>
+            <button class="btn btn-link" id="later">Later</button>
+          </div>`
+          : `<button class="btn btn-primary next-step" id="next">${esc(step.label)} ${icons.arrow}</button>
+            <div class="two">
+              ${step.label === 'Retry' || step.label === 'Try again' || step.label === 'Ride again' || step.label === 'Race again' ? `<button class="btn btn-ghost" id="garage">${icons.shop} Shop</button>` : `<button class="btn btn-ghost" id="again">${icons.replay} Retry</button>`}
+              <button class="btn btn-ghost" id="home">${icons.home} Home</button>
+            </div>`}
+        ${route.kind === 'race' && r.finished ? `<div class="result-links"><button class="btn btn-link" id="challenge">${icons.send} ${ch ? `Send ${esc(ch.name)} your answer` : 'Challenge a friend'}</button><button class="btn btn-link" id="board">${icons.trophy} Leaderboard</button></div><p class="muted small" id="shareNote" hidden></p>` : ''}
       </div>
     </div>`);
   // animated counters
-  app.querySelectorAll<HTMLElement>('[data-count]').forEach((el) => {
-    const target = Number(el.dataset.count);
-    const t0 = performance.now();
-    const tick = (t: number) => {
-      const k = Math.min(1, (t - t0) / 900);
-      el.textContent = fmt(target * (1 - Math.pow(1 - k, 3)));
-      if (k < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-  on('#again', 'click', () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route, 3, settings.difficulty ?? 'normal') } : x.opts)));
-  on('#getHelmet', 'click', () => garageScreen());
+  app.querySelectorAll<HTMLElement>('[data-count]').forEach((el) => countUp(el, 0, Number(el.dataset.count)));
+  on('#next', 'click', () => step.run());
+  on('#again', 'click', again);
+  on('#garage', 'click', () => garageScreen());
   on('#challenge', 'click', () => share(`Can you beat my ${clock(r.time)} on ${route.name}? Race my run on LEGONRUSH`, challengeLink(route, x.run, r.time), app.querySelector('#shareNote')!));
-  on('#explore', 'click', () => explorePicker(route.id === 'explore' ? route.to.name : undefined));
   on('#home', 'click', () => home());
-  on('#create', 'click', () => createRider({ ...p, name: '' }, false));
+  on('#later', 'click', () => home());
+  on('#create', 'click', () => onboard());
   on('#board', 'click', () => boardScreen(route.id, () => home('race')));
-  on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((x) => x.id === el.dataset.race)!)));
   onBack(() => home());
+  // level up: a moment of its own, with what it unlocked
+  if (levelUp) {
+    setTimeout(() => {
+      if (!app.querySelector('.results')) return;
+      sfx.finish();
+      celebrate(icons.star, `Level ${rw.levelAfter}!`, unlocked.length ? 'You unlocked something new.' : 'Keep riding to unlock new races and bikes.',
+        () => onBack(() => home()),
+        unlocked.map((u) => `<button class="card selectable unlock-card" data-race="${u.id}"><div class="row"><b>${icons.unlock} New race: ${esc(u.name)}</b><span class="grow"></span>${icons.arrow}</div><p class="muted small">${esc(u.blurb)}</p></button>`).join(''));
+      app.querySelectorAll<HTMLElement>('.celebrate [data-race]').forEach((el) => el.addEventListener('click', () => play(false, raceRoute(RACES.find((d) => d.id === el.dataset.race)!))));
+    }, settings.reducedMotion ? 0 : 1100);
+  }
 }
 
 // ---------- hub ----------
@@ -1387,6 +1637,16 @@ function shell(content: string) {
     </div>`;
 }
 
+/** the coin count the player last saw, so new coins count up into it */
+let shownCoins = -1;
+function animateCoins() {
+  const p = profile;
+  if (!p) return;
+  app.querySelectorAll<HTMLElement>('.coin-count').forEach((el) => countUp(el, shownCoins < 0 ? p.coins : shownCoins, p.coins, 1100));
+  if (shownCoins >= 0 && p.coins > shownCoins) app.querySelector('.coin-pill')?.classList.add('pop');
+  shownCoins = p.coins;
+}
+
 function topBar() {
   const p = profile!;
   const c = campusById(settings.campus);
@@ -1396,7 +1656,7 @@ function topBar() {
     <button class="campus-btn" data-campus aria-label="Choose campus">${icons.pin}<span>${esc(c.id === 'ug' ? 'UG · Legon' : c.short)}</span><em>▾</em></button>
     <div class="weather-pill" id="weather" hidden></div>
     <span class="grow"></span>
-    <span class="coin-pill">${icons.coin} ${fmt(p.coins)}</span>
+    <span class="coin-pill">${icons.coin} <span class="coin-count">${fmt(shownCoins < 0 ? p.coins : shownCoins)}</span></span>
     <button class="icon-btn" id="bell" aria-label="Invites">${icons.bell}${notices.length ? `<i class="dot-badge">${notices.length}</i>` : ''}</button>
     <button class="me-btn" data-nav="you" aria-label="Your profile"><span class="avatar sm" style="background:${hallById(p.hall).color}">${esc(p.name.slice(0, 1).toUpperCase())}</span><span class="lv-wrap"><span class="lv">Lv ${level}</span><span class="lv-bar"><i style="width:${((p.xp - lo) / (hi - lo)) * 100}%"></i></span></span></button>
     <button class="icon-btn desk-only" id="settingsTop" aria-label="Settings">${icons.gear}</button>
@@ -1481,6 +1741,32 @@ function quickRideCard() {
     <div class="qr-campus-row"><button class="qr-campus-chip" data-campus>${icons.pin} Campus: ${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)} <em>▾</em></button></div>`;
 }
 
+/** "Complete your profile": the answers sign-up skipped, for a coin reward */
+function completeCard(p: Profile) {
+  if (p.about.completedAt) return '';
+  const t = profileTodo(p);
+  const items: [boolean, string][] = [[t.birthday, 'Birthday'], [t.campus, 'Campus and programme'], [t.social, 'Socials'], [t.type, 'Rider type']];
+  const done = items.filter(([ok]) => ok).length;
+  return `<div class="card stack complete-card">
+    <div class="row"><span class="gear-ico">${icons.user}</span><span class="grow"><b>Complete your profile</b><span class="muted small">${done} of ${items.length} done. Tell riders a bit more about you.</span></span><span class="badge gold">+${PROFILE_REWARD} ${icons.coin}</span></div>
+    <div class="xpbar"><div style="width:${(done / items.length) * 100}%"></div></div>
+    <div class="todo">${items.map(([ok, label]) => `<span class="${ok ? 'ok' : ''}">${ok ? icons.check : '<i></i>'} ${label}</span>`).join('')}</div>
+    <button class="btn btn-primary" id="completeProfile">Finish my profile</button>
+  </div>`;
+}
+
+function continueRow() {
+  const lr = lastRide();
+  if (!lr || lr.last.id === CAMPUS_LOOP.id) return '';
+  const best = profile?.bestTimes[lr.last.id];
+  return `<button class="continue-row" id="continue">
+    <span class="p-ico">${icons.replay}</span>
+    <span class="grow"><small>Continue where you left off</small><b>${esc(lr.last.name)}</b></span>
+    ${best ? `<span class="muted small">Best ${clock(best)}</span>` : ''}
+    <span class="cr-go">${icons.arrow}</span>
+  </button>`;
+}
+
 function missionsPanel() {
   const m = todayMissions(profile!);
   return `<div class="panel">
@@ -1513,7 +1799,14 @@ function livePanel() {
   </button>`;
 }
 
+/** what still works without a connection */
+const offlineNote = (compact = false) => `<div class="offline-card${compact ? ' compact' : ''}" role="status">
+    <span class="p-ico">${icons.wifiOff}</span>
+    <span class="grow"><b>You're offline</b><span>Solo rides, Explore, the Garage and your progress all still work. Online races, Vibe Ride and leaderboards come back when you reconnect.</span></span>
+  </div>`;
+
 function onlinePanel() {
+  if (!navigator.onLine) return `<div class="panel online-panel">${offlineNote(true)}</div>`;
   return `<div class="panel online-panel">
     <div class="panel-head"><span class="p-ico">${icons.social}</span><b>Riders Online</b><span class="small" style="margin-left:auto;font-weight:600"><span class="dot-live"></span> <span id="onlineCount">${onlineCountText()}</span></span></div>
     <div id="onlineList" class="online-list">${onlineRows()}</div>
@@ -1608,6 +1901,7 @@ function home(next: Tab = 'home') {
           </div>
         </div>
         ${quickRideCard()}
+        ${continueRow()}
         <div class="modes">${MODES.map((m) => `<button class="mode-card" data-mode="${m.id}"><img class="mode-img" src="${m.img}" alt="" width="760" height="320"><span class="mode-body"><span class="mode-title"><span class="mode-ico">${m.icon}</span>${esc(m.title)}</span><span class="mode-text">${esc(m.text)}</span></span><span class="mode-go">${icons.arrow}</span></button>`).join('')}</div>
         <div class="home-bottom">
           ${missionsPanel()}
@@ -1633,6 +1927,7 @@ function home(next: Tab = 'home') {
       <div class="hub">
         <p class="kicker">Race</p>
         <h1 class="title">Race someone</h1>
+        ${navigator.onLine ? '' : offlineNote()}
         <button class="ride-cta" id="quick">
           <div><div class="big" style="font-size:26px">${icons.flag} QUICK MATCH</div><div class="sub">Race against riders online. Get matched with available riders and jump straight into a live race.</div></div>${icons.arrow}
         </button>
@@ -1684,6 +1979,10 @@ function home(next: Tab = 'home') {
             ${p.snap ? `<p class="muted small">${icons.ghost} @${esc(p.snap)}${p.snapPublic ? '' : ' · hidden'}</p>` : ''}
           </div>
         </div>
+        ${p.guest ? `<div class="card stack complete-card">
+            <div class="row"><span class="gear-ico">${icons.user}</span><span class="grow"><b>Save your progress</b><span class="muted small">Create your account to keep your coins, pick your hall and race your friends.</span></span></div>
+            <button class="btn btn-primary" id="createAcct">Create my account</button>
+          </div>` : completeCard(p)}
         <div class="card stack" style="gap:8px">
           <div class="row"><b>Level ${level}</b><span class="grow"></span><span class="muted small">${fmt(p.xp - lo)} / ${fmt(hi - lo)} XP</span></div>
           <div class="xpbar"><div style="width:${((p.xp - lo) / (hi - lo)) * 100}%"></div></div>
@@ -1698,7 +1997,7 @@ function home(next: Tab = 'home') {
         </div>
         ${fx.youLinksHtml(p)}
         <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
-        <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create rider' : 'Edit details'}</button></div>
+        <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create account' : 'Edit details'}</button></div>
         <button class="btn btn-ghost" id="settings">Settings</button>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
         ${cloud.account
@@ -1710,6 +2009,7 @@ function home(next: Tab = 'home') {
   };
 
   render(shell(views[tab]));
+  animateCoins();
   void fillWeather();
   // who's online loads a moment later, so the menu itself is never held up
   setTimeout(connectLobby, 1500);
@@ -1735,6 +2035,10 @@ function home(next: Tab = 'home') {
   });
   on('[data-invite]', 'click', (_, el) => inviteOnline(el.dataset.invite!));
   on('#ride', 'click', () => play(false));
+  on('#continue', 'click', () => {
+    const r = lastRide()?.route();
+    if (r) play(false, r);
+  });
   on('#routeCard', 'click', () => play(false));
   on('#exploreBtn', 'click', () => explorePicker());
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
@@ -1786,7 +2090,9 @@ function home(next: Tab = 'home') {
   // back from another tab goes to Home; from Home it leaves the app
   onBack(tab === 'home' ? null : () => home());
   on('#quizBtn', 'click', () => whereIsIt());
-  on('#edit', 'click', () => createRider({ ...p, look: structuredClone(p.look) }, !p.guest));
+  on('#edit', 'click', () => (p.guest ? onboard() : createRider({ ...p, look: structuredClone(p.look) }, true)));
+  on('#createAcct', 'click', () => onboard());
+  on('#completeProfile', 'click', () => onboard({ draft: structuredClone(p), email: '', pass: '', step: 0, flow: 'complete' }));
   on('#dress', 'click', () => dressRider({ ...p, look: structuredClone(p.look) }, true));
   on('#install', 'click', async () => {
     await installPrompt?.prompt();
@@ -1991,6 +2297,7 @@ function socialView() {
     <div class="hub">
       <p class="kicker">${icons.heart} Vibe Ride</p>
       <h1 class="title">Ride together</h1>
+      ${navigator.onLine ? '' : offlineNote()}
       <p class="muted">Find someone and enjoy the ride together. Get paired with an online rider, or create a private ride and invite someone with a link or code. No racing: just ride, connect and enjoy the campus.</p>
       <div class="card stack" style="gap:10px">
         <b>Find a rider</b>
@@ -2761,6 +3068,18 @@ function settingsScreen() {
           <p class="muted small">Reduced turns off camera shake, speed zoom and screen animations.</p>
         </div>
         <div class="card stack">
+          <div class="set-row"><b>Vibration</b>${seg('vibe', [['1', 'On'], ['0', 'Off']], settings.vibration ? '1' : '0')}</div>
+          <p class="muted small">The phone buzzes when you crash, grab coins and finish.</p>
+        </div>
+        <div class="card stack">
+          <div class="set-row"><b>Big buttons</b>${seg('big', [['0', 'Off'], ['1', 'On']], settings.bigButtons ? '1' : '0')}</div>
+          <p class="muted small">Larger buttons and text in the menus, easier to tap.</p>
+        </div>
+        <div class="card stack">
+          <div class="set-row"><b>Night menus</b>${seg('night', [['0', 'Off'], ['1', 'On']], settings.nightMenus ? '1' : '0')}</div>
+          <p class="muted small">Dark menus that are easier on the eyes at night.</p>
+        </div>
+        <div class="card stack">
           <b>Data</b>
           <p class="muted small">LEGONRUSH uses no data while you ride. The first visit downloads about ${INSTALL_KB} KB, then the game works offline. Updates download only the parts that changed.</p>
         </div>
@@ -2779,6 +3098,9 @@ function settingsScreen() {
   pick('hand', (v) => changeSettings({ leftHanded: v === '1' }));
   pick('difficulty', (v) => changeSettings({ difficulty: v as typeof settings.difficulty }));
   pick('motion', (v) => changeSettings({ reducedMotion: v === '1' }));
+  pick('vibe', (v) => { changeSettings({ vibration: v === '1' }); buzz(40); });
+  pick('big', (v) => changeSettings({ bigButtons: v === '1' }));
+  pick('night', (v) => changeSettings({ nightMenus: v === '1' }));
   on('#volume', 'input', (_, el) => changeSettings({ volume: Number((el as HTMLInputElement).value) / 100 }));
   on('#volume', 'change', () => sfx.coin());
   on('#musicVol', 'input', (_, el) => changeSettings({ musicVolume: Number((el as HTMLInputElement).value) / 100 }));
@@ -3134,6 +3456,23 @@ fx.initFeatures({
 const resetting = cloud.cameFromReset();
 onProfileSave((p) => {
   if (!p.guest) cloud.push(p);
+});
+// riders who answered everything at sign-up before "Complete your profile" existed are already done
+if (profile && !profile.guest && !profile.about.completedAt && profileComplete(profile)) {
+  profile.about.completedAt = 'signup';
+  saveProfile(profile);
+}
+// losing the connection: say what still works, and refresh the menu that is showing
+let offlineToldAt = 0;
+addEventListener('offline', () => {
+  // browsers can fire 'offline' twice in a row; say it once
+  if (Date.now() - offlineToldAt < 10000) return;
+  offlineToldAt = Date.now();
+  toast(`${icons.wifiOff} <b>You're offline.</b> Solo rides, Explore and the Garage still work.`, [], 6000);
+  if (app.querySelector('.shell')) home(tab);
+});
+addEventListener('online', () => {
+  if (app.querySelector('.shell')) home(tab);
 });
 splash();
 cloud.restore(() => {

@@ -103,8 +103,24 @@ export interface About {
   newsOptIn: boolean;
   /** when the rider accepted the terms (ISO date), empty if never */
   termsAt: string;
+  /** when the "Complete your profile" reward was paid (ISO date), empty if not yet */
+  completedAt: string;
 }
-export const newAbout = (): About => ({ dob: '', campus: 'ug', status: '', riderType: '', instagram: '', tiktok: '', newsOptIn: false, termsAt: '' });
+export const newAbout = (): About => ({ dob: '', campus: 'ug', status: '', riderType: '', instagram: '', tiktok: '', newsOptIn: false, termsAt: '', completedAt: '' });
+
+/** coins for finishing "Complete your profile" */
+export const PROFILE_REWARD = 300;
+/** the profile answers asked after sign-up; done when status, programme and rider type are in */
+export function profileTodo(p: Profile) {
+  const a = p.about;
+  return {
+    birthday: !!a.dob,
+    campus: !!a.status && (a.status === 'staff' || a.status === 'visitor' || !!p.department),
+    social: !!(p.snap || a.instagram || a.tiktok),
+    type: !!a.riderType,
+  };
+}
+export const profileComplete = (p: Profile) => { const t = profileTodo(p); return t.campus && t.type; };
 
 export interface MissionDay {
   day: string;
@@ -223,11 +239,20 @@ export interface Settings {
   campus: string;
   /** how hard rides are: traffic and obstacles (the game) and mission timers */
   difficulty: Difficulty;
+  /** the welcome screens were shown (only once, to someone new) */
+  onboarded: boolean;
+  /** buzz the phone on crashes, coins and the finish */
+  vibration: boolean;
+  /** larger buttons and text in the menus */
+  bigButtons: boolean;
+  /** dark menus for riding at night */
+  nightMenus: boolean;
 }
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
 const defaultSettings = (): Settings => ({
   sound: true, volume: 0.8, musicVolume: 0.5, graphics: 'auto', slowDevice: false, leftHanded: false, campus: 'ug', difficulty: 'normal',
+  onboarded: false, vibration: true, bigButtons: false, nightMenus: false,
   reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
 });
 
