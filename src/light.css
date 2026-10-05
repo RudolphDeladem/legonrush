@@ -685,3 +685,9 @@ html.night .light .screen.dress { background: linear-gradient(180deg, rgba(12,18
 .photo-on .hud > :not(.photo-ui){visibility:hidden}
 /* the HUD rows sit above the swipe layer so their buttons can be tapped */
 .hud-top, .hud-bottom { position: relative; z-index: 2; }
+
+/* More (phones): the tabs that don't fit the bottom bar */
+.phone-only-flex { display: flex; }
+@media (min-width: 900px) { .phone-only-flex { display: none !important; } }
+.more-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.more-item { display: flex; align-items: center; gap: 10px; padding: 14px; border-radius: 16px; background: #fff; border: 1px solid var(--line); font-weight: 700; color: var(--ink); text-align: left; }

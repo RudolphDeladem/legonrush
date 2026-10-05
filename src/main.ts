@@ -26,6 +26,9 @@ import { CAMPUSES, campusById } from './data/campuses';
 import * as fx from './features';
 import * as money from './features/money-ui';
 import * as vb from './features/vibe';
+import { tabView, type TabId } from './tabs/registry';
+import { showSystem, takeDue } from './features/notify';
+import './tabs';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -79,8 +82,10 @@ const changeSettings = (patch: Partial<typeof settings>) => {
   applySettings();
 };
 
-type Tab = 'home' | 'ride' | 'race' | 'events' | 'social' | 'you';
-let tab: Tab = 'home';
+/** the menu tabs, plus older names still used around the app (race → challenges, social → community) */
+type Tab = TabId | 'ride' | 'race' | 'social';
+const TAB_ALIAS: Partial<Record<Tab, TabId>> = { race: 'challenges', social: 'community' };
+let tab: TabId | 'ride' = 'home';
 
 let installPrompt: (Event & { prompt: () => Promise<void> }) | null = null;
 addEventListener('beforeinstallprompt', (e) => {
@@ -1644,13 +1649,31 @@ const greeting = () => {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 };
 
-type NavId = Tab | 'map' | 'garage';
+let tabCleanup: (() => void) | null = null;
+
+/** phones: the tabs that don't fit in the bottom bar */
+function moreSheet() {
+  const sh = document.createElement('div');
+  sh.className = 'overlay sheet-overlay fade-in';
+  sh.innerHTML = `<div class="sheet light-ui more-sheet" role="dialog" aria-label="More"><div class="row"><h2 class="title" style="font-size:22px">More</h2><span class="grow"></span><button class="btn btn-link" data-close>Close</button></div>
+    <div class="more-grid">${NAV.filter(([id]) => !PHONE_NAV.includes(id)).map(([id, label, icon]) => `<button class="more-item" data-go="${id}"><span class="p-ico">${icon}</span>${label}</button>`).join('')}
+    <button class="more-item" data-go="settings"><span class="p-ico">${icons.gear}</span>Settings</button></div></div>`;
+  document.body.appendChild(sh);
+  const close = () => sh.remove();
+  sh.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-go]');
+    if (b) { close(); return b.dataset.go === 'settings' ? settingsScreen() : home(b.dataset.go as TabId); }
+    if (e.target === sh || (e.target as HTMLElement).closest('[data-close]')) close();
+  });
+}
 /** id, label, icon, shown in the phone's bottom bar */
-const NAV: [NavId, string, string, boolean][] = [
-  ['home', 'Home', icons.home, true], ['ride', 'Ride', icons.ride, true], ['race', 'Race', icons.race, true],
-  ['events', 'Events', icons.events, true], ['social', 'Social', icons.social, true],
-  ['map', 'Map', icons.map, false], ['garage', 'Garage', icons.garage, false], ['you', 'Profile', icons.you, true],
+// side menu on computers; phones show the first four plus More
+const NAV: [TabId, string, string][] = [
+  ['home', 'Home', icons.home], ['challenges', 'Challenges', icons.race], ['events', 'Events', icons.events],
+  ['community', 'Community', icons.social], ['map', 'Map', icons.map], ['garage', 'Garage', icons.garage],
+  ['store', 'Store', icons.shop], ['you', 'Profile', icons.you],
 ];
+const PHONE_NAV: TabId[] = ['home', 'challenges', 'events', 'community'];
 
 function shell(content: string) {
   const c = campusById(settings.campus);
@@ -1658,10 +1681,11 @@ function shell(content: string) {
     <div class="shell">
       <nav class="nav">
         <div class="nav-brand"><div class="brand-mark">LEGON<span>RUSH</span></div></div>
-        ${NAV.map(([id, label, icon, phone]) => `<button class="nav-item${tab === id ? ' active' : ''}${phone ? '' : ' desk-only'}" data-nav="${id}">${icon}<span>${id === 'you' ? '<i class="phone-only">You</i><i class="desk-only">Profile</i>' : id === 'social' ? '<i class="phone-only">Social</i><i class="desk-only">Community</i>' : label}</span></button>`).join('')}
+        ${NAV.map(([id, label, icon]) => `<button class="nav-item${tab === id ? ' active' : ''}${PHONE_NAV.includes(id) ? '' : ' desk-only'}" data-nav="${id}">${icon}<span>${label}</span></button>`).join('')}
+        <button class="nav-item phone-only-flex${PHONE_NAV.includes(tab as TabId) ? '' : ' active'}" data-more>${icons.grid}<span>More</span></button>
         <button class="nav-campus" data-campus><small>Riding on</small><b>${esc(c.id === 'ug' ? 'University of Ghana, Legon' : c.name)}</b><span class="small">Change campus →</span></button>
       </nav>
-      <main class="content fade-in tab-${tab}">${tab === 'home' ? content : topBar() + content}</main>
+      <main class="content fade-in tab-${tab}">${tab === 'home' || tabView(tab as TabId)?.bare ? content : topBar() + content}</main>
     </div>`;
 }
 
@@ -1870,7 +1894,14 @@ function home(next: Tab = 'home') {
     return void joinVibe(v.code, false, v.name);
   }
   stopSearching();
-  tab = next;
+  const want = TAB_ALIAS[next] ?? next;
+  tabCleanup?.();
+  tabCleanup = null;
+  // tabs not rebuilt yet open their older screens
+  if (want === 'map' && !tabView('map')) return explorePicker();
+  if (want === 'garage' && !tabView('garage')) return garageScreen();
+  if (want === 'store' && !tabView('store')) return money.buyCoinsScreen();
+  tab = want as TabId | 'ride';
   game.showcase();
   applyLook();
   setStatus('menu');
@@ -1910,7 +1941,7 @@ function home(next: Tab = 'home') {
     <button class="card selectable explore-card" id="quizBtn"><div class="row"><h3 style="font-weight:800">${icons.pin} WHERE IS IT?</h3><span class="grow"></span><span class="badge gold">Earn ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">Five campus places. Tap the map where you think each one is.</p></button>`;
   const firstName = p.name.split(' ')[0];
 
-  const views: Record<Tab, string> = {
+  const views: Record<'home' | 'ride' | 'race' | 'events' | 'social' | 'you', string> = {
     home: `
       <div class="home">
         ${topBar()}
@@ -2038,17 +2069,18 @@ function home(next: Tab = 'home') {
       </div>`,
   };
 
-  render(shell(views[tab]));
+  const reg = tab === 'ride' ? undefined : tabView(tab);
+  const legacy: Record<string, keyof typeof views> = { challenges: 'race', community: 'social' };
+  render(shell(reg ? reg.render() : views[(legacy[tab] ?? tab) as keyof typeof views]));
+  if (reg?.bind) tabCleanup = reg.bind(app.querySelector<HTMLElement>('main.content')!) || null;
   animateCoins();
   void fillWeather();
   // who's online loads a moment later, so the menu itself is never held up
   setTimeout(connectLobby, 1500);
   on('[data-nav]', 'click', (_, el) => {
-    const id = el.dataset.nav as NavId;
-    if (id === 'map') return explorePicker();
-    if (id === 'garage') return garageScreen();
-    home(id);
+    home(el.dataset.nav as TabId);
   });
+  on('[data-more]', 'click', () => moreSheet());
   on('[data-campus]', 'click', () => campusSheet(() => home(tab)));
   on('#bell', 'click', () => noticesSheet());
   on('#settingsTop', 'click', () => settingsScreen());
@@ -3723,6 +3755,13 @@ if (profile && !profile.guest && !profile.about.completedAt && profileComplete(p
   profile.about.completedAt = 'signup';
   saveProfile(profile);
 }
+// reminders for events and challenges the rider signed up for
+setInterval(() => {
+  for (const r of takeDue()) {
+    showSystem(r);
+    toast(`<b>${esc(r.title)}</b> ${esc(r.body)}`, r.tab ? [['Open', () => home(r.tab as TabId), true]] : []);
+  }
+}, 20000);
 // losing the connection: say what still works, and refresh the menu that is showing
 let offlineToldAt = 0;
 addEventListener('offline', () => {

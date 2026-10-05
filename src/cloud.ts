@@ -208,6 +208,8 @@ function mergeFeatures(local: Profile, remote: Profile) {
     visited: union(local.visited, remote.visited),
     favourites: union(local.favourites, remote.favourites),
     missionBest,
+    diamonds: Math.max(local.diamonds ?? 0, remote.diamonds ?? 0),
+    items: maxEach(local.items ?? {}, remote.items ?? {}),
   };
 }
 

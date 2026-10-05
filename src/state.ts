@@ -34,6 +34,10 @@ export interface Profile {
   missions: MissionDay;
   /** answers from the sign-up steps */
   about: About;
+  /** diamonds: the rare currency (treasure, events, the store) */
+  diamonds: number;
+  /** owned items by id (cosmetics, parts, decals, titles, event badges...): how many */
+  items: Record<string, number>;
   /** shop gear: crash helmets left (each saves one crash) and brakes fitted (0 none, 1 rim, 2 disc), plus the shop extras */
   gear: Gear;
   /** this week's challenges: progress and which rewards were claimed */
@@ -168,6 +172,7 @@ export function newProfile(): Profile {
     gear: newGear(),
     weekly: { id: '', n: {}, claimed: [] }, dailyStreak: { last: '', count: 0 }, stats: {}, badges: [], visited: [], favourites: [],
     missionBest: {}, treasure: { week: '', found: 0, claimed: false },
+    diamonds: 0, items: {},
   };
 }
 
@@ -190,6 +195,8 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.missions.n ??= {};
   p.about = { ...newAbout(), ...p.about };
   p.gear = { ...newGear(), ...p.gear };
+  p.items ??= {};
+  p.diamonds ??= 0;
   p.gear.upgrades = { ...newGear().upgrades, ...p.gear.upgrades };
   p.weekly = { ...d.weekly, ...p.weekly };
   p.dailyStreak = { ...d.dailyStreak, ...p.dailyStreak };
