@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { AREAS, BUILDINGS, NODE_XZ, ROADS, buildingAt, mapBounds, type Place, type PlaceKind } from './campusmap';
 import type { Track } from './track';
-import { asphaltTexture, billboardTexture, concreteTexture, grassTexture, labelTexture, wallTexture } from './textures';
+import { asphaltTexture, billboardTexture, concreteTexture, grassMacroTexture, grassTexture, labelTexture, pitchTexture } from './textures';
+import { buildBuildings } from './facades';
 
 export const LANES = [-2.4, 0, 2.4];
 
@@ -133,6 +134,33 @@ const groundMat = (color: string, layer: number, map?: THREE.Texture) =>
   new THREE.MeshStandardMaterial({ color, ...(map && { map }), roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -layer, polygonOffsetUnits: -layer * 2 });
 
 /**
+ * Grass with large light, dark and dry patches laid over the fine 8 m texture,
+ * so the open fields do not show an obvious repeat. One extra texture lookup.
+ */
+function grassMaterial(map: THREE.Texture) {
+  const macro = grassMacroTexture();
+  macro.colorSpace = THREE.NoColorSpace;
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: 1 });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.grassMacro = { value: macro };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vGrassW;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGrassW = (modelMatrix * vec4(transformed, 1.0)).xz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vGrassW;\nuniform sampler2D grassMacro;')
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        vec2 gm = texture2D(grassMacro, vGrassW / 260.0).rg + texture2D(grassMacro, vGrassW / 71.0 + 0.37).rg - 1.0;
+        diffuseColor.rgb *= 1.0 + gm.r * 0.8;
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.05, 0.62), clamp(gm.g * 2.2, 0.0, 0.5));`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'legon-grass';
+  return mat;
+}
+
+/**
  * The real campus, built once: ground, ground areas (pitches, parking, water),
  * every road and footpath at its real width, and every building footprint.
  */
@@ -150,7 +178,7 @@ export function buildCampus() {
   for (let i = 0; i < tx; i++) for (let j = 0; j < tz; j++) tiles.push(new THREE.PlaneGeometry(TILE, TILE).rotateX(-Math.PI / 2).translate(x0 + i * TILE + TILE / 2, 0, z0 + j * TILE + TILE / 2));
   const grassTex = grassTexture();
   grassTex.repeat.set(TILE / 8, TILE / 8);
-  const ground = new THREE.Mesh(mergeGeometries(tiles), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
+  const ground = new THREE.Mesh(mergeGeometries(tiles), grassMaterial(grassTex));
   ground.receiveShadow = true;
   group.add(ground);
 
@@ -167,8 +195,20 @@ export function buildCampus() {
     for (const v of contour) buf.pos.push(v.x, 0, v.y);
     for (const t of tris) buf.idx.push(base + t[0], base + t[1], base + t[2]);
   }
+  // car parks get asphalt and pitches mown stripes, laid in world space
+  const AREA_MAP: Record<string, [() => THREE.Texture, number, string]> = {
+    parking: [concreteTexture, 5, '#b9bbbf'],
+    pitch: [pitchTexture, 12, '#5aa443'],
+  };
   for (const [kind, buf] of areaBuf) {
-    const m = new THREE.Mesh(flatGeometry(buf.pos, buf.idx), groundMat(AREA_COLOR[kind], 1));
+    const geo = flatGeometry(buf.pos, buf.idx);
+    const tex = AREA_MAP[kind];
+    if (tex) {
+      const uv: number[] = [];
+      for (let k = 0; k < buf.pos.length; k += 3) uv.push(buf.pos[k] / tex[1], buf.pos[k + 2] / tex[1]);
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    }
+    const m = new THREE.Mesh(geo, tex ? groundMat(tex[2], 1, tex[0]()) : groundMat(AREA_COLOR[kind], 1));
     m.receiveShadow = true;
     group.add(m);
   }
@@ -186,8 +226,10 @@ export function buildCampus() {
     polyStrip(pts, half, buf.pos, buf.idx);
     for (const [x, z] of [pts[0], pts[pts.length - 1]]) (footpath ? pathCaps : caps).push(new THREE.CircleGeometry(half, 10).rotateX(-Math.PI / 2).translate(x, 0, z));
   }
-  const asphalt = groundMat('#5d6169', 3);
-  const path = groundMat('#cbbd9b', 2);
+  const campusAsphalt = asphaltTexture(false);
+  const asphalt = groundMat('#f2f2f2', 3, campusAsphalt);
+  const pathTex = concreteTexture();
+  const path = groundMat('#efe2c2', 2, pathTex);
   const merged = (main: THREE.BufferGeometry, extra: THREE.BufferGeometry[]) => {
     const parts = [main, ...extra].map((g) => {
       const flat = g.index ? g.toNonIndexed() : g;
@@ -196,6 +238,11 @@ export function buildCampus() {
     });
     const geo = mergeGeometries(parts);
     geo.computeVertexNormals();
+    // world-space UVs: the surface texture repeats every 6 m wherever the road runs
+    const p = geo.attributes.position;
+    const uv = new Float32Array(p.count * 2);
+    for (let k = 0; k < p.count; k++) { uv[k * 2] = p.getX(k) / 6; uv[k * 2 + 1] = p.getZ(k) / 6; }
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     return geo;
   };
   const roads = new THREE.Mesh(merged(flatGeometry(roadBuf.pos, roadBuf.idx), caps), asphalt);
@@ -204,49 +251,31 @@ export function buildCampus() {
   paths.receiveShadow = true;
   group.add(paths, roads);
 
-  // every building: whitewashed walls with windows and a flat terracotta roof
-  const wallPos: number[] = [], wallUv: number[] = [], roofPos: number[] = [];
-  for (const bd of BUILDINGS) {
-    const p = bd.pts;
-    const n = p.length / 2;
-    if (n < 3) continue;
-    let area = 0;
-    for (let i = 0, j = n - 1; i < n; j = i++) area += p[j * 2] * p[i * 2 + 1] - p[i * 2] * p[j * 2 + 1];
-    area = Math.abs(area) / 2;
-    const h = bd.height ?? (area < 60 ? 3.6 : area < 350 ? 7 : rand() < 0.5 ? 7 : 10.5);
-    let u = 0;
-    const wall = (r: Float32Array) => {
-      const m = r.length / 2;
-      for (let i = 0; i < m; i++) {
-        const j = (i + 1) % m;
-        const ax = r[i * 2], az = r[i * 2 + 1], bx = r[j * 2], bz = r[j * 2 + 1];
-        const len = Math.hypot(bx - ax, bz - az);
-        wallPos.push(ax, 0, az, bx, 0, bz, bx, h, bz, ax, 0, az, bx, h, bz, ax, h, az);
-        const u0 = u / 8, u1 = (u + len) / 8, v = h / 7;
-        wallUv.push(u0, 0, u1, 0, u1, v, u0, 0, u1, v, u0, v);
-        u += len;
+  // painted centre dashes on the main and through roads, all in one mesh
+  const dashPos: number[] = [], dashIdx: number[] = [];
+  for (const r of ROADS) {
+    if (r.cls > 1) continue;
+    let carry = 2;
+    for (let k = 0; k < r.nodes.length - 1; k++) {
+      const a = r.nodes[k], c = r.nodes[k + 1];
+      const ax = NODE_XZ[a * 2], az = NODE_XZ[a * 2 + 1], cx = NODE_XZ[c * 2], cz = NODE_XZ[c * 2 + 1];
+      const len = Math.hypot(cx - ax, cz - az);
+      if (len < 1e-3) continue;
+      const dx = (cx - ax) / len, dz = (cz - az) / len, nx = -dz * 0.07, nz = dx * 0.07;
+      let t = carry;
+      for (; t + 3 <= len; t += 9) {
+        const x0 = ax + dx * t, z0 = az + dz * t, x1 = x0 + dx * 3, z1 = z0 + dz * 3;
+        const base = dashPos.length / 3;
+        dashPos.push(x0 - nx, 0, z0 - nz, x0 + nx, 0, z0 + nz, x1 + nx, 0, z1 + nz, x1 - nx, 0, z1 - nz);
+        dashIdx.push(base, base + 1, base + 2, base, base + 2, base + 3);
       }
-    };
-    wall(p);
-    bd.holes.forEach(wall);
-    const vec = (r: Float32Array) => Array.from({ length: r.length / 2 }, (_, i) => new THREE.Vector2(r[i * 2], r[i * 2 + 1]));
-    const contour = vec(p);
-    const holes = bd.holes.map(vec);
-    const all = contour.concat(...holes);
-    for (const t of THREE.ShapeUtils.triangulateShape(contour, holes)) for (const k of t) roofPos.push(all[k].x, h, all[k].y);
+      carry = Math.max(0, t - len);
+    }
   }
-  const wallGeo = new THREE.BufferGeometry();
-  wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(wallPos, 3));
-  wallGeo.setAttribute('uv', new THREE.Float32BufferAttribute(wallUv, 2));
-  wallGeo.computeVertexNormals();
-  const walls = new THREE.Mesh(wallGeo, new THREE.MeshStandardMaterial({ map: wallTexture(), roughness: 0.9, side: THREE.DoubleSide }));
-  walls.castShadow = walls.receiveShadow = true;
-  const roofGeo = new THREE.BufferGeometry();
-  roofGeo.setAttribute('position', new THREE.Float32BufferAttribute(roofPos, 3));
-  roofGeo.computeVertexNormals();
-  const roofs = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: '#a24b2e', roughness: 0.85, side: THREE.DoubleSide }));
-  roofs.castShadow = true;
-  group.add(walls, roofs);
+  if (dashPos.length) group.add(new THREE.Mesh(flatGeometry(dashPos, dashIdx), groundMat('#e9e6dc', 4)));
+
+  // every building: cream walls with window bays, a plinth, and terracotta tile roofs
+  group.add(buildBuildings(BUILDINGS));
 
   // street trees along the main campus roads
   const broad: THREE.Matrix4[] = [], palms: THREE.Matrix4[] = [];

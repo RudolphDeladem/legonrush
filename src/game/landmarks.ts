@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { placeByName, roadAt } from './campusmap';
 import { labelTexture } from './textures';
+import { facadeBox, hipRoof } from './facades';
 
 const white = new THREE.MeshStandardMaterial({ color: '#f1ece2', roughness: 0.85 });
 const cream = new THREE.MeshStandardMaterial({ color: '#e3d6bd', roughness: 0.9 });
@@ -39,6 +40,8 @@ const at = (m: THREE.Object3D, x: number, y: number, z: number) => {
   m.position.set(x, y, z);
   return m;
 };
+/** a tiled hipped roof with eaves and overhang, covering about w x w, rising h from y */
+const tiledHip = (w: number, h: number, y: number) => hipRoof(w - 1.2, w - 1.2, y, '#ad4f2d', 0.6, h / (w / 2));
 /** a four-sided hipped roof */
 const hip = (w: number, h: number, y: number) => {
   const m = new THREE.Mesh(new THREE.ConeGeometry(w * 0.72, h, 4), tile);
@@ -61,10 +64,10 @@ const clocks = (g: THREE.Group, size: number, half: number, y: number, tex: THRE
 /** Balme Library, from DELA's photos: stepped hip roofs rising to a slim clock tower and a red spire. */
 function balmeTower(tex: THREE.Texture) {
   const g = new THREE.Group();
-  g.add(box(14, 9, 12, white));
-  g.add(hip(17, 3.2, 9));
-  g.add(box(8, 3.5, 8, white, 12 + 1.75 - 0.5));
-  g.add(hip(10, 2.4, 14.6));
+  g.add(facadeBox(14, 9, 12, '#f6f1e6'));
+  g.add(tiledHip(17, 3.2, 9));
+  g.add(at(facadeBox(8, 3.5, 8, '#f6f1e6', 2.7), 0, 11.5, 0));
+  g.add(tiledHip(10, 2.4, 14.6));
   g.add(box(3, 6, 3, white, 19.5));
   clocks(g, 1.15, 1.5, 19.8, tex);
   g.add(hip(4.2, 1.4, 22.5));
