@@ -927,8 +927,19 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   game.setUpgrades(setup.upgrades);
   game.setRideItems({ energy: setup.energy, repairKits: setup.repairKits });
   game.setDifficulty(settings.difficulty ?? 'normal');
-  const raining = !!weather?.rain && !lr;
+  // weather: sun and showers come and go, or follow Legon's real weather, or stay clear
+  const wMode = lr || money.isPrizeRide(route.id) ? 'clear' : settings.weather ?? 'changing';
+  let raining = wMode === 'live' ? !!weather?.rain : wMode === 'changing' ? Math.random() < 0.25 : false;
   game.setWeather(raining ? 'rain' : 'clear');
+  const weatherTimer = wMode === 'changing' ? setInterval(() => {
+    if (game.paused || !game.isRiding) return;
+    // showers pass after a while; dry spells sometimes end in rain
+    if (Math.random() < (raining ? 0.5 : 0.2)) {
+      raining = !raining;
+      game.setWeather(raining ? 'rain' : 'clear');
+      flash(raining ? 'RAIN' : 'SUN', raining ? 'A shower is coming. Roads get slippery' : 'The rain has stopped', 2200);
+    }
+  }, 45000) : 0;
   game.setTreasure(opts.treasure?.count ?? 0, opts.treasure?.seed ?? 1);
   if (money.isPrizeRide(route.id)) money.levelField(game, brakes);
   const flash = (head: string, text: string, ms = 1600) => {
@@ -1300,6 +1311,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     music(false);
     stopAmbience();
     clearInterval(ambTimer);
+    clearInterval(weatherTimer);
     game.onNearMiss = game.onJump = () => {};
     game.onDraft = game.onRepair = game.onTreasure = () => {};
     if (keyHandler) removeEventListener('keydown', keyHandler);
@@ -1877,7 +1889,7 @@ function home(next: Tab = 'home') {
     }
     const route = raceRoute(r);
     const b = p.bestTimes[r.id];
-    return `<button class="card selectable" data-race="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">${(route.length / 1000).toFixed(1)} km · Difficulty ${stars(r.difficulty)}${b ? ` · Best ${clock(b)} 👻` : ''}</p></button>`;
+    return `<button class="card selectable" data-race="${r.id}" style="text-align:left"><div class="row"><h3 style="font-weight:800">${TIME_ICON[r.time]} ${esc(r.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div><p class="muted small" style="margin-top:4px">${esc(r.blurb)}</p><p class="muted small" style="margin-top:4px">${(route.length / 1000).toFixed(1)} km · Difficulty ${stars(r.difficulty)}${b ? ` · Best ${clock(b)}` : ''}</p></button>`;
   };
   const week = currentWeek(p);
   const eventCard = (e: EventDef) => {
@@ -1935,7 +1947,7 @@ function home(next: Tab = 'home') {
         <p class="muted small">Beat your best time: a ghost of your best run rides with you.</p>
         <div class="card selectable" id="routeCard">
           <div class="row"><h3 style="font-weight:800">${esc(CAMPUS_LOOP.name.toUpperCase())}</h3><span class="grow"></span><span class="badge gold">250 ${icons.coin}</span></div>
-          <p class="muted small" style="margin-top:4px">${(CAMPUS_LOOP.length / 1000).toFixed(1)} km · Difficulty ${stars(CAMPUS_LOOP.difficulty)}${best ? ` · Best ${clock(best)} 👻` : ''}</p>
+          <p class="muted small" style="margin-top:4px">${(CAMPUS_LOOP.length / 1000).toFixed(1)} km · Difficulty ${stars(CAMPUS_LOOP.difficulty)}${best ? ` · Best ${clock(best)}` : ''}</p>
         </div>
         ${RACES.map(raceCard).join('')}
       </div>`,
@@ -3303,6 +3315,7 @@ function settingsScreen() {
         </div>
         <div class="card stack">
           <div class="set-row"><b>Difficulty</b>${seg('difficulty', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']], settings.difficulty)}</div>
+          <div class="set-row"><b>Weather</b>${seg('weather', [['changing', 'Changing'], ['live', 'Live Legon'], ['clear', 'Always sunny']], settings.weather ?? 'changing')}</div>
           <p class="muted small">Easy gives you more time on missions; Hard gives less and more traffic.</p>
         </div>
         <div class="card stack">
@@ -3343,6 +3356,7 @@ function settingsScreen() {
   });
   pick('hand', (v) => changeSettings({ leftHanded: v === '1' }));
   pick('difficulty', (v) => changeSettings({ difficulty: v as typeof settings.difficulty }));
+  pick('weather', (v) => changeSettings({ weather: v as typeof settings.weather }));
   pick('motion', (v) => changeSettings({ reducedMotion: v === '1' }));
   pick('vibe', (v) => { changeSettings({ vibration: v === '1' }); buzz(40); });
   pick('big', (v) => changeSettings({ bigButtons: v === '1' }));

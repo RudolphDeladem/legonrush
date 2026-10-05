@@ -683,3 +683,5 @@ html.night .light .screen.dress { background: linear-gradient(180deg, rgba(12,18
 @media (max-width: 599px) { .home:has(.continue-row) .qr { height: 96px; } }
 .hud-top .coin-hud { margin-left: auto; }
 .photo-on .hud > :not(.photo-ui){visibility:hidden}
+/* the HUD rows sit above the swipe layer so their buttons can be tapped */
+.hud-top, .hud-bottom { position: relative; z-index: 2; }
