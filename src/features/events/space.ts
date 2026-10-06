@@ -20,7 +20,7 @@ import { HALL_PLACE, hallById } from '../../data/campus';
 import { placeByName } from '../../game/campusmap';
 import { buildHangout, type Act, type Person } from '../life/world';
 import { crowdNow, skyNow, venueById, type Theme, type Venue } from '../life/venues';
-import { introFor, replyTo } from '../life/bots';
+import { chatBack, introFor, lineFor, QUICK_FLIRT, QUICK_SAY, replyTo } from '../life/bots';
 
 const DEVICE_KEY = 'legonrush.device.v1';
 function myKey() {
@@ -136,6 +136,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
         <div data-pane="chat" class="ev-chat">
           <div class="row"><span class="muted small">Event chat</span><span class="grow"></span><span class="muted small" id="evConn">Connecting…</span></div>
           <div class="ev-log" id="evLog"></div>
+          <div class="ev-quick" id="evQuick">${[...QUICK_SAY, ...(adult ? QUICK_FLIRT : [])].map((q) => `<button type="button" data-say="${esc(q)}">${esc(q)}</button>`).join('')}</div>
           <form class="chat-form" id="evForm"><input id="evSay" maxlength="160" autocomplete="off" placeholder="Say something…" aria-label="Message"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form>
         </div>
         <div data-pane="people" class="stack" style="gap:10px" hidden>
@@ -265,12 +266,24 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     ov.innerHTML = `<div class="sheet light-ui ev-person-sheet">
       <div class="row"><span class="ev-person big" style="--c:${colorOf(b.key)}"><i>${initial(b.name)}</i></span><div class="grow"><h2 class="title" style="font-size:24px;margin:0">${esc(b.name)}</h2><small class="muted">${esc([b.hall, ACT_LABEL[b.act]].filter(Boolean).join(' · '))}</small></div><button class="btn btn-link" data-close>${icons.close}</button></div>
       ${staff ? `<p class="muted small">${b.act === 'dj' ? 'Running the music tonight.' : 'Serving food. Tap Eat to get something.'}</p>` : ''}
+      ${staff ? '' : `<div class="row" style="gap:8px"><button class="btn btn-primary btn-sm grow" data-talk="chat">${icons.chat} Talk to ${esc(b.name.split(' ')[0])}</button>${adult ? `<button class="btn btn-ghost btn-sm" data-talk="flirt">${icons.heart} Flirt</button>` : ''}</div>`}
       <div class="ev-asks">${ASKS.filter((a) => !a.adult).map((a) => `<button class="ev-emote" data-ask="${a.id}">${a.icon}<span>${a.label}</span></button>`).join('')}</div>
     </div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', (ev) => {
       const t = ev.target as HTMLElement;
       if (t === ov || t.closest('[data-close]')) return ov.remove();
+      const talk = t.closest<HTMLElement>('[data-talk]')?.dataset.talk;
+      if (talk) {
+        ov.remove();
+        if (!world.meetSomeone(b)) return toast(`${esc(b.name.split(' ')[0])} is busy right now`);
+        partner = b;
+        lastMeet = Date.now();
+        openPanel('chat');
+        if (talk === 'flirt') send(QUICK_FLIRT[(Math.random() * QUICK_FLIRT.length) | 0]);
+        else setTimeout(() => { if (!gone) botSays(b, introFor(b, venue.theme, Math.random)); }, 1400);
+        return;
+      }
       const a = t.closest<HTMLElement>('[data-ask]')?.dataset.ask as Ask | undefined;
       if (!a) return;
       ov.remove();
@@ -509,11 +522,17 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
   const input = $<HTMLInputElement>('#evSay')!;
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    const text = maskText(input.value.trim().slice(0, 160));
-    if (!text) return;
-    if (Date.now() - lastSend < 1000) return;
+    if (send(input.value)) input.value = '';
+  });
+  $('#evQuick')!.addEventListener('click', (ev) => {
+    const q = (ev.target as HTMLElement).closest<HTMLElement>('[data-say]')?.dataset.say;
+    if (q) send(q);
+  });
+  function send(raw: string) {
+    const text = maskText(raw.trim().slice(0, 160));
+    if (!text) return false;
+    if (Date.now() - lastSend < 1000) return false;
     lastSend = Date.now();
-    input.value = '';
     msgs.push({ k: me, name: p.name, text, at: Date.now() });
     world.speak('me', text);
     drawLog();
@@ -523,8 +542,28 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     const b = partner && world.people().includes(partner) && Math.hypot(partner.x - world.me.x, partner.z - world.me.z) < 6 ? partner : near;
     if (b) partner = b;
     const r = b && replyTo(text, Math.random, b);
-    if (b && r) setTimeout(() => { if (gone) return; world.speak(b.key, r); msgs.push({ k: b.key, name: b.name, text: r, at: Date.now() }); drawLog(); }, 1200 + Math.random() * 1500);
-  });
+    if (b && r) setTimeout(() => { if (!gone) botSays(b, r); }, 1200 + Math.random() * 1500);
+    return true;
+  }
+  function botSays(b: Person, text: string) {
+    world.speak(b.key, text);
+    msgs.push({ k: b.key, name: b.name, text, at: Date.now() });
+    drawLog();
+    bump();
+  }
+  // the crowd talks in the chat too: someone says something every little while and others answer
+  let chatTimer = window.setTimeout(function again() {
+    if (gone) return;
+    const crowd = world.people().filter((x) => x.bot && !x.bike && x.act !== 'vendor' && x.act !== 'dj' && x !== partner);
+    const a = crowd[(Math.random() * crowd.length) | 0];
+    if (a) {
+      const line = lineFor(venue.theme, Math.random);
+      botSays(a, line);
+      const b = crowd[(Math.random() * crowd.length) | 0];
+      if (b && b !== a && Math.random() < 0.55) setTimeout(() => { if (!gone) botSays(b, chatBack(line, Math.random)); }, 2000 + Math.random() * 3000);
+    }
+    chatTimer = window.setTimeout(again, 9e3 + Math.random() * 14e3);
+  }, 5e3);
   $('#evMusic')!.addEventListener('click', () => {
     musicOn = !musicOn;
     if (musicOn) startParty(venue.style, { people: world.count(), horn: venue.horn }); else stopParty();
@@ -540,6 +579,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     clearInterval(hereTimer);
     clearInterval(posTimer);
     clearTimeout(meetTimer);
+    clearTimeout(chatTimer);
     for (const x of pending.values()) clearTimeout(x.timer);
     h.app.removeEventListener('click', onPerson);
     removeEventListener('keydown', keyDown);

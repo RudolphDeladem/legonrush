@@ -69,6 +69,8 @@ export interface GhostRun {
   x: number[];
 }
 const GHOST_STEP = 0.1;
+/** bike paints for the riders beside you */
+const RIVAL_BIKES = ['#1f2937', '#c62828', '#1565c0', '#2e7d32', '#6a1b9a', '#ef6c00'];
 
 /** Another rider on the road: your best run, a friend's challenge or a bot, replayed from a recording. */
 export interface Rival {
@@ -259,6 +261,7 @@ export class Game {
   private headlight = new THREE.SpotLight('#fff1cf', 0, 45, 0.55, 0.6, 1.2);
   private rivals: RivalState[] = [];
   private rigPool: { rig: RiderRig; mat: THREE.MeshStandardMaterial }[] = [];
+  private solidPool: { rig: RiderRig; key: string }[] = [];
   private rec: GhostRun = { step: GHOST_STEP, d: [], x: [] };
 
   private phase: Phase = 'showcase';
@@ -342,6 +345,8 @@ export class Game {
   private lowEnd: boolean;
   /** no traffic or obstacles: for learning the way */
   calm = false;
+  /** the rider's chosen cruising speed (m/s) for Explore and Vibe rides; null: the normal pace */
+  cruiseSpeed: number | null = null;
   /**
    * Explore's guided ride: a slow, steady pace that rolls to a stop at each place in `stops`
    * (ride distance d, map x/z) and waits there until continueTour().
@@ -528,7 +533,20 @@ export class Game {
   /** Riders replayed beside you; the first one is the gap shown in the HUD. */
   setRivals(list: Rival[]) {
     for (const p of this.rigPool) p.rig.root.visible = false;
+    for (const p of this.solidPool) p.rig.root.visible = false;
     this.rivals = list.filter((r) => r.live || r.run.d.length > 1).map((r, i) => {
+      if (!r.ghostly) {
+        // real riders and bots ride as proper people on proper bikes, not see-through ghosts
+        let s = this.solidPool[i];
+        if (!s || s.key !== r.color) {
+          if (s) this.scene.remove(s.rig.root);
+          const rig = buildRider(r.color, RIVAL_BIKES[i % RIVAL_BIKES.length]);
+          rig.root.visible = false;
+          this.scene.add(rig.root);
+          s = this.solidPool[i] = { rig, key: r.color };
+        }
+        return { ...r, rig: s.rig, crank: 0, lean: 0, finish: r.bot ? Infinity : this.finishTime(r.run) };
+      }
       let p = this.rigPool[i];
       if (!p) {
         const rig = buildRider('#ffffff', '#ffffff');
@@ -880,6 +898,7 @@ export class Game {
     this.paused = false;
     this.rec = { step: GHOST_STEP, d: [], x: [] };
     for (const p of this.rigPool) p.rig.root.visible = false;
+    for (const p of this.solidPool) p.rig.root.visible = false;
     this.rider.body.rotation.set(0, 0, 0);
     this.rider.body.position.set(0, 0, 0);
   }
@@ -977,7 +996,7 @@ export class Game {
       this.time += dt;
       const progress = this.d / this.route.length;
       const difficulty = Math.min(1, progress * 1.3 + (this.route.difficulty - 2) * 0.1);
-      let target = this.baseSpeed + difficulty * 6;
+      let target = this.cruiseSpeed ?? this.baseSpeed + difficulty * 6;
       const boosting = this.boostTime > 0;
       if (boosting) {
         target *= 1.45;
@@ -1003,7 +1022,7 @@ export class Game {
         target *= 0.6;
         this.slowTimer -= dt;
       }
-      if (this.tour) target = this.tour.speed;
+      if (this.tour) target = this.cruiseSpeed ?? this.tour.speed;
       if (this.shield > 0) this.shield -= dt;
       if (this.honkCool > 0) this.honkCool -= dt;
       const accel = 4 + (this.bike?.acceleration ?? 3) * 1.6;

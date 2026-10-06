@@ -478,3 +478,8 @@ i.desk-only { font-style: normal; }
 .guide-card .btn-ghost { color: #10213f; border-color: rgba(16, 33, 63, 0.25); }
 @keyframes guide-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 @media (min-width: 900px) { .guide-card { left: 50%; right: auto; transform: translateX(-50%); width: 480px; bottom: 170px; } @keyframes guide-in { from { opacity: 0; } to { opacity: 1; } } }
+/* Explore and Vibe rides: pick your own cruising speed */
+.pace-box { position: absolute; left: 14px; top: calc(214px + var(--safe-t, 0px)); z-index: 5; width: 132px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 6px; padding: 8px 10px; border-radius: 14px; background: rgba(10, 20, 40, 0.72); color: #fff; font-size: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.3); pointer-events: auto; }
+.pace-box span { opacity: 0.8; }
+.pace-box b { font-size: 12px; }
+.pace-box input { grid-column: 1 / -1; width: 100%; accent-color: #f5c518; height: 28px; margin: 0; }

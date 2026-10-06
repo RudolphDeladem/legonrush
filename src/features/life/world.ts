@@ -150,7 +150,8 @@ export interface HangoutWorld extends SceneGuest {
   /** a bot near you answers what you said */
   nearestBot(): Person | null;
   /** someone free comes over to you, faces you and waves */
-  meetSomeone(): Person | null;
+  /** someone comes over to talk: `who` if given, else one of the nearest free people */
+  meetSomeone(who?: Person): Person | null;
   selfie(capture: () => string): string;
   /** for streaming your position */
   state(): { x: number; z: number; yaw: number; act: Act };
@@ -880,11 +881,12 @@ export function buildHangout(v: Venue, me: { name: string; hall: string; skin: s
       for (const p of people) { if (!p.bot || p.act === 'leave') continue; const d = Math.hypot(p.x - meP.x, p.z - meP.z); if (d < bd) { bd = d; best = p; } }
       return best;
     },
-    meetSomeone() {
+    meetSomeone(who) {
       const free = people.filter((q) => q.bot && !q.bike && (q.act === 'chat' || q.act === 'idle' || q.act === 'dance' || q.act === 'sit') && Math.hypot(q.x - meP.x, q.z - meP.z) < 16);
-      if (!free.length) return null;
+      if (who && (!who.bot || who.bike || !people.includes(who) || who.act === 'vendor' || who.act === 'dj')) return null;
+      if (!who && !free.length) return null;
       free.sort((a, b) => Math.hypot(a.x - meP.x, a.z - meP.z) - Math.hypot(b.x - meP.x, b.z - meP.z));
-      const p = free[(rand() * Math.min(4, free.length)) | 0];
+      const p = who ?? free[(rand() * Math.min(4, free.length)) | 0];
       release(p);
       p.fig.phone.visible = p.fig.plate.visible = false;
       const a = meP.yaw + Math.PI + (rand() - 0.5) * 1.2;

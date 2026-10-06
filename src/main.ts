@@ -911,6 +911,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       <div class="prompt" id="prompt"></div>
       <div class="tip" id="tip" hidden></div>
       <div class="guide-card" id="guideCard" role="dialog" aria-live="polite" hidden></div>
+      ${isExplore(route) || opts.live?.kind === 'vibe' ? `<label class="pace-box" id="paceBox"><span>Speed</span><input type="range" id="pace" min="4" max="35" step="1" aria-label="Riding speed"><b id="paceVal"></b></label>` : ''}
       <div class="hud-bottom">
         ${brakes ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : '<span class="hud-slot"></span>'}
         <div class="speedo" id="speedo">
@@ -1366,6 +1367,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     game.onAction = () => {};
     game.onGuide = () => {};
     game.tour = null;
+    game.cruiseSpeed = null;
     if ('speechSynthesis' in window) speechSynthesis.cancel();
     game.paused = false;
     clearInterval(stream);
@@ -1379,6 +1381,26 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   const guide = opts.guided && isExplore(route) && !lr ? guideStops(route) : [];
   game.tour = guide.length ? { stops: guide.map((g) => ({ d: g.d, x: g.place.x, z: g.place.z })), speed: exploreOpts.mode === 'walk' ? 2.4 : 4 } : null;
   if (game.tour) game.calm = true;
+  // Explore and Vibe rides: the rider picks their own cruising speed (remembered per mode)
+  const paceIn = app.querySelector<HTMLInputElement>('#pace');
+  game.cruiseSpeed = null;
+  if (paceIn) {
+    const key = `legonrush.pace.${lr ? 'vibe' : game.tour ? 'tour' : 'explore'}`;
+    let kmh = game.tour ? Math.round(game.tour.speed * 3.6) : 18;
+    try { kmh = Number(localStorage.getItem(key)) || kmh; } catch { /* private mode */ }
+    const setPace = (v: number) => {
+      kmh = Math.max(4, Math.min(35, Math.round(v)));
+      paceIn.value = String(kmh);
+      $('paceVal').textContent = `${kmh} km/h`;
+      game.cruiseSpeed = kmh / 3.6;
+    };
+    setPace(kmh);
+    paceIn.addEventListener('input', () => {
+      setPace(Number(paceIn.value));
+      try { localStorage.setItem(key, String(kmh)); } catch { /* private mode */ }
+    });
+    for (const ev of ['pointerdown', 'touchstart', 'keydown'] as const) $('paceBox').addEventListener(ev, (e) => e.stopPropagation());
+  }
   const guideCard = $('guideCard');
   const canSpeak = 'speechSynthesis' in window;
   const say = (text: string) => {

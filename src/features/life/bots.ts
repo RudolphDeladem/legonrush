@@ -80,9 +80,26 @@ export function replyTo(text: string, rand: () => number, b?: { name: string; ha
   if (/\b(dance|dancing)\b/.test(t)) return pickOf(['Let’s go! 💃', 'Only if you lead 😂', 'This song? Yes!'], rand);
   if (/\b(eat|food|hungry|waakye|jollof|kelewele|indomie)\b/.test(t)) return pickOf(['The waakye here is top', 'Let’s go buy something', 'I’m hungry too 😅'], rand);
   if (/\b(first time|new|fresher)\b/.test(t)) return pickOf(['Welcome to Legon! 🎉', 'You’ll love it here', 'Freshers! Ask me anything'], rand);
+  // playful, friendly flirting: they flirt back a little, never anything explicit
+  if (/\b(cute|pretty|beautiful|handsome|fine|nice (dress|shirt|smile|outfit)|you look|smile)\b/.test(t)) return pickOf(['Awww, thank you 😊', 'Stop it 🙈 you too!', 'Hehe, you’re sweet', 'Chale, you dey talk 😂 thanks', 'You’re not bad yourself 😏'], rand);
+  if (/\b(number|snap|snapchat|insta|instagram|whatsapp|contact)\b/.test(t)) return pickOf(['Let’s dance first, then we’ll see 😏', 'Haha, slow down 😂 tell me about yourself first', 'Find me here at the next jam 😉', 'Maybe if you buy me kelewele 😂'], rand);
+  if (/\b(single|boyfriend|girlfriend|crush|date|go out)\b/.test(t)) return pickOf(['Haha why are you asking? 😏', 'That’s classified 🙈', 'Maybe… who wants to know? 😂', 'Let’s start with a dance 💃'], rand);
+  if (/\b(sit with|join you|walk with|hang out|come with)\b/.test(t)) return pickOf(['Sure, come 😊', 'Yes, plenty space', 'Let’s go!'], rand);
+  if (/\b(miss|like you|love)\b/.test(t)) return pickOf(['Eiii 🙈', 'Haha, you’re funny 😂', 'Already? 😏'], rand);
   if (/\b(hi|hey|hello|charley|chale|yo|sup|good (morning|evening|afternoon))\b/.test(t)) return pickOf(HELLO, rand);
   if (/\b(thanks|thank you|bye|later)\b/.test(t)) return pickOf(['Anytime!', 'See you around 👋', 'Enjoy!'], rand);
   if (/\?$/.test(t)) return pickOf(['Hmm, good question 😂', 'I think so', 'Not sure oo', 'Yes!'], rand);
   if (rand() < 0.6) return pickOf(REPLY, rand);
   return null;
+}
+
+/** quick things to say, shown as chips over the chat box; the flirty ones only for 18+ riders who chose Date */
+export const QUICK_SAY = ['Hi 👋', 'Which hall are you?', 'What do you study?', 'You dey dance?', 'Let’s get food', 'First time here 😅'];
+export const QUICK_FLIRT = ['You look nice tonight 😊', 'Can I sit with you?', 'Your smile tho 😏', 'Are you single? 😂'];
+
+/** a student in the crowd answers someone else in the group chat, so the chat feels alive */
+export function chatBack(text: string, rand: () => number) {
+  const t = text.toLowerCase();
+  if (/\?/.test(t)) return pickOf(['Me! 🙋', 'Yes oo', 'Not me 😂', 'Ask the DJ', 'Later later', 'I dey come'], rand);
+  return pickOf(['😂😂', 'True!', 'Facts', 'Eiii', 'We move 🔥', 'Same', 'Lol', '💯'], rand);
 }
