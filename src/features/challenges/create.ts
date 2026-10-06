@@ -206,7 +206,7 @@ export function createScreen(back: () => void = () => H().home('challenges'), ed
       <button class="btn btn-ghost" id="cwPrev">${step === 0 ? 'Cancel' : 'Back'}</button>
       ${step < STEPS.length - 1
         ? `<button class="btn btn-primary" id="cwNext">Next ${icons.arrow}</button>`
-        : `<button class="btn btn-primary" id="cwMake" ${(!editing && cfg.creationFee > p.coins) || !api.online() ? 'disabled' : ''}>${editing ? 'Save changes' : `Create challenge · ${fmt(cfg.creationFee)} ${icons.coin}`}</button>`}
+        : `<button class="btn btn-primary" id="cwMake" ${(!editing && cfg.creationFee > p.coins) || !api.online() ? 'disabled' : ''}>${editing ? 'Save changes' : `Create for ${fmt(cfg.creationFee)} ${icons.coin}`}</button>`}
     </div>
   `, prev, 'chx-screen chx-wizard');
 

@@ -131,6 +131,8 @@ button.chx-row:hover { background: var(--chx-soft); }
 
 .chx-invite-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-color: var(--gold); }
 .chx-invite-card .chx-row { padding: 6px 2px; }
+.chx-invite-card .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.chx-invite-card .two .btn { min-height: 40px; padding: 8px 12px; font-size: 14px; }
 .chx-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 22px 16px; border: 1.5px dashed var(--line); border-radius: 18px; background: var(--card); }
 .chx-empty-ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--chx-soft); color: var(--muted); }
 .chx-empty-ico .i { width: 22px; height: 22px; }
@@ -284,7 +286,7 @@ html.night .chx-rd.on { background: rgba(46, 204, 113, 0.18); color: #7ee2a8; }
 .chx-steps .on i { background: var(--gold); color: #0b1530; border-color: var(--gold); }
 .chx-steps .on em { color: var(--ink); }
 .chx-steps .done i { background: #0b1530; color: #fff; border-color: #0b1530; }
-@media (max-width: 420px) { .chx-steps em { display: none; } .chx-steps .on em { display: block; position: absolute; } .chx-steps span { position: relative; } }
+@media (max-width: 420px) { .chx-steps em { display: none; } .chx-steps .on em { display: block; overflow: visible; max-width: none; } }
 .chx-step-h { font-family: var(--display); font-size: 24px; font-weight: 800; color: var(--ink); }
 .chx-routes, .chx-opts { display: flex; flex-direction: column; gap: 8px; }
 .chx-route, .chx-opt { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); text-align: left; color: var(--ink); width: 100%; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04); }
@@ -332,7 +334,7 @@ html.night .chx-rd.on { background: rgba(46, 204, 113, 0.18); color: #7ee2a8; }
 .chx-cp { text-align: right; border-left: 1px solid rgba(255, 255, 255, 0.15); padding-left: 10px; }
 .chx-hud.cp-hit .chx-cp b { animation: chx-cp 0.9s ease-out; }
 @keyframes chx-cp { 0% { color: var(--gold); transform: scale(1.35); } 100% { color: #fff; transform: none; } }
-@media (max-width: 420px) { .chx-hud { left: 12px; right: 12px; max-width: none; top: calc(150px + var(--safe-t, 0px)); } }
+@media (max-width: 420px) { .chx-hud { left: 128px; right: 10px; max-width: none; top: calc(100px + var(--safe-t, 0px)); gap: 8px; padding: 6px 10px 6px 6px; } .chx-hud small { max-width: 110px; font-size: 9px; } .chx-hud b { font-size: 16px; } .chx-hud-ico { width: 26px; height: 26px; } }
 
 /* results screen card */
 .chx-result { display: flex; flex-direction: column; gap: 8px; }
