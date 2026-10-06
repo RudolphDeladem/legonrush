@@ -75,4 +75,13 @@ export const icons = {
   wifiOff: svg('<path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4.2-2.4M19 12.5a10 10 0 0 0-2.6-1.8M2 8.8a15 15 0 0 1 4.3-2.6M22 8.8A15 15 0 0 0 11 5"/><circle cx="12" cy="20" r="0.6"/>'),
   steer: svg('<path d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4"/>'),
   replay: svg('<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>'),
+  // campus map
+  layers: svg('<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'),
+  locate: svg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14"/>'),
+  minus: svg('<path d="M5 12h14"/>'),
+  close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  question: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5h.01"/>'),
+  directions: svg('<path d="M12 2.5l9.5 9.5-9.5 9.5L2.5 12z"/><path d="M9 14v-2.5a1.5 1.5 0 0 1 1.5-1.5H15M13 8l2 2-2 2"/>'),
+  chevron: svg('<path d="M6 9l6 6 6-6"/>'),
 };

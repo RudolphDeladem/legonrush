@@ -56,6 +56,9 @@ export interface Profile {
   missionBest: Record<string, number>;
   /** this week's treasure hunt */
   treasure: { week: string; found: number; claimed: boolean };
+  // ---- Map (src/features/map) ----
+  /** campus map collection: places already rewarded as discovered, and collection rewards claimed */
+  mapDex: { seen: string[]; claimed: string[] };
 }
 
 export type Upgrade = 'speed' | 'grip' | 'boost';
@@ -173,6 +176,7 @@ export function newProfile(): Profile {
     weekly: { id: '', n: {}, claimed: [] }, dailyStreak: { last: '', count: 0 }, stats: {}, badges: [], visited: [], favourites: [],
     missionBest: {}, treasure: { week: '', found: 0, claimed: false },
     diamonds: 0, items: {},
+    mapDex: { seen: [], claimed: [] },
   };
 }
 
@@ -202,6 +206,7 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.dailyStreak = { ...d.dailyStreak, ...p.dailyStreak };
   p.treasure = { ...d.treasure, ...p.treasure };
   p.stats ??= {};
+  p.mapDex = { seen: p.mapDex?.seen ?? [], claimed: p.mapDex?.claimed ?? [] };
   return p;
 }
 

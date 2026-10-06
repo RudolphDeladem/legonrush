@@ -210,6 +210,8 @@ function mergeFeatures(local: Profile, remote: Profile) {
     missionBest,
     diamonds: Math.max(local.diamonds ?? 0, remote.diamonds ?? 0),
     items: maxEach(local.items ?? {}, remote.items ?? {}),
+    // Map: discoveries rewarded and collection rewards claimed (union, so nothing is paid twice)
+    mapDex: { seen: union(local.mapDex?.seen, remote.mapDex?.seen), claimed: union(local.mapDex?.claimed, remote.mapDex?.claimed) },
   };
 }
 
