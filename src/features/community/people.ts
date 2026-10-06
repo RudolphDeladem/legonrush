@@ -324,7 +324,7 @@ export function onlineScreen(from: () => void = back) {
     const st = lobbyState();
     const box = H().app.querySelector<HTMLElement>('#cmList');
     const n = H().app.querySelector<HTMLElement>('#cmOnlineN');
-    if (n) n.textContent = st === 'on' ? `${plural(list.length + 1, 'rider')} online, including you` : st === 'off' ? 'Offline' : 'Connecting…';
+    if (n) n.textContent = st === 'on' ? `${plural(list.length + 1, 'rider')} online on this campus, including you` : st === 'off' ? 'Offline' : 'Connecting…';
     if (!box) return;
     if (st === 'off') { box.innerHTML = empty(icons.wifiOff, 'Live riders unavailable', 'Riders online show here when you are connected.'); return; }
     if (!list.length) { box.innerHTML = empty(ci.users, st === 'on' ? "You're the only one here" : 'Looking for riders…', st === 'on' ? 'Invite a friend to Vibe Ride, or check back soon.' : ''); return; }
@@ -340,7 +340,7 @@ export function onlineScreen(from: () => void = back) {
     bindPeople(box, list.map((o) => ({ id: o.key, name: o.state.name, hall: o.state.hall, level: o.state.level }) as Card));
   };
   screen(`
-    <div class="cm-head"><span class="cm-head-ico">${ci.users}</span><div><h1 class="title">Riders online</h1><p class="muted"><i class="cm-dot"></i> <span id="cmOnlineN"></span> on this campus</p></div></div>
+    <div class="cm-head"><span class="cm-head-ico">${ci.users}</span><div><h1 class="title">Riders online</h1><p class="muted"><i class="cm-dot"></i> <span id="cmOnlineN"></span></p></div></div>
     <p class="muted small">${fx.info} Riders who turned off "Show online status" aren't listed. Invites to ride need the other rider to accept.</p>
     <div id="cmList" class="cm-list"></div>`, from, 'cm-screen');
   draw();
