@@ -35,6 +35,7 @@ const COS_SUB: [string, string, Kind[]][] = [
 export const store = { cat: 'featured' as Cat, sub: 'all', q: '', sort: 'featured', rar: 'all' as Rarity | 'all', hideOwned: false };
 
 const P = () => H().profile();
+// the shop is the Shop side of the Garage tab now; 'store' opens it there
 const backToStore = () => H().home('store');
 const artFor = (p: Profile, it: Item) => (it.kind === 'bike' && owned(p, it.id) ? bikeSvg(styleFor(p, it.id.slice(5))) : itemArt(it));
 const sub = (it: Item) => it.kind === 'bike' ? `${CLASSES[it.cls!].name} · Rating ${ratingOf(it.stats!)}`
@@ -44,10 +45,10 @@ const sub = (it: Item) => it.kind === 'bike' ? `${CLASSES[it.cls!].name} · Rati
 // ---------- the storefront ----------
 
 /** the Store tab's page */
-export function storeHtml(p: Profile) {
-  return `<div class="gx gx-store">
-    <div class="gx-head"><h1 class="title">Store</h1><span class="grow"></span>${wallet(p, false)}</div>
-    <p class="gx-tag">Ride better. Look better. Stand out.</p>
+export function storeHtml(p: Profile, inGarage = false) {
+  return `<div class="gx gx-store${inGarage ? ' in-garage' : ''}">
+    ${inGarage ? '' : `<div class="gx-head"><h1 class="title">Store</h1><span class="grow"></span>${wallet(p, false)}</div>
+    <p class="gx-tag">Ride better. Look better. Stand out.</p>`}
     <div class="gx-searchrow">
       <label class="gx-search">${fx.search}<input id="stSearch" type="search" autocomplete="off" placeholder="Search bikes, helmets, decals, wheels…" value="${esc(store.q)}" aria-label="Search the store"></label>
       <button class="btn btn-ghost btn-sm gx-admin-btn" id="stAdmin" hidden>${icons.sliders} Admin</button>

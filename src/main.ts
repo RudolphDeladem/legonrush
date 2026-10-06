@@ -32,7 +32,7 @@ import * as vb from './features/vibe';
 import { tabView, type TabId } from './tabs/registry';
 // Garage & Store: bike looks and the stats rides use
 import * as garage from './features/garage/garage';
-import { openStore } from './tabs/store';
+import { openStore, setGarageView } from './tabs/garage';
 import { showSystem, takeDue } from './features/notify';
 import * as community from './features/community';
 import './tabs';
@@ -1860,7 +1860,7 @@ function moreSheet() {
 const NAV: [TabId, string, string][] = [
   ['home', 'Home', icons.home], ['challenges', 'Challenges', icons.race], ['events', 'Events', icons.events],
   ['community', 'Community', icons.social], ['map', 'Map', icons.map], ['garage', 'Garage', icons.garage],
-  ['store', 'Store', icons.shop], ['you', 'Profile', icons.you],
+  ['you', 'Profile', icons.you],
 ];
 const PHONE_NAV: TabId[] = ['home', 'challenges', 'events', 'community'];
 
@@ -2083,12 +2083,14 @@ function home(next: Tab = 'home') {
     return void joinVibe(v.code, false, v.name);
   }
   stopSearching();
+  // the Store is the Shop side of the Garage now
+  if (next === 'store') { setGarageView('shop'); next = 'garage'; }
+  else if (next === 'garage' && tab !== 'garage') setGarageView('mine');
   const want = TAB_ALIAS[next] ?? next;
   tabCleanup?.();
   tabCleanup = null;
   // tabs not rebuilt yet open their older screens
   if (want === 'garage' && !tabView('garage')) return oldGarageScreen();
-  if (want === 'store' && !tabView('store')) return money.buyCoinsScreen();
   tab = want as TabId | 'ride';
   game.showcase();
   game.sleep = !!(want !== 'home' && tabView(want as TabId)?.bare);

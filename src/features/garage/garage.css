@@ -1,7 +1,7 @@
 /* Garage & Store. The 3D bike shows through a see-through "stage" box: the page is transparent and the
    stage's huge box-shadow paints the page colour everywhere else, under all the content. */
-.light .shell:has(> main.content.tab-garage) { background: transparent; }
-.light main.content.tab-garage { background: transparent; position: relative; z-index: 0; isolation: isolate; }
+.light .shell:has(> main.content.tab-garage .gx-hole) { background: transparent; }
+.light main.content.tab-garage:has(.gx-hole) { background: transparent; position: relative; z-index: 0; isolation: isolate; }
 .gx-page { background: transparent; isolation: isolate; padding: calc(12px + var(--safe-t)) 16px calc(24px + var(--safe-b)); color: var(--ink); }
 .gx-page:not(.has-stage) { background: var(--bg); }
 .gx-hole { position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none; box-shadow: 0 0 0 6000px var(--bg); }
@@ -360,3 +360,26 @@ html.night .gx-lv i { background: #222c45; }
 .gx-admin-row { gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
 .gx-admin-btn svg { width: 15px; height: 15px; }
 .gx-admin-btn[hidden] { display: none; }
+
+/* one Garage: My garage | Shop (the Store tab merged in, 2026-10-06) */
+.gx-merged { gap: 14px; }
+.gx-merged .gx-tag { margin-top: -8px; }
+.gx-views { max-width: 460px; }
+.gx-views button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.gx-views .i, .gx-views svg { width: 18px; height: 18px; }
+.gx-store.in-garage { padding: 0; gap: 14px; min-width: 0; width: 100%; margin: 0; }
+.gx-today { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.gx-mini { display: flex; align-items: center; gap: 12px; padding: 10px 12px; text-align: left; font: inherit; color: var(--ink); min-width: 0; }
+button.gx-mini { cursor: pointer; }
+button.gx-mini:hover { border-color: var(--gold); }
+.gx-mini .grow { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gx-mini small { color: var(--muted); font-size: 11.5px; line-height: 1.25; }
+.gx-mini .grow > small:first-child { text-transform: uppercase; letter-spacing: 0.12em; font-weight: 800; font-size: 10.5px; color: var(--gold-ink); }
+.gx-mini b { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gx-mini-art { flex: none; width: 52px; height: 52px; border-radius: 12px; background: #fff8dc; display: grid; place-items: center; overflow: hidden; }
+.gx-mini-art svg { width: 100%; height: 100%; }
+.gx-mini-art .gx-ico svg { width: 26px; height: 26px; }
+.gx-mini .gx-prog { display: block; height: 6px; border-radius: 99px; background: #eceff4; overflow: hidden; margin: 3px 0 1px; }
+.gx-mini .gx-prog i { display: block; height: 100%; background: var(--gold); border-radius: inherit; }
+html.night .gx-mini-art { background: #2a2a1a; }
+html.night .gx-mini .gx-prog { background: #26304a; }
