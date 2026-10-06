@@ -698,6 +698,18 @@ export class Game {
     }
   }
 
+  /** Events (treasure hunts): one treasure at each given ride distance, in the given lane (0..2). Call while riding. */
+  addTreasureAt(spots: { d: number; lane: number }[]) {
+    const k = kit();
+    for (const s of spots) {
+      const lane = Math.max(0, Math.min(2, Math.round(s.lane)));
+      const mesh = new THREE.Mesh(k.gem, k.gemMat);
+      this.place(mesh, s.d, LANES[lane], 1.0);
+      this.dynamic.add(mesh);
+      this.treasures.push({ mesh, d: s.d, x: LANES[lane], lane, taken: false, t: 0 });
+    }
+  }
+
   /** Photo mode: freezes the ride and lets the camera orbit the rider. */
   setPhotoMode(on: boolean) {
     if (on === this.photo) return;

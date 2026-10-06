@@ -32,6 +32,7 @@ import * as garage from './features/garage/garage';
 import { openStore } from './tabs/store';
 import { showSystem, takeDue } from './features/notify';
 import './tabs';
+import type { EventRide } from './features/events/ride-hook';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -809,6 +810,8 @@ interface PlayOpts {
   mission?: fx.MissionRun;
   /** this week's treasure hunt: chests to place on the route (the lead wires Game.setTreasure) */
   treasure?: { count: number; seed: number };
+  /** Events tab: an event activity riding along (features/events/play.ts) */
+  eventPlay?: EventRide;
 }
 
 interface LiveRide {
@@ -938,8 +941,9 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   game.setRideItems({ energy: setup.energy, repairKits: setup.repairKits });
   game.setDifficulty(settings.difficulty ?? 'normal');
   // weather: sun and showers come and go, or follow Legon's real weather, or stay clear
-  const wMode = lr || money.isPrizeRide(route.id) ? 'clear' : settings.weather ?? 'changing';
-  let raining = wMode === 'live' ? !!weather?.rain : wMode === 'changing' ? Math.random() < 0.25 : false;
+  const wMode = lr || money.isPrizeRide(route.id) || opts.eventPlay ? 'clear' : settings.weather ?? 'changing';
+  // events set their own weather (a Rain Rush stays wet)
+  let raining = opts.eventPlay ? opts.eventPlay.rain : wMode === 'live' ? !!weather?.rain : wMode === 'changing' ? Math.random() < 0.25 : false;
   game.setWeather(raining ? 'rain' : 'clear');
   const weatherTimer = wMode === 'changing' ? setInterval(() => {
     if (game.paused || !game.isRiding) return;
@@ -1084,6 +1088,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
 
   game.onHud = (h: HudState) => {
     missionTick?.(h);
+    opts.eventPlay?.hud(h);
     dist.textContent = km(h.distance);
     drawMap(h.pos, h.yaw);
     turn.hidden = !h.next || !!h.countdown;
@@ -1172,7 +1177,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       saveProfile(profile!);
       prize = event.prize;
     }
-    const feature = fx.afterRide(profile!, route, result, opts.mission);
+    const feature = fx.afterRide(profile!, route, result, opts.mission) + (opts.eventPlay?.end(r) ?? '');
     results(result, rewards, route, { hadGhost: !!ghost, rivals: game.rivalTimes, run, opts, event, prize, feature });
     if (lr) liveStandings(lr, result);
   };
@@ -1311,7 +1316,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   const night = (route.time ?? 'day') === 'night';
   const ambience = () => ({ night, rain: raining, market: marketProximity(...game.riderXZ) });
   const ambTimer = setInterval(() => { if (!game.paused) setAmbience(ambience()); }, 1000);
-  const leaveSolo = () => (opts.mission ? fx.missionsScreen() : route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
+  const leaveSolo = () => (opts.eventPlay ? opts.eventPlay.leave() : opts.mission ? fx.missionsScreen() : route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
   document.addEventListener('visibilitychange', onHidden);
@@ -1338,6 +1343,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     clearInterval(stream);
     clearTimeout(tipTimer);
     if (vibe) { vibe.onPos = null; vibe.redraw = null; }
+    opts.eventPlay?.stop();
   }
 
   game.calm = lr?.kind === 'vibe' || (isExplore(route) && exploreOpts.calm);
@@ -1349,6 +1355,8 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     setTimeout(() => { if (prompt.textContent?.includes('smooth mode')) prompt.innerHTML = ''; }, 3000);
   };
   game.start(bike, tutorial);
+  // Events tab: the event's rules (night, fog, no boost...) and its HUD start with the ride
+  opts.eventPlay?.start({ game, hud: app.querySelector<HTMLElement>('.hud')!, brakes, quit: () => { cleanup(); opts.eventPlay!.leave(); } });
   music(true);
   startAmbience(ambience());
   showUpdate('ride');

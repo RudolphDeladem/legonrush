@@ -5,11 +5,17 @@ import type { MissionRun } from './missions';
 import type { TabId } from '../tabs/registry';
 import type { BikeStyle } from '../game/models';
 import type { BikeView } from '../game/Game';
+import type { EventDef } from '../data/events';
+import type { EventRide } from './events/ride-hook';
 import './features.css';
 
 export interface RideExtras {
   mission?: MissionRun;
   treasure?: { count: number; seed: number };
+  /** a daily timed event (Sunset Rush, Night Rush) this race counts for */
+  event?: EventDef;
+  /** an Events-tab activity riding along (features/events/play.ts) */
+  eventPlay?: EventRide;
 }
 
 export interface FeatureHost {

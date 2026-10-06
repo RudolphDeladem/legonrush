@@ -92,4 +92,18 @@ export const icons = {
   seat: svg('<path d="M4 8c3-2 13-2 16 0-1 2-5 3-8 3S5 10 4 8z"/><path d="M12 11v9M8 20h8"/>'),
   cart: svg('<path d="M3 4h2.5l2.2 11h10.6L21 7H7"/><circle cx="9" cy="19.5" r="1.5"/><circle cx="17" cy="19.5" r="1.5"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  // ---- Events system ----
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'),
+  share: svg('<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>'),
+  users: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.5.9 2.6 2.6 3 5.2"/>'),
+  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17h.01"/>'),
+  ticket: svg('<path d="M3 8a2 2 0 0 0 0 4v0a2 2 0 0 1 0 4v2h18v-2a2 2 0 0 1 0-4 2 2 0 0 1 0-4V6H3z"/><path d="M14 6v12" stroke-dasharray="2 2"/>'),
+  stamp: svg('<path d="M9 3h6l-1 8h-4z"/><path d="M4 15h16v3H4zM6 21h12M8 11h8l2 4H6z"/>'),
+  megaphone: svg('<path d="M3 10v4h4l8 5V5L7 10z"/><path d="M18 9a4 4 0 0 1 0 6M7 14l1.5 6h2.5L10 15"/>'),
+  image: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>'),
+  dance: svg('<circle cx="13" cy="4" r="2"/><path d="M8 9l4-2 3 3 3 1M12 7l-1 6 3 3-1 5M11 13l-4 3-2-1"/>'),
+  highfive: svg('<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4a1.5 1.5 0 0 1 3 0v6M14 10V5a1.5 1.5 0 0 1 3 0v7M17 11V9a1.5 1.5 0 0 1 3 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4a1.5 1.5 0 0 1 2.5-1.6L8 15"/><path d="M3 4l2 2M3 9h2M6 2l1 2"/>'),
+  flagGh: svg('<path d="M5 21V4"/><path d="M5 4h14v12H5"/><path d="M5 8h14M5 12h14M12 9l.6 1.2 1.3.1-1 .8.3 1.3-1.2-.7-1.2.7.3-1.3-1-.8 1.3-.1z"/>'),
+  tree: svg('<path d="M12 3l6 8h-3l4 6H5l4-6H6z"/><path d="M12 17v4"/>'),
 };
