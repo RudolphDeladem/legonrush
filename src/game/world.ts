@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { weathering } from './shading';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { AREAS, BUILDINGS, NODE_XZ, ROADS, buildingAt, mapBounds, type Place, type PlaceKind } from './campusmap';
 import type { Track } from './track';
@@ -288,7 +289,7 @@ export function buildCampus() {
     for (const [x, z] of [pts[0], pts[pts.length - 1]]) (footpath ? pathCaps : caps).push(new THREE.CircleGeometry(half, 10).rotateX(-Math.PI / 2).translate(x, 0, z));
   }
   const campusAsphalt = asphaltTexture(false);
-  const asphalt = wettable(groundMat('#f2f2f2', 3, campusAsphalt));
+  const asphalt = weathering(wettable(groundMat('#f2f2f2', 3, campusAsphalt)), 'ground', 34, 0.35);
   const pathTex = concreteTexture();
   const path = wettable(groundMat('#efe2c2', 2, pathTex));
   const merged = (main: THREE.BufferGeometry, extra: THREE.BufferGeometry[]) => {
@@ -384,7 +385,7 @@ export function buildRouteLayer(track: Track, o: RouteLayerOptions) {
 
   const roadTex = asphaltTexture();
   roadTex.repeat.set(2, 1);
-  const road = new THREE.Mesh(ribbon(track, -ROAD_HALF, 0, ROAD_HALF, 0, 0, L), wettable(groundMat('#ffffff', 5, roadTex)));
+  const road = new THREE.Mesh(ribbon(track, -ROAD_HALF, 0, ROAD_HALF, 0, 0, L), weathering(wettable(groundMat('#ffffff', 5, roadTex)), 'ground', 34, 0.35));
   road.receiveShadow = true;
   group.add(road);
   const white = groundMat('#e9e6dc', 6);

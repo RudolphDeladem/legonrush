@@ -6,6 +6,7 @@ import { sfx } from '../audio';
 import { buildCoin, buildObstacle, buildRider, OBSTACLES, taxi, trotro, type BikeStyle, type ObstacleKind, type ObstacleSpec, type RiderLook, type RiderRig } from './models';
 import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
+import { Tufts } from './tufts';
 import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES, ROAD_HALF } from './world';
 import { buildingAt } from './campusmap';
 import { setNightLights } from './life';
@@ -253,6 +254,8 @@ export class Game {
   readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
   private sun = new THREE.DirectionalLight('#fff1d6', 2.6);
   private sky: THREE.Mesh;
+  /** grass tufts and wild flowers round the camera */
+  private tufts: Tufts;
   private hemi = new THREE.HemisphereLight('#cfe3ff', '#5a6b3a', 1.1);
   private sunOffset = new THREE.Vector3(-30, 45, 20);
   private cine = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
@@ -421,6 +424,8 @@ export class Game {
     this.scene.add(this.sun, this.sun.target);
 
     this.scene.add(buildCampus(), buildLandmarks());
+    this.tufts = new Tufts(lowEnd);
+    this.scene.add(this.tufts.group);
     this.setRoute(CAMPUS_LOOP);
     this.scene.add(this.dynamic);
 
@@ -443,6 +448,7 @@ export class Game {
     this.quality = q;
     this.renderer.shadowMap.enabled = q === 'high';
     this.sun.castShadow = q === 'high';
+    this.tufts.setLow(q === 'low');
     this.renderer.setPixelRatio(q === 'low' ? Math.min(devicePixelRatio, 1) : Math.min(devicePixelRatio, this.lowEnd ? 1.5 : 2));
     this.resize();
     // materials compiled with shadows must be rebuilt
@@ -980,6 +986,7 @@ export class Game {
       this.sun.position.set(f.x + this.sunOffset.x, this.sunOffset.y, f.z + this.sunOffset.z);
       this.sun.target.position.set(f.x, 0, f.z);
       this.wfx?.update(dt, cam);
+      this.tufts.update(cam.position.x, cam.position.z);
       this.renderer.render(this.scene, cam);
       return;
     }
@@ -1790,6 +1797,7 @@ export class Game {
     this.sun.position.set(here.x + this.sunOffset.x, this.sunOffset.y, here.z + this.sunOffset.z);
     this.sun.target.position.set(here.x, 0, here.z);
     this.wfx?.update(dt, cam);
+    this.tufts.update(cam.position.x, cam.position.z);
     this.renderer.render(this.scene, cam);
   }
   private camTarget = new THREE.Vector3();
