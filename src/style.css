@@ -464,3 +464,17 @@ i.desk-only { font-style: normal; }
 .content:not(.tab-home) { background: linear-gradient(180deg, rgba(10,16,32,0.55) 0%, rgba(10,16,32,0.9) 30%, rgba(10,16,32,0.97) 100%); }
 .vibe-room .select-wrap select, .vibe-room .select-wrap { width: 100%; min-width: 0; }
 .code-in::placeholder { letter-spacing: 0.04em; text-transform: none; font-weight: 600; }
+
+/* Explore's guided ride: the card that introduces a place when the ride stops there */
+.guide-card { position: absolute; left: 14px; right: 14px; bottom: calc(150px + var(--safe-b, 0px)); z-index: 6; max-height: 58vh; overflow-y: auto; text-align: left; background: rgba(255, 255, 255, 0.97); color: #10213f; border: 1px solid rgba(245, 197, 24, 0.7); border-radius: 18px; padding: 14px 16px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); animation: guide-in 0.35s ease-out; }
+.guide-card[hidden] { display: none; }
+.guide-card .kicker { color: #8a6a00; margin: 0; }
+.guide-card .gc-head { gap: 10px; align-items: center; margin: 4px 0 6px; }
+.guide-card .gc-head h2 { font-size: 22px; font-weight: 800; margin: 0; }
+.guide-card .kind-icon { font-size: 24px; width: 30px; text-align: center; }
+.guide-card p { margin: 0 0 8px; font-size: 15px; line-height: 1.4; }
+.guide-card ul { margin: 2px 0 10px; padding-left: 20px; font-size: 14px; line-height: 1.45; }
+.guide-card .gc-actions { gap: 8px; justify-content: flex-end; }
+.guide-card .btn-ghost { color: #10213f; border-color: rgba(16, 33, 63, 0.25); }
+@keyframes guide-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@media (min-width: 900px) { .guide-card { left: 50%; right: auto; transform: translateX(-50%); width: 480px; bottom: 170px; } @keyframes guide-in { from { opacity: 0; } to { opacity: 1; } } }

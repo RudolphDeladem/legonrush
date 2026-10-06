@@ -3,6 +3,7 @@ import { PLACES, directions, findPath, nodeXZ, placeByName, ROADS, type Place, t
 import { Track } from './track';
 import type { RouteLabel } from './world';
 import type { TimeOfDay } from './Game';
+import { GUIDE, guideFor, type GuideEntry } from '../data/guide';
 
 export type RouteKind = 'race' | 'explore';
 
@@ -158,6 +159,40 @@ const races = new Map<string, Route>();
 export function raceRoute(def: RaceDef) {
   if (!races.has(def.id)) races.set(def.id, routeThrough(def.stops.map(must), { id: def.id, name: def.name, kind: 'race', difficulty: def.difficulty, time: def.time })!);
   return races.get(def.id)!;
+}
+
+/** A place the guided Explore ride stops at, with what the guide says there. */
+export interface GuideStop {
+  /** ride distance where the rider stops */
+  d: number;
+  place: Place;
+  entry: GuideEntry;
+}
+
+/**
+ * Explore's guided ride: the places along the way the ride pauses at to introduce.
+ * The start, every tour stop and the destination when the guide knows them, plus guide
+ * places close to the road on the way, spaced out so the ride isn't stop-start.
+ */
+export function guideStops(route: Route): GuideStop[] {
+  const out: GuideStop[] = [];
+  const add = (place: Place, d: number) => {
+    const entry = guideFor(place.name);
+    if (entry && !out.some((s) => s.entry === entry)) out.push({ d: Math.max(2, Math.min(route.length - 2, d)), place, entry });
+  };
+  add(route.from, 2);
+  for (const s of route.steps) if (s.turn === 'stop') { const p = PLACES.find((q) => q.x === s.x && q.z === s.z); if (p) add(p, s.d); }
+  add(route.to, route.length);
+  for (const g of GUIDE) {
+    const place = placeByName(g.place);
+    if (!place || out.some((s) => s.entry === g)) continue;
+    const pr = route.track.project(place.x, place.z);
+    const d = pr.d - route.lead;
+    if (pr.dist > 80 || d < 30 || d > route.length - 30) continue;
+    if (out.some((s) => Math.abs(s.d - d) < 70)) continue;
+    add(place, d);
+  }
+  return out.sort((a, b) => a.d - b.d);
 }
 
 export { EVENTS, eventStatus, type EventDef } from '../data/events';

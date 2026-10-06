@@ -9,7 +9,7 @@ import './light.css';
 import { registerSW } from 'virtual:pwa-register';
 import { Game, type Action, type HudState } from './game/Game';
 import { BIKES, GARAGE_BIKES, HALLS, HALL_PLACE, bikeById, hallById, type BikeSpec } from './data/campus';
-import { CAMPUS_LOOP, EVENTS, RACES, TOUR_STOPS, eventStatus, exploreRoute, freshersTour, raceRoute, type EventDef, type RaceDef, type Route } from './game/routes';
+import { CAMPUS_LOOP, EVENTS, RACES, TOUR_STOPS, eventStatus, exploreRoute, freshersTour, guideStops, raceRoute, type EventDef, type RaceDef, type Route } from './game/routes';
 import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './game/rivals';
 import type { GhostRun, Rival } from './game/Game';
 import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
@@ -827,6 +827,8 @@ interface PlayOpts {
   eventPlay?: EventRide;
   /** Race Challenges: HUD panel, result recording, level field and buttons (features/challenges) */
   challengeRide?: ChallengeRide;
+  /** Explore's guided ride: very slow, stopping at places along the way to introduce them */
+  guided?: boolean;
 }
 
 interface LiveRide {
@@ -908,6 +910,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       <div class="turn-banner" id="turn" hidden><span class="turn-arrow" id="turnArrow"></span><div><b id="turnDist"></b><span id="turnText"></span></div></div>
       <div class="prompt" id="prompt"></div>
       <div class="tip" id="tip" hidden></div>
+      <div class="guide-card" id="guideCard" role="dialog" aria-live="polite" hidden></div>
       <div class="hud-bottom">
         ${brakes ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : '<span class="hud-slot"></span>'}
         <div class="speedo" id="speedo">
@@ -1361,6 +1364,9 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     game.onHud = () => {};
     game.onEnd = () => {};
     game.onAction = () => {};
+    game.onGuide = () => {};
+    game.tour = null;
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
     game.paused = false;
     clearInterval(stream);
     clearTimeout(tipTimer);
@@ -1369,6 +1375,39 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   }
 
   game.calm = lr?.kind === 'vibe' || (isExplore(route) && exploreOpts.calm);
+  // Explore's guided ride: walking pace, stopping at each place to introduce it
+  const guide = opts.guided && isExplore(route) && !lr ? guideStops(route) : [];
+  game.tour = guide.length ? { stops: guide.map((g) => ({ d: g.d, x: g.place.x, z: g.place.z })), speed: exploreOpts.mode === 'walk' ? 2.4 : 4 } : null;
+  if (game.tour) game.calm = true;
+  const guideCard = $('guideCard');
+  const canSpeak = 'speechSynthesis' in window;
+  const say = (text: string) => {
+    if (!canSpeak) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-GB';
+    u.rate = 0.95;
+    speechSynthesis.speak(u);
+  };
+  game.onGuide = (i) => {
+    guideCard.hidden = i === null;
+    if (i === null) { if (canSpeak) speechSynthesis.cancel(); return; }
+    const g = guide[i];
+    const [icon, label] = KIND_ICON[g.place.kind];
+    const where = i === 0 ? 'You start at' : i === guide.length - 1 && g.place === route.to ? 'You have arrived at' : 'Now passing';
+    guideCard.innerHTML = `
+      <p class="kicker">Stop ${i + 1} of ${guide.length} · ${esc(where)}</p>
+      <div class="row gc-head"><span class="kind-icon" title="${esc(label)}">${icon}</span><h2>${esc(g.entry.title)}</h2></div>
+      <p>${esc(g.entry.intro)}</p>
+      <p class="kicker">What students do here</p>
+      <ul>${g.entry.doHere.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+      <div class="row gc-actions">
+        ${canSpeak ? `<button class="btn btn-ghost btn-sm" id="gcSay">${icons.megaphone} Read aloud</button>` : ''}
+        <button class="btn btn-primary" id="gcGo">${i === guide.length - 1 && g.place === route.to ? 'Finish' : 'Continue riding'}</button>
+      </div>`;
+    guideCard.querySelector('#gcSay')?.addEventListener('click', () => say(`${g.entry.title}. ${g.entry.intro} What students do here: ${g.entry.doHere.join('. ')}.`));
+    guideCard.querySelector('#gcGo')!.addEventListener('click', () => game.continueTour());
+  };
   // auto graphics: drop to smooth mode once if this phone can't keep up
   game.watchSpeed = settings.graphics === 'auto' && !settings.slowDevice;
   game.onSlow = () => {
@@ -3469,8 +3508,8 @@ const KIND_ICON: Record<PlaceKind, [string, string]> = {
 
 // Explore options, remembered on this device
 const EXPLORE_KEY = 'legonrush.explore.v1';
-const exploreOpts: { mode: TravelMode; calm: boolean } = (() => {
-  try { return { mode: 'cycle', calm: true, ...JSON.parse(localStorage.getItem(EXPLORE_KEY) ?? '{}') }; } catch { return { mode: 'cycle', calm: true }; }
+const exploreOpts: { mode: TravelMode; calm: boolean; guide: boolean } = (() => {
+  try { return { mode: 'cycle', calm: true, guide: true, ...JSON.parse(localStorage.getItem(EXPLORE_KEY) ?? '{}') }; } catch { return { mode: 'cycle', calm: true, guide: true }; }
 })();
 const saveExploreOpts = () => { try { localStorage.setItem(EXPLORE_KEY, JSON.stringify(exploreOpts)); } catch { /* private mode */ } };
 
@@ -3564,7 +3603,7 @@ function explorePicker(fromName?: string, toName = '') {
         <button class="btn btn-link swap" id="swap" aria-label="Swap from and to">⇅ Swap</button>
         <div class="field picker"><label for="to">To</label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you need to be?"><ul class="suggest" id="toList" hidden></ul></div>
         <div class="chips">${POPULAR.filter((n) => placeByName(n)).map((n) => `<button class="chip" data-to="${esc(n)}">${esc(n)}</button>`).join('')}</div>
-        <div class="row options">${seg('mode', [['cycle', `${icons.bike} Cycle`], ['walk', `${icons.walk} Walk`]], exploreOpts.mode)}${seg('calm', [['1', 'Calm ride'], ['0', 'With traffic']], exploreOpts.calm ? '1' : '0')}</div>
+        <div class="row options">${seg('mode', [['cycle', `${icons.bike} Cycle`], ['walk', `${icons.walk} Walk`]], exploreOpts.mode)}${seg('guide', [['1', 'Guided tour'], ['0', 'Just ride']], exploreOpts.guide ? '1' : '0')}${seg('calm', [['1', 'Calm ride'], ['0', 'With traffic']], exploreOpts.calm ? '1' : '0')}</div>
         <div id="preview" class="stack"></div>
         <p class="muted small">${esc(ATTRIBUTION)}</p>
       </div>
@@ -3601,7 +3640,7 @@ function explorePicker(fromName?: string, toName = '') {
         <div class="stat"><b>${mins(route.length / 1.3)}</b><span>Walking</span></div>
         <div class="stat"><b>${mins(route.length / 4.5)}</b><span>Cycling</span></div>
       </div>
-      <button class="btn btn-primary" id="go">Ride there</button>
+      <button class="btn btn-primary" id="go">${exploreOpts.guide ? 'Start guided ride' : 'Ride there'}</button>
       <div class="two">
         <button class="btn btn-ghost" id="share">Share route</button>
         <a class="btn btn-ghost" id="gmaps" target="_blank" rel="noopener">Google Maps</a>
@@ -3611,7 +3650,7 @@ function explorePicker(fromName?: string, toName = '') {
       ${stepsList(route)}`;
     routeMap(preview.querySelector('canvas')!, route);
     fx.bindFavButton(preview, p);
-    preview.querySelector('#go')!.addEventListener('click', () => route && play(false, route));
+    preview.querySelector('#go')!.addEventListener('click', () => route && play(false, route, { guided: exploreOpts.guide }));
     const [fl, fg] = toLatLng(from.x, from.z), [tl, tg] = toLatLng(to.x, to.z);
     preview.querySelector<HTMLAnchorElement>('#gmaps')!.href =
       `https://www.google.com/maps/dir/?api=1&origin=${fl.toFixed(6)},${fg.toFixed(6)}&destination=${tl.toFixed(6)},${tg.toFixed(6)}&travelmode=${exploreOpts.mode === 'walk' ? 'walking' : 'bicycling'}`;
@@ -3674,6 +3713,12 @@ function explorePicker(fromName?: string, toName = '') {
     app.querySelectorAll('#mode [data-v]').forEach((b) => b.classList.toggle('on', b === el));
     update();
   });
+  on('#guide [data-v]', 'click', (_, el) => {
+    exploreOpts.guide = el.dataset.v === '1';
+    saveExploreOpts();
+    app.querySelectorAll('#guide [data-v]').forEach((b) => b.classList.toggle('on', b === el));
+    update();
+  });
   on('#calm [data-v]', 'click', (_, el) => {
     exploreOpts.calm = el.dataset.v === '1';
     saveExploreOpts();
@@ -3681,7 +3726,7 @@ function explorePicker(fromName?: string, toName = '') {
   });
   on('#back', 'click', () => home());
   onBack(() => home());
-  on('#tour', 'click', () => play(false, freshersTour()));
+  on('#tour', 'click', () => play(false, freshersTour(), { guided: exploreOpts.guide }));
   on('[data-campus]', 'click', () => campusSheet(() => explorePicker(fromName, toName)));
   update();
 }

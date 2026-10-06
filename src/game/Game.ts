@@ -335,6 +335,17 @@ export class Game {
   private lowEnd: boolean;
   /** no traffic or obstacles: for learning the way */
   calm = false;
+  /**
+   * Explore's guided ride: a slow, steady pace that rolls to a stop at each place in `stops`
+   * (ride distance d, map x/z) and waits there until continueTour().
+   */
+  tour: { stops: { d: number; x: number; z: number }[]; speed: number } | null = null;
+  /** the guided ride stopped at tour stop i (null: rolling again) */
+  onGuide: (i: number | null) => void = () => {};
+  private guideIdx = 0;
+  private guideWait = false;
+  /** 0..1: how far the camera has turned to look at the place the ride stopped at */
+  private guideLook = 0;
   onEnd: (r: RideEnd) => void = () => {};
   /** a helmet just saved the rider from a crash; how many are left */
   onHelmet: (left: number) => void = () => {};
@@ -803,6 +814,14 @@ export class Game {
     this.onAction(a);
   }
 
+  /** Guided ride: move on from the place it stopped at. */
+  continueTour() {
+    if (!this.guideWait) return;
+    this.guideWait = false;
+    this.guideIdx++;
+    this.onGuide(null);
+  }
+
   abort() {
     this.showcase();
   }
@@ -827,6 +846,8 @@ export class Game {
     this.d = this.x = this.y = this.vy = this.speed = this.boost = this.boostTime = this.coins = this.time = 0;
     this.slowTimer = this.endTimer = this.lean = this.shake = this.shield = 0;
     this.braking = false;
+    this.guideIdx = this.guideLook = 0;
+    this.guideWait = false;
     this.lane = 1;
     this.paused = false;
     this.rec = { step: GHOST_STEP, d: [], x: [] };
@@ -942,6 +963,7 @@ export class Game {
         target *= 0.6;
         this.slowTimer -= dt;
       }
+      if (this.tour) target = this.tour.speed;
       if (this.shield > 0) this.shield -= dt;
       if (this.honkCool > 0) this.honkCool -= dt;
       const accel = 4 + (this.bike?.acceleration ?? 3) * 1.6;
@@ -959,6 +981,19 @@ export class Game {
         const floor = 2.5;
         this.speed = Math.max(Math.min(this.speed, floor), this.speed - (this.brakeLevel > 1 ? 26 : 13) * dt);
       } else this.speed += Math.sign(target - this.speed) * Math.min(Math.abs(target - this.speed), accel * dt * (target < this.speed ? 2.5 : 1));
+      if (this.tour) {
+        // roll gently to a stop at the next place, then wait there
+        const stop = this.tour.stops[this.guideIdx];
+        if (this.guideWait) this.speed = 0;
+        else if (stop) {
+          const rem = stop.d - this.d;
+          if (rem <= 0.4) {
+            this.guideWait = true;
+            this.speed = 0;
+            this.onGuide(this.guideIdx);
+          } else this.speed = Math.min(this.speed, Math.sqrt(3 * rem) + 0.3);
+        }
+      }
     } else {
       // crashed or finished: coast to a stop
       this.speed = Math.max(0, this.speed - (this.phase === 'crashed' ? 30 : 10) * dt);
@@ -1644,7 +1679,7 @@ export class Game {
       const boosting = this.boostTime > 0;
       const back = boosting ? 7.2 : 6.2;
       const behind = this.pose(this.d - back, this.x * 0.6);
-      this.camTarget.set(behind.x, 3.1 + this.y * 0.4, behind.z);
+      this.camTarget.set(behind.x, 3.1 + this.y * 0.4 + this.guideLook * 1.4, behind.z);
       cam.position.lerp(this.camTarget, Math.min(1, dt * 8));
       if (this.shake > 0 && !this.reducedMotion) {
         cam.position.x += (Math.random() - 0.5) * this.shake;
@@ -1652,7 +1687,13 @@ export class Game {
         this.shake = Math.max(0, this.shake - dt);
       }
       const ahead = this.pose(this.d + 12, this.x * 0.8);
-      cam.lookAt(ahead.x, 1.1, ahead.z);
+      // guided ride: stopped at a place, the camera rises a little and turns to look at it
+      const stop = this.tour?.stops[this.guideIdx];
+      this.guideLook += ((this.guideWait ? 1 : 0) - this.guideLook) * Math.min(1, dt * 1.6);
+      if (stop && this.guideLook > 0.001) {
+        const k = this.guideLook * 0.75;
+        cam.lookAt(ahead.x + (stop.x - ahead.x) * k, 1.1 + 2.5 * k, ahead.z + (stop.z - ahead.z) * k);
+      } else cam.lookAt(ahead.x, 1.1, ahead.z);
       // the camera banks a little with the bike
       if (!this.reducedMotion) cam.rotateZ(this.lean * 0.18);
       const fovBase = innerWidth < innerHeight ? 72 : 60;
