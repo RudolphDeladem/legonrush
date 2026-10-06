@@ -34,7 +34,7 @@ export function challengesScreen(back: () => void = () => H().home('you')) {
   const allToday = MISSIONS.every((x) => day.claimed.includes(x.id));
   const nextBonus = STREAK_BONUS * Math.min(7, allToday ? streak : streak + 1);
   screen(`
-    <p class="kicker">${icons.target} Challenges</p>
+    <p class="kicker">${icons.target} Daily &amp; weekly goals</p>
     <h1 class="title">Daily &amp; weekly</h1>
     <div class="card fx-streak">
       <span class="fx-big-ico">${icons.flame}</span>

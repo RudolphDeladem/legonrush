@@ -404,3 +404,5 @@ select.cm-input { appearance: auto; }
   .cm-pv-stats b, .cm-crew-stats b, .cm-group-stats b { font-size: 16px; }
   .cm-group-stats span { font-size: 10.5px; }
 }
+/* no live connection: a grey dot, not a green one */
+.cm-pill.online.off .cm-dot { background: #9aa3b2; box-shadow: none; }

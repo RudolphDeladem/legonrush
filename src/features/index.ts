@@ -57,7 +57,7 @@ export function youLinksHtml(p: Profile) {
   const c = counts(p);
   const b = (id: string, icon: string, label: string, extra = '') => `<button class="fx-link" data-fx-open="${id}"><span class="fx-ico">${icon}</span><span>${label}</span>${extra}</button>`;
   return `<div class="fx-links">
-    ${b('challenges', icons.target, 'Challenges', c.ready ? `<em class="fx-dot">${c.ready}</em>` : '')}
+    ${b('challenges', icons.target, 'Daily goals', c.ready ? `<em class="fx-dot">${c.ready}</em>` : '')}
     ${b('badges', fx.medal, 'Badges', `<small>${c.badges}/${BADGES.length}</small>`)}
     ${b('missions', fx.box, 'Missions')}
     ${b('treasure', fx.chest, 'Treasure')}

@@ -54,7 +54,7 @@ export function render() {
     </header>
     <form class="cm-search" id="cmSearch"><span>${ci.search}</span><input id="cmSearchIn" type="search" maxlength="30" autocomplete="off" placeholder="Search riders by name or @username"></form>
     <div class="cm-strip">
-      <button class="cm-pill online" id="cmOnline"><i class="cm-dot"></i><span id="cmOnlineN">${onlineText()}</span><em>View</em></button>
+      <button class="cm-pill online${lobbyState() === 'on' ? '' : ' off'}" id="cmOnline"><i class="cm-dot"></i><span id="cmOnlineN">${onlineText()}</span><em>View</em></button>
       <button class="cm-pill status" id="cmStatus">${shown.length ? `${shown.map((x) => statusInfo(x)[1]).join('')}<span>${shown.map((x) => statusInfo(x)[2]).join(' · ')}${s.showStatus ? '' : ' (hidden)'}</span>` : s.statuses.includes('none') ? `${ci.moon}<span>Not looking</span>` : `${ci.plus}<span>Set your social status</span>`}<em>Edit</em></button>
     </div>
     <div class="cm-grid">
@@ -255,7 +255,7 @@ export function bind(root: HTMLElement) {
   };
   void load();
 
-  const stopOnline = H().watchOnline(() => { const n = $('#cmOnlineN'); if (n) n.innerHTML = onlineText(); });
+  const stopOnline = H().watchOnline(() => { const n = $('#cmOnlineN'); if (n) n.innerHTML = onlineText(); $('#cmOnline')?.classList.toggle('off', lobbyState() !== 'on'); });
   const stopLive = api.onLive((e) => { if (e.type === 'message' || e.type === 'notification') void load(); });
   return () => { alive = false; stopOnline(); stopLive(); };
 }

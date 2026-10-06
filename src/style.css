@@ -1,3 +1,6 @@
+/* anything marked hidden stays hidden, whatever display its class sets */
+[hidden] { display: none !important; }
+
 :root {
   --navy: #0a1020;
   --navy-2: #121a33;
