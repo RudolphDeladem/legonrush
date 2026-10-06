@@ -2,11 +2,18 @@
 import type { Profile, Settings } from '../state';
 import type { Route } from '../game/routes';
 import type { MissionRun } from './missions';
+import type { EventDef } from '../data/events';
+import type { EventRide } from './events/ride-hook';
+import type { TabId } from '../tabs/registry';
 import './features.css';
 
 export interface RideExtras {
   mission?: MissionRun;
   treasure?: { count: number; seed: number };
+  /** a daily timed event (Sunset Rush, Night Rush) this race counts for */
+  event?: EventDef;
+  /** an Events-tab activity riding along (features/events/play.ts) */
+  eventPlay?: EventRide;
 }
 
 export interface FeatureHost {
@@ -18,7 +25,7 @@ export interface FeatureHost {
   /** show the 3D campus behind menus */
   showcase: () => void;
   play: (route: Route, extras: RideExtras) => void;
-  home: (tab?: 'home' | 'ride' | 'race' | 'events' | 'social' | 'you') => void;
+  home: (tab?: TabId | 'ride' | 'race' | 'social') => void;
   explore: (from?: string, to?: string) => void;
   garage: () => void;
   share: (text: string, url: string, note: HTMLElement) => void;

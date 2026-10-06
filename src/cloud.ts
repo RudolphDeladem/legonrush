@@ -210,6 +210,13 @@ function mergeFeatures(local: Profile, remote: Profile) {
     missionBest,
     diamonds: Math.max(local.diamonds ?? 0, remote.diamonds ?? 0),
     items: maxEach(local.items ?? {}, remote.items ?? {}),
+    // Events system: everything joined, finished, stamped or claimed on either device
+    events: {
+      joined: maxEach(local.events?.joined, remote.events?.joined),
+      done: union(local.events?.done, remote.events?.done),
+      stamps: maxEach(local.events?.stamps, remote.events?.stamps),
+      claimed: union(local.events?.claimed, remote.events?.claimed),
+    },
   };
 }
 

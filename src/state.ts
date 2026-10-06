@@ -56,7 +56,23 @@ export interface Profile {
   missionBest: Record<string, number>;
   /** this week's treasure hunt */
   treasure: { week: string; found: number; claimed: boolean };
+  // ---- Events system (src/features/events) ----
+  /** events joined and finished, Event Passport stamps and collection rewards */
+  events: EventsProgress;
 }
+
+// ---- Events system (src/features/events) ----
+export interface EventsProgress {
+  /** event key -> when you joined it (ms) */
+  joined: Record<string, number>;
+  /** event keys whose reward has been paid */
+  done: string[];
+  /** Event Passport: stamp id (an event type) -> events of that type attended */
+  stamps: Record<string, number>;
+  /** passport collections whose reward has been paid */
+  claimed: string[];
+}
+export const newEventsProgress = (): EventsProgress => ({ joined: {}, done: [], stamps: {}, claimed: [] });
 
 export type Upgrade = 'speed' | 'grip' | 'boost';
 export interface Gear {
@@ -173,6 +189,7 @@ export function newProfile(): Profile {
     weekly: { id: '', n: {}, claimed: [] }, dailyStreak: { last: '', count: 0 }, stats: {}, badges: [], visited: [], favourites: [],
     missionBest: {}, treasure: { week: '', found: 0, claimed: false },
     diamonds: 0, items: {},
+    events: newEventsProgress(),
   };
 }
 
@@ -202,6 +219,7 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.dailyStreak = { ...d.dailyStreak, ...p.dailyStreak };
   p.treasure = { ...d.treasure, ...p.treasure };
   p.stats ??= {};
+  p.events = { ...newEventsProgress(), ...p.events };
   return p;
 }
 
