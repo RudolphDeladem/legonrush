@@ -256,6 +256,8 @@ export class Game {
 
   private phase: Phase = 'showcase';
   paused = false;
+  /** skip drawing the menu scene while a full-screen tab (the map) covers it */
+  sleep = false;
   /** tutorial: obstacles wait until the rider has tried every move */
   private holdSpawns = false;
 
@@ -597,6 +599,7 @@ export class Game {
 
   /** Idle camera orbiting the rider, used behind menus. */
   showcase() {
+    this.sleep = false;
     this.reset();
     this.phase = 'showcase';
     this.dressing = false;
@@ -860,6 +863,7 @@ export class Game {
   }
 
   private frame() {
+    if (this.sleep && this.phase === 'showcase') return;
     this.timer.update();
     const raw = this.timer.getDelta();
     const dt = Math.min(raw, 1 / 20);

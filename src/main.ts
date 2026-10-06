@@ -35,6 +35,9 @@ import * as community from './features/community';
 import './tabs';
 import type { EventRide } from './features/events/ride-hook';
 import { rememberRidePos } from './features/map/where';
+import { MAP_ROUTES } from './features/map/routes';
+import { passportCardHtml } from './features/events';
+import { privacyScreen } from './features/community/settings';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -1391,7 +1394,7 @@ const challengeLink = (route: Route, run: GhostRun, time: number) =>
 function routeById(id: string): Route | null {
   if (id === CAMPUS_LOOP.id) return CAMPUS_LOOP;
   const def = RACES.find((r) => r.id === id);
-  return def ? raceRoute(def) : null;
+  return def ? raceRoute(def) : MAP_ROUTES.find((r) => r.id === id)?.route() ?? null;
 }
 
 const hourText = (d: Date) => {
@@ -1925,6 +1928,7 @@ function home(next: Tab = 'home') {
   if (want === 'store' && !tabView('store')) return money.buyCoinsScreen();
   tab = want as TabId | 'ride';
   game.showcase();
+  game.sleep = !!(want !== 'home' && tabView(want as TabId)?.bare);
   applyLook();
   setStatus('menu');
   const p = profile;
@@ -2078,10 +2082,11 @@ function home(next: Tab = 'home') {
           <div class="stat"><b>${fmt(p.bestScore)}</b><span>Best score</span></div>
         </div>
         ${fx.youLinksHtml(p)}
+        ${passportCardHtml()}
         ${money.youMoneyHtml()}
         <button class="card selectable row" id="garage"><span class="hall-swatch" style="background:${bikeById(p.bike).color}"></span><span class="muted small">Bike</span><b>${bikeById(p.bike).name}</b><span class="grow"></span><span class="small">Garage ${icons.arrow}</span></button>
         <div class="two"><button class="btn btn-ghost" id="dress">Dress rider</button><button class="btn btn-ghost" id="edit">${p.guest ? 'Create account' : 'Edit details'}</button></div>
-        <button class="btn btn-ghost" id="settings">Settings</button>
+        <div class="two"><button class="btn btn-ghost" id="settings">Settings</button><button class="btn btn-ghost" id="privacy">Privacy &amp; safety</button></div>
         ${installPrompt ? '<button class="btn btn-ghost" id="install">Install app</button>' : ''}
         ${cloud.account
           ? `<div class="card stack" style="gap:8px"><div class="row"><b>Account</b><span class="grow"></span><span class="badge gold">Synced</span></div><p class="muted small">Signed in as ${esc(cloud.account.email)}. Your progress is saved to your account and follows you to any device.</p><button class="btn btn-ghost" id="signOut">Sign out</button></div>`
@@ -2127,6 +2132,7 @@ function home(next: Tab = 'home') {
   on('#exploreBtn', 'click', () => explorePicker());
   on('[data-race]', 'click', (_, el) => play(false, raceRoute(RACES.find((r) => r.id === el.dataset.race)!)));
   on('#settings', 'click', () => settingsScreen());
+  on('#privacy', 'click', () => privacyScreen(() => home('you')));
   on('#quick', 'click', () => quickMatch());
   on('#boards', 'click', () => boardScreen(CAMPUS_LOOP.id, () => home('race')));
   on('#hallBoard', 'click', () => boardScreen('halls', () => home('events')));
