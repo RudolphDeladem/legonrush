@@ -61,10 +61,17 @@ export async function chatWith(c: Card, from?: () => void) {
   openChat({ id, kind: 'dm', other: c, unread: 0, last_at: new Date().toISOString() }, from);
 }
 
-/** the chat itself */
+/** the chat itself, as its own screen */
 export function openChat(c: Chat, from: () => void = () => chatsScreen()) {
+  let stopChat = () => {};
+  screen(`<div class="cm-chat-host" id="cmChatHost"></div>`, () => { stopChat(); from(); }, 'cm-screen cm-chat-screen');
+  stopChat = mountChat(c, H().app.querySelector<HTMLElement>('#cmChatHost')!, () => { stopChat(); from(); });
+}
+
+/** draws a chat into `app` (a screen, or the right-hand pane of the Messages tab); returns a stop function */
+export function mountChat(c: Chat, app: HTMLElement, leaveChat: () => void): () => void {
   const title = c.kind === 'crew' ? c.crew?.name ?? 'Crew' : c.other?.name ?? 'Rider';
-  screen(`
+  app.innerHTML = `
     <div class="cm-chat-head">
       ${c.kind === 'crew' ? `<span class="cm-logo sm" style="--c:${esc(c.crew?.color ?? '#ffd21f')}">${CREW_LOGOS[c.crew?.logo ?? 'bike'] ?? ''}</span>` : avatar(c.other ?? { name: '?' }, 'sm')}
       <button class="cm-p-main" id="cmChatWho"><b>${esc(title)}</b><small>${c.kind === 'crew' ? `Crew chat · ${c.crew?.members ?? ''} members` : c.other?.username ? `@${esc(c.other.username)}` : 'Private chat'}</small></button>
@@ -76,8 +83,7 @@ export function openChat(c: Chat, from: () => void = () => chatsScreen()) {
       <button type="button" class="icon-btn cm-mini" id="cmEmojiBtn" aria-label="Emoji">${ci.smile}</button>
       <input id="cmSayIn" maxlength="500" autocomplete="off" placeholder="Message ${esc(title)}…">
       <button class="btn btn-primary btn-sm" aria-label="Send">${ci.send}</button>
-    </form>`, () => { stop(); clearInterval(poll); from(); }, 'cm-screen cm-chat-screen');
-  const app = H().app;
+    </form>`;
   const thread = app.querySelector<HTMLElement>('#cmThread')!;
   const input = app.querySelector<HTMLInputElement>('#cmSayIn')!;
   let msgs: Msg[] = [];
@@ -176,7 +182,8 @@ export function openChat(c: Chat, from: () => void = () => chatsScreen()) {
     if (c.kind === 'dm' && c.other) void openPerson(c.other.id, c.other);
     if (c.kind === 'crew' && c.crew) (await import('./crews')).openCrew(c.crew.id);
   });
-  app.querySelector('#cmChatMenu')!.addEventListener('click', () => chatMenu(c, () => { stop(); clearInterval(poll); from(); }));
+  app.querySelector('#cmChatMenu')!.addEventListener('click', () => chatMenu(c, () => { stop(); clearInterval(poll); leaveChat(); }));
+  return () => { stop(); clearInterval(poll); };
 }
 
 function chatMenu(c: Chat, leave: () => void) {

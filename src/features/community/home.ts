@@ -1,27 +1,36 @@
-// The Community tab: "Who is around me, who do I know, and who can I connect with?"
-// Organised like campus life: your hall, course and level, friends, riding buddies, crew, then
-// discovery (Find your people, People you may know), the feed, Vibe Ride, messages and crews.
-import * as live from '../../live';
+// The Community tab, in DELA's design: a hero over the campus photo, then four parts so the page
+// stays clean: Feed (Latest from Campus: news plus rider posts), Discover (riders online, your
+// circles, all riders), Messages (chats list and the open chat) and Leaderboard. It stands on its
+// own: nothing here links to Vibe Ride.
 import { icons } from '../../ui/icons';
 import { fx } from '../icons';
 import { H, esc, fmt } from '../host';
-import * as vb from '../vibe';
 import * as api from './api';
 import { known, remember, social, syncNow } from './local';
-import type { Card, Home, Notification } from './model';
-import { chatRow, chatsScreen, openChat } from './chat';
-import { bindCrews, crewCard, crewsScreen, createCrewScreen, openCrew } from './crews';
+import type { Card, Chat, Home, Notification } from './model';
+import { chatRow, chatsScreen, mountChat, openChat } from './chat';
+import { crewsScreen, openCrew } from './crews';
 import { datingScreen } from './dating';
 import { bindPosts, composer, feedScreen, postHtml } from './feed';
-import { badgesHtml, boardsScreen, checkSocialBadges, courseScreen, hallScreen } from './groups';
+import { NEWS_CATS, campusNews, isLiked, toggleLike, type News, type NewsCat } from './news';
+import { badgesHtml, boardTabsHtml, checkSocialBadges, courseScreen, fillBoard, hallScreen, type BoardTab } from './groups';
 import { friendsScreen, onlineScreen, openPerson, peopleScreen, type Category } from './people';
 import { lobbyState, onlineNow } from './presence';
 import { privacyScreen, statusSheet } from './settings';
-import { avatar, bindSignIn, ci, empty, hallName, loading, plural, problemBox, sheet, sheetHead, statusChips, statusInfo, timeAgo } from './ui';
+import { avatar, bindSignIn, ci, empty, hallName, handle, loading, plural, problemBox, sheet, sheetHead, statusChips, statusInfo, timeAgo, toast } from './ui';
 
 let last: Home | null = null;
 let lastFor = '';
 const here = () => H().home('social');
+
+type Part = 'feed' | 'discover' | 'messages' | 'leaderboard';
+const ui = { part: 'feed' as Part, cat: 'all' as NewsCat | 'all' | 'riders', chat: 0, chatFilter: 'all' as 'all' | 'dm' | 'crew', chatQ: '', board: 'riders' as BoardTab };
+const PARTS: [Part, string, string, string, string][] = [
+  ['feed', 'Feed', ci.edit, 'Find your people', 'Ride together. Compete together. Live campus together.'],
+  ['discover', 'Discover', ci.users, 'Discover', 'Find and connect with riders on campus.'],
+  ['messages', 'Messages', ci.chat, 'Messages', 'Chat with riders, hall mates, course mates and your crews.'],
+  ['leaderboard', 'Leaderboard', ci.trophy, 'Leaderboard', 'See who is leading across campus.'],
+];
 
 const FIND: [Category | 'dating', string, string, string][] = [
   ['friends_status', ci.users, 'Friends', 'Looking for friendship'],
@@ -31,127 +40,158 @@ const FIND: [Category | 'dating', string, string, string][] = [
   ['dating', ci.heart, 'Dating', '18+ and opted in'],
 ];
 
-const onlineText = () => {
-  const st = lobbyState();
-  return st === 'on' ? `<b>${fmt(onlineNow().length + 1)}</b> riders online` : st === 'off' ? 'Riders online unavailable' : 'Finding riders online…';
-};
+const photo = (n: string) => `${import.meta.env.BASE_URL}photos/${n}.webp`;
+const signInBox = (title: string, text: string) => `<div class="cm-signin"><b>${title}</b><p class="muted small">${text}</p><button class="btn btn-primary btn-sm" data-cm-signin>Sign in</button></div>`;
 
 export function render() {
-  const p = H().profile();
-  const s = social(p);
   const signed = api.signedIn();
   const h = signed && lastFor === api.myId() ? last : null;
-  const shown = s.statuses.filter((x) => x !== 'none');
-  return `<div class="cm">
-    <header class="cm-top">
-      <h1 class="title">Community</h1>
-      <div class="cm-top-acts">
+  const part = PARTS.find((x) => x[0] === ui.part)!;
+  return `<div class="cm cm2" id="cm2" style="--cm-banner:url('${photo('challenges-banner')}');--cm-banner-sm:url('${photo('challenges-banner-sm')}')">
+    <section class="cm-hero">
+      <div class="cm-hero-card">
+        <p class="cm-kick"><span>${ci.users}</span>Community</p>
+        <h1>${part[3]}</h1>
+        <p>${part[4]}</p>
+      </div>
+      <div class="cm-hero-acts">
         <button class="icon-btn" id="cmNotif" aria-label="Community notifications">${ci.bell}${h?.notifications ? `<i class="dot-badge">${h.notifications}</i>` : ''}</button>
-        <button class="icon-btn" id="cmMsgs" aria-label="Messages">${ci.chat}${h?.unread ? `<i class="dot-badge">${h.unread}</i>` : ''}</button>
         <button class="icon-btn" id="cmPrivacy" aria-label="Privacy and safety">${ci.shield}</button>
       </div>
-      <p class="muted cm-top-sub">Connect with riders. Find your people.</p>
-    </header>
-    <form class="cm-search" id="cmSearch"><span>${ci.search}</span><input id="cmSearchIn" type="search" maxlength="30" autocomplete="off" placeholder="Search riders by name or @username"></form>
-    <div class="cm-strip">
-      <button class="cm-pill online${lobbyState() === 'on' ? '' : ' off'}" id="cmOnline"><i class="cm-dot"></i><span id="cmOnlineN">${onlineText()}</span><em>View</em></button>
-      <button class="cm-pill status" id="cmStatus">${shown.length ? `${shown.map((x) => statusInfo(x)[1]).join('')}<span>${shown.map((x) => statusInfo(x)[2]).join(' · ')}${s.showStatus ? '' : ' (hidden)'}</span>` : s.statuses.includes('none') ? `${ci.moon}<span>Not looking</span>` : `${ci.plus}<span>Set your social status</span>`}<em>Edit</em></button>
-    </div>
-    <div class="cm-grid">
-      <div class="cm-col">
-        <section class="cm-card cm-circle" id="cmCircle">${circleHtml(h)}</section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${ci.sparkle} Find your people</h2></div>
-          <p class="muted small">Only riders who chose that kind of connection show up.</p>
-          <div class="cm-find">${FIND.map(([id, ico, t, x]) => `<button class="cm-find-t ${id}" data-find="${id}"><span>${ico}</span><b>${t}</b><small>${x}</small></button>`).join('')}</div>
-        </section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${ci.users} People you may know</h2>${signed ? '<button class="btn btn-link" id="cmMoreSuggest">View more</button>' : ''}</div>
-          <div id="cmSuggest" class="cm-suggest">${signed ? (h ? suggestHtml(h.suggest) : loading(2)) : signInBox('See people from your hall and course', 'Sign in to get suggestions, with the reason for each one.')}</div>
-        </section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${icons.bolt} Community feed</h2>${signed ? `<button class="btn btn-ghost btn-sm" id="cmPost">${ci.edit} Post</button><button class="btn btn-link" id="cmFeedAll">View all</button>` : ''}</div>
-          <div id="cmFeedPrev" class="cm-feed">${signed ? (h ? feedPrevHtml(h) : loading(2)) : signInBox('Wins, PBs and events from your people', 'Sign in to see the feed and react.')}</div>
-        </section>
-      </div>
-      <div class="cm-col">
-        <section class="cm-card cm-vibe">
-          <div class="cm-sec-head"><h2>${ci.heart} Vibe Ride</h2></div>
-          <p class="muted small">Ride together and enjoy the campus. Invites always need the other rider to accept.</p>
-          <p class="small cm-vibe-prefs">${esc(vb.prefsSummary(vb.loadPrefs(p)))}</p>
-          <div class="two"><button class="btn btn-primary" id="cmVibeFind">Find a rider</button><button class="btn btn-ghost" id="cmVibeNew">Private ride</button></div>
-          <form class="row cm-code" id="cmVibeCode"><input class="code-in" id="cmCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Got a code?"><button class="btn btn-ghost btn-sm">Join</button></form>
-        </section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${ci.chat} Messages</h2>${signed ? `<button class="btn btn-link" id="cmChatsAll">View all</button>` : ''}</div>
-          <div id="cmChatsPrev" class="cm-list">${signed ? (h ? chatsPrevHtml(h) : loading(2)) : signInBox('Chat with friends and your crew', 'Sign in to send messages.')}</div>
-        </section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${ci.shield} Crews</h2>${signed ? `<button class="btn btn-link" id="cmCrewsAll">Explore</button>` : ''}</div>
-          <div id="cmCrewsPrev" class="cm-list">${signed ? (h ? crewsPrevHtml(h) : loading(2)) : signInBox('Join a riding crew', 'Sign in to join or start a crew.')}</div>
-        </section>
-        <section class="cm-card cm-date-card-home">
-          <div class="cm-sec-head"><h2>${ci.heart} Dating</h2></div>
-          <p class="muted small">${s.dating.on ? `You're open to dating.${h?.matches ? ` ${plural(h.matches, 'connection')}.` : ''}` : 'Opt-in and 18+. Only people who switched it on see each other, and chat opens only when you both connect.'}</p>
-          <button class="btn btn-ghost" id="cmDating">${s.dating.on ? 'Discover' : 'Learn more'}</button>
-        </section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${ci.chart} Leaderboards</h2><button class="btn btn-link" id="cmBoards">View all</button></div>
-          <div class="cm-board-links">
-            <button data-board="riders">${icons.trophy}Top riders</button><button data-board="active">${icons.bike}Most active</button>
-            <button data-board="crews">${ci.shield}Top crews</button><button data-board="halls">${ci.hall}Halls</button>
-          </div>
-        </section>
-        <section class="cm-card">
-          <div class="cm-sec-head"><h2>${fx.medal} Social badges</h2></div>
-          <div class="cm-badges">${badgesHtml(p)}</div>
-        </section>
-      </div>
-    </div>
+    </section>
+    <nav class="cm-parts" role="tablist">${PARTS.map(([id, l, ico]) => `<button role="tab" class="${ui.part === id ? 'on' : ''}" data-part="${id}">${ico}<span>${l}</span>${id === 'messages' && h?.unread ? `<i class="dot-badge">${h.unread}</i>` : ''}</button>`).join('')}</nav>
+    <div id="cmPart">${partHtml(h)}</div>
   </div>`;
 }
 
-const signInBox = (title: string, text: string) => `<div class="cm-signin"><b>${title}</b><p class="muted small">${text}</p><button class="btn btn-primary btn-sm" data-cm-signin>Sign in</button></div>`;
+function partHtml(h: Home | null) {
+  if (ui.part === 'discover') return discoverHtml(h);
+  if (ui.part === 'messages') return messagesHtml(h);
+  if (ui.part === 'leaderboard') return leaderboardHtml();
+  return feedHtml(h);
+}
 
-function circleHtml(h: Home | null) {
+// ---------- Feed ----------
+
+function feedHtml(h: Home | null) {
+  const signed = api.signedIn();
+  const chip = (id: string, label: string) => `<button class="chip-btn${ui.cat === id ? ' on' : ''}" data-cat="${id}">${label}</button>`;
+  const news = ui.cat === 'riders' ? [] : campusNews().filter((n) => ui.cat === 'all' || n.cat === ui.cat);
+  const posts = ui.cat === 'all' || ui.cat === 'riders' ? h?.feed ?? [] : [];
+  // one list, newest first: news cards and rider posts
+  const items: [number, string][] = [
+    ...news.map((n) => [n.at, newsCard(n)] as [number, string]),
+    ...posts.map((x) => [new Date(x.at).getTime(), `<div class="cm-postwrap">${postHtml(x)}</div>`] as [number, string]),
+  ].sort((a, b) => b[0] - a[0]);
+  return `<section class="cm-panel">
+    <div class="cm-feed-top">
+      <div class="grow"><h2 class="cm-h">Latest from Campus</h2><p class="muted">News, stories and updates from the LEGONRUSH community.</p></div>
+      <button class="btn btn-primary cm-create" id="cmPost">${ci.plus} Create Post</button>
+    </div>
+    <div class="cm-chips cm-scroll">${chip('all', 'All')}${NEWS_CATS.map(([id, l]) => chip(id, l)).join('')}${chip('riders', 'Riders')}</div>
+    <div class="cm-news" id="cmFeedList">
+      ${items.map(([, x]) => x).join('')}
+      ${ui.cat === 'riders' && !signed ? signInBox('Posts from riders', 'Sign in to see what riders share, react and post your own.') : ''}
+      ${ui.cat === 'riders' && signed && !posts.length ? (h ? empty(icons.bolt, 'No rider posts yet', 'Wins, personal bests and rides from your people show up here. Post something to start it off.') : loading(2)) : ''}
+    </div>
+    ${signed ? `<button class="btn btn-link" id="cmFeedAll">See all rider posts ${icons.arrow}</button>` : ''}
+  </section>`;
+}
+
+function newsCard(n: News) {
+  const on = isLiked(n.id);
+  return `<article class="cm-newscard" data-news="${esc(n.id)}">
+    <button class="cm-news-img" data-news-go style="background-image:url('${photo(n.photo)}')" aria-label="${esc(n.goLabel)}"></button>
+    <div class="cm-news-body">
+      <span class="cm-tag t-${n.cat}">${NEWS_CATS.find(([c]) => c === n.cat)![1]}</span>
+      <button class="cm-news-title" data-news-go>${esc(n.title)}</button>
+      <p>${esc(n.text)}</p>
+      <div class="cm-news-foot">
+        <span class="cm-news-by"><span class="cm-lr">LR</span>${esc(n.author)} · ${esc(n.when ?? timeAgo(n.at))}</span>
+        <span class="grow"></span>
+        <button class="cm-like${on ? ' on' : ''}" data-like aria-pressed="${on}" aria-label="Like">${ci.heart}</button>
+        <button class="cm-share" data-share aria-label="Share">${ci.send}</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+// ---------- Discover ----------
+
+const onlineText = () => {
+  const st = lobbyState();
+  return st === 'on' ? `${fmt(onlineNow().length)} online now` : st === 'off' ? 'Online riders unavailable' : 'Finding riders online…';
+};
+
+function discoverHtml(h: Home | null) {
   const p = H().profile();
   const s = social(p);
-  const row = (id: string, ico: string, label: string, value: string, sub: string, disabled = false) =>
-    `<button class="cm-circle-row" data-circle="${id}" ${disabled ? 'disabled' : ''}><span class="cm-ci">${ico}</span><span class="cm-p-main"><small>${label}</small><b>${value}</b></span><span class="cm-circle-n">${sub}</span>${disabled ? '' : icons.arrow}</button>`;
-  const crew = h?.crew;
-  return `<div class="cm-sec-head"><h2>Your Campus Circle</h2></div>
-    ${row('hall', ci.hall, 'Your hall', p.hall !== 'none' ? esc(hallName(p.hall)) : 'No hall chosen', h ? plural(h.hall.members, 'member') : '', p.hall === 'none')}
-    ${row('course', ci.grad, 'Your course', p.department ? esc(p.department) : 'Add your programme', h?.course ? plural(h.course.members, 'member') : '', !p.department)}
-    ${s.level ? row('level', ci.book, 'Your level', `Level ${esc(s.level)}`, h?.level ? plural(h.level.members, 'rider') : '') : ''}
-    ${row('friends', ci.users, 'Your friends', h ? plural(h.friends, 'friend') : api.signedIn() ? '…' : 'Sign in to add friends', h?.requests ? `<em class="cm-count">${h.requests} new</em>` : h ? `${h.followers} followers` : '')}
-    ${row('buddies', ci.bike, 'Your riding buddies', h ? plural(h.buddies, 'rider') : `${social(p).counts.rodeWith.length} ridden with`, '')}
-    ${row('crew', ci.shield, 'Your crew', crew ? esc(crew.name) : 'Join or start a crew', crew ? plural(crew.members, 'member') : '')}`;
+  const signed = api.signedIn();
+  const shown = s.statuses.filter((x) => x !== 'none');
+  const online = onlineNow().slice(0, 12);
+  const circle = (id: string, ico: string, label: string, sub: string) => `<button class="cm-circ" data-circle="${id}"><span class="cm-circ-ico">${ico}</span><span class="grow"><b>${label}</b><small>${sub}</small></span><span class="cm-circ-go">${icons.arrow}</span></button>`;
+  return `<form class="cm-search" id="cmSearch"><span>${ci.search}</span><input id="cmSearchIn" type="search" maxlength="30" autocomplete="off" placeholder="Search riders by name or @username"><button class="cm-status-btn" type="button" id="cmStatus" title="Your social status">${shown.length ? shown.map((x) => statusInfo(x)[1]).join('') : ci.plus}<span>${shown.length ? 'Status' : 'Set status'}</span></button></form>
+    <section class="cm-panel">
+      <div class="cm-sec-top"><h2 class="cm-h">Riders Online <small class="cm-live"><i class="cm-dot"></i><span id="cmOnlineN">${onlineText()}</span></small></h2><button class="cm-all" id="cmOnline">View all ${icons.arrow}</button></div>
+      ${online.length ? `<div class="cm-rail" id="cmOnlineRail">${online.map((o) => `<button class="cm-rider" data-online="${esc(o.key)}">${avatar({ name: o.state.name, hall: o.state.hall }, 'lg', true)}<b>${esc(o.state.name)}</b><small>${esc(hallName(o.state.hall) || o.state.department || `Level ${o.state.level}`)}</small><span class="cm-rider-chip">${o.state.place ? `${ci.pin} ${esc(String(o.state.place))}` : `${ci.bike} Level ${o.state.level}`}</span></button>`).join('')}</div>` : `<p class="muted small cm-quiet">No one else is online right now. Riders who are on campus show up here.</p>`}
+    </section>
+    <section class="cm-panel">
+      <div class="cm-sec-top"><div><h2 class="cm-h">Your Circles</h2><p class="muted small">Find people with similar interests.</p></div></div>
+      <div class="cm-circs">
+        ${circle('hall', ci.hall, 'Hall Mates', p.hall !== 'none' ? (h ? plural(h.hall.members, 'member') : esc(hallName(p.hall))) : 'Choose your hall')}
+        ${circle('course', ci.grad, 'Course Mates', p.department ? (h?.course ? plural(h.course.members, 'member') : esc(p.department)) : 'Add your programme')}
+        ${circle('buddies', ci.bike, 'Riding Buddies', h ? plural(h.buddies, 'rider') : `${s.counts.rodeWith.length} ridden with`)}
+        ${circle('crew', ci.shield, 'Crews', h?.crew ? esc(h.crew.name) : h ? `${plural(h.crews.length, 'crew')} on campus` : 'Join or start one')}
+        ${circle('friends', ci.users, 'Friends', h ? `${plural(h.friends, 'friend')}${h.requests ? ` · ${h.requests} new` : ''}` : signed ? '…' : 'Sign in to add friends')}
+      </div>
+      <div class="cm-find">${FIND.map(([id, ico, t, x]) => `<button class="cm-find-t ${id}" data-find="${id}"><span>${ico}</span><b>${t}</b><small>${x}</small></button>`).join('')}</div>
+    </section>
+    <section class="cm-panel">
+      <div class="cm-sec-top"><h2 class="cm-h">All Riders <small class="muted">People from your hall, course and rides</small></h2>${signed ? `<button class="cm-all" id="cmMoreSuggest">View all ${icons.arrow}</button>` : ''}</div>
+      <div id="cmSuggest" class="cm-riders">${signed ? (h ? suggestHtml(h.suggest) : loading(2)) : signInBox('Find riders from your hall and course', 'Sign in to see suggestions, with the reason for each one, and add friends.')}</div>
+    </section>`;
 }
 
 function suggestHtml(list: Card[]) {
   if (!list.length) return empty(ci.users, 'No suggestions yet', 'As riders from your hall and course join and choose to be found, they show up here with the reason why.');
   const on = new Set(onlineNow().map((o) => o.key));
-  return list.slice(0, 8).map((c) => `<button class="cm-sug" data-sug="${esc(c.id)}">
-    ${avatar(c, 'md', on.has(c.id))}
-    <b>${esc(c.username ? `@${c.username}` : c.name)}</b>
-    <small>${esc(hallName(c.hall) || c.course || (c.level ? `Level ${c.level}` : ''))}</small>
-    ${statusChips(c.statuses, 1)}
-    ${c.reason ? `<span class="cm-why-chip">${esc(c.reason)}</span>` : ''}
-  </button>`).join('');
+  return list.slice(0, 12).map((c) => `<div class="cm-rcard">
+    <button class="cm-rcard-who" data-sug="${esc(c.id)}">${avatar(c, 'md', on.has(c.id))}<span><b>${esc(c.name)}</b><small>${esc(c.course || hallName(c.hall) || (c.level ? `Level ${c.level}` : ''))}</small>${c.reason ? `<em>${esc(c.reason)}</em>` : statusChips(c.statuses, 1)}</span></button>
+    <button class="cm-add" data-add="${esc(c.id)}"${c.rel === 'sent' ? ' disabled' : ''}>${c.rel === 'friend' ? `${ci.userCheck} Friends` : c.rel === 'sent' ? `${ci.userClock} Sent` : `${ci.userPlus} Add`}</button>
+  </div>`).join('');
 }
 
-function feedPrevHtml(h: Home) {
-  return h.feed.length ? h.feed.slice(0, 3).map((x) => postHtml(x)).join('') : empty(icons.bolt, 'Your feed is quiet', 'Wins, personal bests and events from friends, people you follow and your hall show up here. Share something to get it going.');
-}
+// ---------- Messages ----------
 
-function chatsPrevHtml(h: Home) {
-  return h.chats.length ? h.chats.slice(0, 3).map(chatRow).join('') : `<p class="muted small">No messages yet. Open a rider's profile and tap Message.</p>`;
+function messagesHtml(h: Home | null) {
+  if (!api.signedIn()) return `<section class="cm-panel">${signInBox('Chat with riders, hall mates and your crew', 'Sign in to send messages. Who can message you follows your privacy settings.')}</section>`;
+  const f = (id: typeof ui.chatFilter, l: string) => `<button class="chip-btn${ui.chatFilter === id ? ' on' : ''}" data-cf="${id}">${l}</button>`;
+  return `<section class="cm-msgs">
+    <div class="cm-panel cm-msgs-list">
+      <div class="cm-sec-top"><h2 class="cm-h">Messages</h2><button class="icon-btn cm-new" id="cmNewChat" aria-label="New message">${ci.edit}</button></div>
+      <div class="cm-chips">${f('all', 'All')}${f('dm', 'Direct')}${f('crew', 'Crews')}</div>
+      <label class="cm-search sm"><span>${ci.search}</span><input id="cmChatQ" type="search" autocomplete="off" placeholder="Search conversations…" value="${esc(ui.chatQ)}"></label>
+      <div id="cmChatList" class="cm-list">${h ? chatListHtml(h.chats) : loading(4)}</div>
+    </div>
+    <div class="cm-panel cm-msgs-pane" id="cmPane">${h && current(h) ? '' : `<div class="cm-pane-empty">${ci.chat}<b>Your messages</b><p class="muted small">Pick a chat on the left, or open a rider's profile and tap Message.</p></div>`}</div>
+  </section>`;
 }
+const chatTitle = (c: Chat) => (c.kind === 'crew' ? c.crew?.name ?? 'Crew' : handle(c.other ?? { name: 'Rider' }));
+function chatListHtml(chats: Chat[]) {
+  const q = ui.chatQ.trim().toLowerCase();
+  const list = chats.filter((c) => (ui.chatFilter === 'all' || c.kind === ui.chatFilter) && (!q || `${chatTitle(c)} ${c.other?.name ?? ''} ${c.last?.text ?? ''}`.toLowerCase().includes(q)));
+  if (!chats.length) return empty(ci.chat, 'No messages yet', "Find someone in Discover, open their profile and tap Message.", '<button class="btn btn-primary btn-sm" data-part="discover">Find people</button>');
+  return list.length ? list.map((c) => chatRow(c).replace('class="cm-chat-row', `class="cm-chat-row${c.id === ui.chat ? ' sel' : ''}`)).join('') : `<p class="muted small cm-quiet">No chats match.</p>`;
+}
+const current = (h: Home) => h.chats.find((c) => c.id === ui.chat) ?? null;
+const wide = () => matchMedia('(min-width: 900px)').matches;
 
-function crewsPrevHtml(h: Home) {
-  const mine = h.crew ? `${crewCard(h.crew)}` : `<div class="cm-cta">${ci.shield}<span><b>Start a crew</b><small>Your own riding group, chat and leaderboard.</small></span><button class="btn btn-primary btn-sm" id="cmCrewNew">Create</button></div>`;
-  const others = h.crews.filter((c) => c.id !== h.crew?.id).slice(0, h.crew ? 2 : 3);
-  return mine + (others.length ? `<b class="cm-label">Popular on campus</b>${others.map(crewCard).join('')}` : '');
+// ---------- Leaderboard ----------
+
+function leaderboardHtml() {
+  const p = H().profile();
+  return `<section class="cm-panel">${boardTabsHtml(ui.board)}<div id="cmBoard" class="cm-board"></div></section>
+    <section class="cm-panel"><div class="cm-sec-top"><h2 class="cm-h">Social badges</h2></div><div class="cm-badges">${badgesHtml(p)}</div></section>`;
 }
 
 // ---------- binding ----------
@@ -159,68 +199,128 @@ function crewsPrevHtml(h: Home) {
 export function bind(root: HTMLElement) {
   const p = H().profile();
   let alive = true;
+  let stopChat = () => {};
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => root.querySelector<T>(sel);
-  bindSignIn(root);
   checkSocialBadges(p);
+  const redraw = () => {
+    const el = $('#cm2');
+    if (!el) return;
+    stopChat();
+    stopChat = () => {};
+    el.outerHTML = render();
+    wire();
+  };
 
-  $('#cmSearch')!.addEventListener('submit', (e) => { e.preventDefault(); peopleScreen('search', here, $<HTMLInputElement>('#cmSearchIn')!.value.trim()); });
-  let st = 0;
-  $('#cmSearchIn')!.addEventListener('input', (e) => {
-    clearTimeout(st);
-    const v = (e.target as HTMLInputElement).value.trim();
-    if (v.replace(/^@/, '').length >= 2) st = window.setTimeout(() => peopleScreen('search', here, v), 700);
-  });
-  $('#cmOnline')!.addEventListener('click', () => onlineScreen(here));
-  $('#cmStatus')!.addEventListener('click', () => statusSheet(here));
-  $('#cmPrivacy')!.addEventListener('click', () => privacyScreen(here));
-  $('#cmNotif')!.addEventListener('click', () => notificationsSheet());
-  $('#cmMsgs')!.addEventListener('click', () => (api.signedIn() ? chatsScreen(here) : H().signIn()));
-  root.querySelectorAll<HTMLElement>('[data-find]').forEach((b) => b.addEventListener('click', () => {
-    const id = b.dataset.find!;
-    if (!api.signedIn()) return H().signIn();
-    if (id === 'dating') datingScreen(here); else peopleScreen(id as Category, here);
-  }));
-  $('#cmMoreSuggest')?.addEventListener('click', () => peopleScreen('suggest', here));
-  $('#cmPost')?.addEventListener('click', () => composer(here));
-  $('#cmFeedAll')?.addEventListener('click', () => feedScreen('home', here));
-  $('#cmChatsAll')?.addEventListener('click', () => chatsScreen(here));
-  $('#cmCrewsAll')?.addEventListener('click', () => crewsScreen(here));
-  $('#cmDating')!.addEventListener('click', () => datingScreen(here));
-  $('#cmBoards')!.addEventListener('click', () => boardsScreen('riders', here));
-  root.querySelectorAll<HTMLElement>('[data-board]').forEach((b) => b.addEventListener('click', () => boardsScreen(b.dataset.board as 'riders', here)));
-  $('#cmVibeFind')!.addEventListener('click', () => H().vibe.setup());
-  $('#cmVibeNew')!.addEventListener('click', () => H().vibe.room(live.newCode(), true));
-  $('#cmVibeCode')!.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const code = ($<HTMLInputElement>('#cmCode')!.value || '').trim().toUpperCase();
-    if (/^[A-Z0-9]{6}$/.test(code)) H().vibe.room(code, false);
-  });
+  const wire = () => {
+    bindSignIn(root);
+    $('#cmNotif')?.addEventListener('click', () => notificationsSheet());
+    $('#cmPrivacy')?.addEventListener('click', () => privacyScreen(here));
+    root.querySelectorAll<HTMLElement>('[data-part]').forEach((b) => b.addEventListener('click', () => { ui.part = b.dataset.part as Part; redraw(); }));
+    if (ui.part === 'feed') wireFeed();
+    if (ui.part === 'discover') wireDiscover();
+    if (ui.part === 'messages') wireMessages();
+    if (ui.part === 'leaderboard') wireBoard();
+  };
 
-  const bindData = () => {
+  const wireFeed = () => {
+    root.querySelectorAll<HTMLElement>('[data-cat]').forEach((b) => b.addEventListener('click', () => { ui.cat = b.dataset.cat as typeof ui.cat; redraw(); }));
+    $('#cmPost')?.addEventListener('click', () => (api.signedIn() ? composer(here) : H().signIn()));
+    $('#cmFeedAll')?.addEventListener('click', () => feedScreen('home', here));
+    const news = campusNews();
+    root.querySelectorAll<HTMLElement>('[data-news]').forEach((card) => {
+      const n = news.find((x) => x.id === card.dataset.news);
+      if (!n) return;
+      card.querySelectorAll('[data-news-go]').forEach((b) => b.addEventListener('click', () => n.go()));
+      card.querySelector('[data-like]')!.addEventListener('click', (e) => { const on = toggleLike(n.id); const b = e.currentTarget as HTMLElement; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+      card.querySelector('[data-share]')!.addEventListener('click', () => {
+        const note = document.createElement('span');
+        H().share(`${n.title} · LEGONRUSH`, `${location.origin}${import.meta.env.BASE_URL}play/`, note);
+      });
+    });
+    const list = $('#cmFeedList');
+    if (list && last) bindPosts(list, last.feed, () => void load());
+  };
+
+  const wireDiscover = () => {
+    $('#cmSearch')?.addEventListener('submit', (e) => { e.preventDefault(); peopleScreen('search', here, $<HTMLInputElement>('#cmSearchIn')!.value.trim()); });
+    let st = 0;
+    $('#cmSearchIn')?.addEventListener('input', (e) => {
+      clearTimeout(st);
+      const v = (e.target as HTMLInputElement).value.trim();
+      if (v.replace(/^@/, '').length >= 2) st = window.setTimeout(() => peopleScreen('search', here, v), 900);
+    });
+    $('#cmStatus')?.addEventListener('click', () => statusSheet(here));
+    $('#cmOnline')?.addEventListener('click', () => onlineScreen(here));
+    root.querySelectorAll<HTMLElement>('[data-online]').forEach((b) => b.addEventListener('click', () => {
+      const o = onlineNow().find((x) => x.key === b.dataset.online);
+      if (o) void openPerson(o.key, { id: o.key, name: o.state.name, hall: o.state.hall, level: o.state.level });
+    }));
+    root.querySelectorAll<HTMLElement>('[data-find]').forEach((b) => b.addEventListener('click', () => {
+      const id = b.dataset.find!;
+      if (!api.signedIn()) return H().signIn();
+      if (id === 'dating') datingScreen(here); else peopleScreen(id as Category, here);
+    }));
     root.querySelectorAll<HTMLElement>('[data-circle]').forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.circle;
-      if (id === 'hall') hallScreen(p.hall, here);
-      if (id === 'course') courseScreen(p.department, here);
-      if (id === 'level') peopleScreen('level', here);
+      if (id === 'hall') { if (p.hall !== 'none') hallScreen(p.hall, here); else H().signIn(); }
+      if (id === 'course') { if (p.department) courseScreen(p.department, here); else H().signIn(); }
       if (id === 'friends') { if (api.signedIn()) friendsScreen(last?.requests ? 'requests' : 'friends', here); else H().signIn(); }
       if (id === 'buddies') { if (api.signedIn()) peopleScreen('buddies', here); else H().signIn(); }
       if (id === 'crew') { if (!api.signedIn()) H().signIn(); else if (last?.crew) openCrew(last.crew.id, here); else crewsScreen(here); }
     }));
+    $('#cmMoreSuggest')?.addEventListener('click', () => peopleScreen('suggest', here));
     root.querySelectorAll<HTMLElement>('[data-sug]').forEach((b) => b.addEventListener('click', () => {
       const c = last?.suggest.find((x) => x.id === b.dataset.sug);
       void openPerson(b.dataset.sug!, c, () => void load());
     }));
-    const feed = $('#cmFeedPrev');
-    if (feed && last) bindPosts(feed, last.feed, () => void load());
-    root.querySelectorAll<HTMLElement>('#cmChatsPrev [data-chat]').forEach((el) => el.addEventListener('click', () => {
-      const c = last?.chats.find((x) => x.id === Number(el.dataset.chat));
-      if (c) openChat(c, here);
+    root.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((b) => b.addEventListener('click', async () => {
+      const c = last?.suggest.find((x) => x.id === b.dataset.add);
+      if (!c || c.rel === 'friend') return void (c && openPerson(c.id, c));
+      b.disabled = true;
+      try {
+        const r = await api.friend(c.id, c.rel === 'received' ? 'accept' : 'request');
+        c.rel = r === 'friend' ? 'friend' : 'sent';
+        b.innerHTML = r === 'friend' ? `${ci.userCheck} Friends` : `${ci.userClock} Sent`;
+      } catch (e) { b.disabled = false; toast(esc(api.problemText(e))); }
     }));
-    const crews = $('#cmCrewsPrev');
-    if (crews) bindCrews(crews);
-    $('#cmCrewNew')?.addEventListener('click', () => void createCrewScreen(here));
   };
-  bindData();
+
+  const showChat = (c: Chat) => {
+    ui.chat = c.id;
+    if (!wide()) return openChat(c, here);
+    root.querySelectorAll('.cm-chat-row').forEach((r) => r.classList.toggle('sel', (r as HTMLElement).dataset.chat === String(c.id)));
+    const pane = $('#cmPane');
+    if (!pane) return;
+    stopChat();
+    stopChat = mountChat(c, pane, () => { ui.chat = 0; void load(); });
+    c.unread = 0;
+  };
+  const wireMessages = () => {
+    const list = $('#cmChatList');
+    const fillList = () => {
+      if (!list || !last) return;
+      list.innerHTML = chatListHtml(last.chats);
+      list.querySelectorAll<HTMLElement>('[data-chat]').forEach((el) => el.addEventListener('click', () => { const c = last?.chats.find((x) => x.id === Number(el.dataset.chat)); if (c) showChat(c); }));
+      list.querySelectorAll<HTMLElement>('[data-part]').forEach((b) => b.addEventListener('click', () => { ui.part = 'discover'; redraw(); }));
+    };
+    fillList();
+    root.querySelectorAll<HTMLElement>('[data-cf]').forEach((b) => b.addEventListener('click', () => {
+      ui.chatFilter = b.dataset.cf as typeof ui.chatFilter;
+      root.querySelectorAll('[data-cf]').forEach((x) => x.classList.toggle('on', x === b));
+      fillList();
+    }));
+    $('#cmChatQ')?.addEventListener('input', (e) => { ui.chatQ = (e.target as HTMLInputElement).value; fillList(); });
+    $('#cmNewChat')?.addEventListener('click', () => friendsScreen('friends', here));
+    const c = last && current(last);
+    if (c && wide()) showChat(c);
+    else if (last?.chats.length && wide() && !ui.chat) showChat(last.chats[0]);
+  };
+
+  const wireBoard = () => {
+    root.querySelectorAll<HTMLElement>('[data-b]').forEach((x) => x.addEventListener('click', () => { ui.board = x.dataset.b as BoardTab; redraw(); }));
+    const box = $('#cmBoard');
+    if (box) fillBoard(box, ui.board, redraw);
+  };
 
   const load = async () => {
     if (!api.signedIn()) return;
@@ -228,36 +328,39 @@ export function bind(root: HTMLElement) {
     try {
       const h = await api.home();
       if (!alive) return;
+      const firstChat = !last && ui.part === 'messages';
       last = h;
       lastFor = api.myId();
-      // who your friends and connections are, for live privacy checks (Vibe Ride invites, map pins)
+      // who your friends and connections are, for live privacy checks (map pins)
       remember({ requests: h.requests, crew: h.crew?.id ?? null, friends: h.friend_ids ?? known().friends, matches: h.match_ids ?? known().matches });
-      $('#cmCircle')!.innerHTML = circleHtml(h);
-      $('#cmSuggest')!.innerHTML = suggestHtml(h.suggest);
-      $('#cmFeedPrev')!.innerHTML = feedPrevHtml(h);
-      $('#cmChatsPrev')!.innerHTML = chatsPrevHtml(h);
-      $('#cmCrewsPrev')!.innerHTML = crewsPrevHtml(h);
-      $('#cmNotif')!.innerHTML = `${ci.bell}${h.notifications ? `<i class="dot-badge">${h.notifications}</i>` : ''}`;
-      $('#cmMsgs')!.innerHTML = `${ci.chat}${h.unread ? `<i class="dot-badge">${h.unread}</i>` : ''}`;
-      bindData();
       checkSocialBadges(p);
-      const badges = $('.cm-badges');
-      if (badges) badges.innerHTML = badgesHtml(p);
+      // the open chat keeps running; everything else redraws with the fresh data
+      if (ui.part === 'messages' && !firstChat && $('#cmPane .cm-thread')) {
+        const list = $('#cmChatList');
+        if (list) { list.innerHTML = chatListHtml(h.chats); list.querySelectorAll<HTMLElement>('[data-chat]').forEach((el) => el.addEventListener('click', () => { const c = h.chats.find((x) => x.id === Number(el.dataset.chat)); if (c) showChat(c); })); }
+        return;
+      }
+      redraw();
     } catch (e) {
       if (!alive) return;
-      for (const id of ['#cmSuggest', '#cmFeedPrev', '#cmChatsPrev', '#cmCrewsPrev']) {
+      for (const id of ['#cmSuggest', '#cmChatList']) {
         const box = $(id);
-        if (box) box.innerHTML = id === '#cmSuggest' ? problemBox(e, 'cmHomeRetry') : `<p class="muted small">${esc(api.problemText(e))}</p>`;
+        if (box) box.innerHTML = problemBox(e, 'cmHomeRetry');
       }
       bindSignIn(root);
       $('#cmHomeRetry')?.addEventListener('click', () => void load());
     }
   };
+  wire();
   void load();
 
-  const stopOnline = H().watchOnline(() => { const n = $('#cmOnlineN'); if (n) n.innerHTML = onlineText(); $('#cmOnline')?.classList.toggle('off', lobbyState() !== 'on'); });
-  const stopLive = api.onLive((e) => { if (e.type === 'message' || e.type === 'notification') void load(); });
-  return () => { alive = false; stopOnline(); stopLive(); };
+  const stopOnline = H().watchOnline(() => {
+    if (ui.part !== 'discover') return;
+    const n = $('#cmOnlineN');
+    if (n) n.textContent = onlineText();
+  });
+  const stopLive = api.onLive((e) => { if (e.type === 'notification' || e.type === 'message') void load(); });
+  return () => { alive = false; stopChat(); stopOnline(); stopLive(); };
 }
 
 // ---------- notifications ----------

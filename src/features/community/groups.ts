@@ -121,7 +121,7 @@ async function fillGroup(kind: 'hall' | 'course', ref: string, again: () => void
 
 // ---------- leaderboards ----------
 
-type BoardTab = api.BoardKind | 'crews' | 'halls' | 'depts';
+export type BoardTab = api.BoardKind | 'crews' | 'halls' | 'depts';
 const BOARDS: [BoardTab, string, string, string, (v: number) => string][] = [
   ['riders', 'Top riders', icons.trophy, 'Most XP from racing and riding.', (v) => `${fmt(v)} XP`],
   ['active', 'Most active', icons.bike, 'Most kilometres in the last 7 days.', (v) => `${fmt(v)} km`],
@@ -143,7 +143,17 @@ export function boardsScreen(tab: BoardTab = 'riders', from: () => void = back) 
     <div id="cmBoard" class="cm-board">${loading(5)}</div>`, from, 'cm-screen');
   const app = H().app;
   app.querySelectorAll<HTMLElement>('[data-b]').forEach((x) => x.addEventListener('click', () => boardsScreen(x.dataset.b as BoardTab, from)));
-  const box = app.querySelector<HTMLElement>('#cmBoard')!;
+  fillBoard(app.querySelector<HTMLElement>('#cmBoard')!, tab, () => boardsScreen(tab, from));
+}
+
+/** the board tabs as chips, and the line about the chosen board (for the Community tab's Leaderboard) */
+export const boardTabsHtml = (tab: BoardTab) => `<div class="cm-chips cm-scroll cm-board-tabs">${BOARDS.map(([id, l, ico]) => `<button class="chip-btn${id === tab ? ' on' : ''}" data-b="${id}">${ico} ${l}</button>`).join('')}</div>
+  <p class="muted small">${BOARDS.find((x) => x[0] === tab)![3]}</p>`;
+
+/** fills box with one leaderboard */
+export function fillBoard(box: HTMLElement, tab: BoardTab, again: () => void) {
+  const b = BOARDS.find((x) => x[0] === tab)!;
+  box.innerHTML = loading(5);
   const p = H().profile();
   void (async () => {
     try {
@@ -157,7 +167,7 @@ export function boardsScreen(tab: BoardTab = 'riders', from: () => void = back) 
         box.innerHTML = list.length ? boardRows(list, b[4]) : empty(ci.hall, 'No rides this week yet', 'Ride for your hall to put it on the board.');
         if (tab === 'halls') box.querySelectorAll<HTMLElement>('[data-row]').forEach((el) => el.addEventListener('click', () => {
           const h = HALLS.find((x) => x.name === el.dataset.row);
-          if (h) hallScreen(h.id, () => boardsScreen(tab, from));
+          if (h) hallScreen(h.id, again);
         }));
         return;
       }
@@ -173,7 +183,7 @@ export function boardsScreen(tab: BoardTab = 'riders', from: () => void = back) 
     } catch (e) {
       box.innerHTML = problemBox(e, 'cmRetry');
       bindSignIn(box);
-      box.querySelector('#cmRetry')?.addEventListener('click', () => boardsScreen(tab, from));
+      box.querySelector('#cmRetry')?.addEventListener('click', again);
     }
   })();
 }
@@ -183,7 +193,7 @@ export function boardsScreen(tab: BoardTab = 'riders', from: () => void = back) 
 interface SocialBadge { id: string; icon: string; title: string; text: string; goal: number; got: (p: Profile) => number; soon?: string }
 export const SOCIAL_BADGES: SocialBadge[] = [
   { id: 'social-first', icon: ci.userPlus, title: 'First connection', text: 'Make your first friend.', goal: 1, got: () => known().friends.length },
-  { id: 'social-buddies', icon: ci.bike, title: 'Riding buddies', text: 'Vibe Ride with 10 different riders.', goal: 10, got: (p) => social(p).counts.rodeWith.length },
+  { id: 'social-buddies', icon: ci.bike, title: 'Riding buddies', text: 'Ride with 10 different riders.', goal: 10, got: (p) => social(p).counts.rodeWith.length },
   { id: 'social-butterfly', icon: ci.party, title: 'Social butterfly', text: 'Attend 10 events.', goal: 10, got: (p) => social(p).counts.events },
   { id: 'social-connector', icon: ci.globe, title: 'Campus connector', text: 'Interact with 50 different riders.', goal: 50, got: (p) => social(p).counts.met.length },
   { id: 'social-crew', icon: ci.shield, title: 'Crew champion', text: 'Win 10 crew challenges.', goal: 10, got: (p) => (p.stats as Record<string, number>).crewWins ?? 0, soon: 'Crew challenges are coming with Challenges.' },
