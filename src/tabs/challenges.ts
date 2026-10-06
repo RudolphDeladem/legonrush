@@ -107,12 +107,12 @@ function render() {
     </div>
     <div class="chx-own">
       <span class="chx-own-ico">${icons.flag}</span>
-      <span class="grow"><b>Your own challenge</b><small>Pick a route, set the rules, invite riders, schedule it. Make it open, code-only or invite-only, and set the maximum riders.</small></span>
+      <span class="grow"><b>Your own challenge</b><small>Pick a route, set the rules, invite riders, schedule it.</small></span>
       <span class="chx-own-act">
         <button class="btn btn-primary" id="chxCreate" ${short ? 'disabled' : ''}>${icons.plus} Create challenge</button>
         <small>Creation fee ${icons.coin} ${fmt(cfg.creationFee)} Rush Coins${short ? ` · you have ${fmt(p.coins)}` : ''}</small>
+        <button class="chx-own-code" id="chxCode">${icons.key} Have a code? Join a private challenge</button>
       </span>
-      <button class="chx-own-code" id="chxCode">${icons.key} Have a code or link? Join a private challenge ${icons.arrow}</button>
     </div>
     ${invites || next ? `<div class="chx-pulse" role="status">
       ${invites ? `<button data-mine="invites">${icons.mail}<b>${invites}</b> invitation${invites === 1 ? '' : 's'} waiting</button>` : ''}
@@ -142,7 +142,10 @@ const grid = (list: Challenge[], now: number) => `<div class="chx-tiles">${list.
 const viewAll = (attrs: string) => `<button class="chx-all" ${attrs}>View all ${icons.arrow}</button>`;
 
 function results(now: number) {
-  const list = sorted(visible(now).filter((c) => matches(c, now)), now);
+  // finished ones only when asked for; the official schedule repeats daily, so each one shows once (the next)
+  const hits = sorted(visible(now).filter((c) => matches(c, now) && (ui.f.status.length > 0 || !['ended', 'cancelled'].includes(phaseOf(c, now)))), now);
+  const seen = new Set<string>();
+  const list = hits.filter((c) => { if (!c.official) return true; const k = allDayTrial(c) ? c.name : `${c.name}|${c.route}`; if (seen.has(k)) return false; seen.add(k); return true; });
   const sortSel = `<label class="chx-sort">Sort <select id="chxSort">${([['soon', 'Starting soon'], ['players', 'Most players'], ['prize', 'Highest prize'], ['popular', 'Most popular'], ['new', 'Recently created']] as [Sort, string][]).map(([v, n]) => `<option value="${v}"${ui.sort === v ? ' selected' : ''}>${n}</option>`).join('')}</select></label>`;
   const code = /^LR-?[A-Z0-9]{4,6}$/i.test(ui.q.trim()) ? `<button class="btn btn-ghost btn-sm" data-findcode>${icons.key} Look up code ${esc(ui.q.trim().toUpperCase())}</button>` : '';
   return `<div class="chx-results-top"><b>${list.length} challenge${list.length === 1 ? '' : 's'}</b>${code}<span class="grow"></span>${sortSel}<button class="btn btn-link btn-sm" data-clear>Clear</button></div>
