@@ -19,7 +19,10 @@ import * as srv from './cloud';
 import { HALL_PLACE, hallById } from '../../data/campus';
 import { placeByName } from '../../game/campusmap';
 import { buildHangout, type Act, type Person } from '../life/world';
-import { crowdNow, skyNow, venueById, type Theme, type Venue } from '../life/venues';
+import { crowdNow, freeNow, menuOf, showNow, skyNow, venueById, type MenuItem, type Theme, type Venue } from '../life/venues';
+import { grant, spend } from '../inventory';
+import { GAMES, playGame, type GameId } from './games';
+import type { PartyStyle } from '../../audio';
 import { chatBack, introFor, lineFor, QUICK_FLIRT, QUICK_SAY, replyTo } from '../life/bots';
 
 const DEVICE_KEY = 'legonrush.device.v1';
@@ -42,13 +45,33 @@ const EMOTES: { id: Emote; label: string; icon: string }[] = [
   { id: 'laugh', label: 'Laugh', icon: icons.smile },
   { id: 'heart', label: 'Heart', icon: icons.heart },
 ];
-type Ask = 'hi' | 'highfive' | 'dance' | 'photo' | 'heart';
+type Ask = 'hi' | 'highfive' | 'dance' | 'photo' | 'heart' | 'kiss';
 const ASKS: { id: Ask; label: string; icon: string; did: string; adult?: boolean }[] = [
   { id: 'hi', label: 'Say hi', icon: icons.hand, did: 'said hi' },
   { id: 'highfive', label: 'High five', icon: icons.highfive, did: 'high-fived' },
   { id: 'dance', label: 'Dance together', icon: icons.dance, did: 'danced together' },
   { id: 'photo', label: 'Take a photo together', icon: icons.camera, did: 'took a photo together' },
   { id: 'heart', label: 'Send a heart', icon: icons.heart, did: 'shared a heart', adult: true },
+  { id: 'kiss', label: 'Kiss', icon: icons.heartFill, did: 'shared a kiss', adult: true },
+];
+
+// once-a-day things per place: the free sponsored food, the giveaway, the mini-game prize
+const DAILY_KEY = 'legonrush.life.daily.v1';
+const today = () => new Date().toDateString();
+const dailyDone = (k: string) => { try { return JSON.parse(localStorage.getItem(DAILY_KEY) || '{}')[k] === today(); } catch { return false; } };
+const dailySet = (k: string) => {
+  try {
+    const all = JSON.parse(localStorage.getItem(DAILY_KEY) || '{}') as Record<string, string>;
+    for (const x of Object.keys(all)) if (all[x] !== today()) delete all[x];
+    all[k] = today();
+    localStorage.setItem(DAILY_KEY, JSON.stringify(all));
+  } catch { /* blocked */ }
+};
+const GENRES: { id: PartyStyle; label: string; line: string }[] = [
+  { id: 'afrobeats', label: 'Afrobeats', line: 'Afrobeats coming up!' },
+  { id: 'amapiano', label: 'Amapiano', line: 'Amapiano! Log drum, let’s go!' },
+  { id: 'highlife', label: 'Highlife', line: 'A highlife classic for the old souls!' },
+  { id: 'chill', label: 'Chill vibes', line: 'Slowing it down a bit. Enjoy.' },
 ];
 
 interface PeerState { name: string; adult: boolean; since: number }
@@ -70,16 +93,19 @@ function venueOf(e: CampusEvent): Venue {
   if (e.key.startsWith('life:')) { const v = venueById(e.key.slice(5), hallId); if (v) return v; }
   const theme: Theme = e.type === 'hall' ? 'hall' : ['party', 'festival', 'seasonal', 'special'].includes(e.type) ? 'jam' : e.place === 'Night Market' ? 'market' : 'square';
   const hall = Object.entries(HALL_PLACE).find(([, pl]) => pl === e.place)?.[0];
-  const n = Math.max(10, Math.min(30, (e.joinedCount ?? 0) + 12));
+  const n = Math.max(24, Math.min(90, (e.joinedCount ?? 0) * 2 + 30));
+  const big = ['party', 'festival', 'seasonal', 'special'].includes(e.type);
   return {
     id: e.key, name: e.name, place: placeByName(e.place) ? e.place : 'Athletic Oval', theme,
     style: theme === 'jam' ? 'amapiano' : theme === 'square' ? 'highlife' : 'afrobeats',
     blurb: e.blurb, things: [], peak: [0, 24], crowd: [n, n], cover: e.cover, horn: theme === 'jam',
     color: theme === 'hall' ? hallById(hall ?? H().profile().hall).color : undefined,
+    // special events: the food is on the host
+    sponsor: big ? { by: e.host || 'the host', item: theme === 'jam' ? 'burger' : 'jollof', hours: [0, 24] } : undefined,
   };
 }
 
-const ACT_LABEL: Partial<Record<Act, string>> = { dance: 'Dancing', sit: 'Sitting', eat: 'Eating', chat: 'Chatting', photo: 'Taking photos', pose: 'Posing', dj: 'On the decks', vendor: 'Selling food' };
+const ACT_LABEL: Partial<Record<Act, string>> = { dance: 'Dancing', sit: 'Sitting', eat: 'Eating', chat: 'Chatting', photo: 'Taking photos', pose: 'Posing', dj: 'On the decks', vendor: 'Selling food', sing: 'On stage', crew: 'On stage' };
 
 export function spaceScreen(e: CampusEvent, back: () => void) {
   const h = H();
@@ -101,13 +127,16 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
 
   // ---------- the place ----------
   const sky = skyNow();
-  const world = buildHangout(venue, { name: p.name, hall: hallById(p.hall).short, skin: p.look.skin, shirt: p.look.jersey || hallById(p.hall).color, female: p.gender === 'female' }, crowdNow(venue), sky === 'night');
+  const show = showNow(venue);
+  const world = buildHangout(venue, { name: p.name, hall: hallById(p.hall).short, skin: p.look.skin, shirt: p.look.jersey || hallById(p.hall).color, female: p.gender === 'female' }, crowdNow(venue), sky === 'night', show);
+  let style: PartyStyle = ['acoustic', 'poetry', 'movie', 'comedy'].includes(show.kind) ? 'chill' : show.kind === 'live' ? 'highlife' : venue.style;
+  const menu = menuOf(venue);
+  const free = freeNow(venue);
   h.showcase();
   h.world.enter(world);
   h.world.time(sky);
   unlockAudio();
-  startParty(venue.style, { people: world.count(), horn: venue.horn });
-  const hasFood = venue.theme === 'market' || venue.theme === 'hall' || venue.theme === 'jam';
+  startParty(style, { people: world.count(), horn: venue.horn });
 
   h.app.innerHTML = `
     <div class="life fade-in">
@@ -118,18 +147,22 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
         <span class="life-here"><i class="ev-dot"></i><span id="lifeHere"></span></span>
         <button class="life-round on" id="evMusic" aria-label="Music">${icons.music}<span class="ev-eq on" id="evEq" aria-hidden="true"><i></i><i></i><i></i></span></button>
       </div>
+      <div class="life-pills">
+        <button class="life-pill stage" id="lifeStage"><i>${show.emoji}</i><span><small>Now on stage</small><b>${esc(show.who)} · ${esc(show.label)}</b></span></button>
+        ${free ? `<button class="life-pill free" id="lifeFree"><i>${free.item.emoji}</i><span><small>Free food</small><b>${esc(free.item.name)} by ${esc(free.by)}</b></span></button>` : ''}
+      </div>
       <div class="ev-floats life-floats" id="evFloats"></div>
+      <button class="life-near" id="lifeNear" hidden></button>
       <p class="life-toast" id="lifeToast"${first ? '' : ' hidden'}>${first ? `${icons.stamp} Passport stamped${rewardText(first) ? ` · ${esc(rewardText(first))}` : ''}` : ''}</p>
       <p class="life-hint" id="lifeHint">Tap the ground to walk. Tap anyone to say hi, or tap Meet. Drag to look around.</p>
       <div class="life-acts">
         <button data-act="meet">${icons.users}<span>Meet</span></button>
         <button data-act="dance">${icons.dance}<span>Dance</span></button>
-        <button data-act="wave">${icons.hand}<span>Wave</span></button>
-        <button data-act="sit">${icons.seat}<span>Sit</span></button>
-        ${hasFood ? `<button data-act="eat">${icons.food}<span>Eat</span></button>` : ''}
+        <button data-act="food">${icons.food}<span>Food</span></button>
+        <button data-act="stage">${icons.music}<span>Stage</span></button>
         <button data-act="photo">${icons.camera}<span>Photo</span></button>
         <button data-panel="chat">${icons.chat}<span>Chat</span><i class="life-badge" id="lifeUnread" hidden></i></button>
-        <button data-panel="people">${icons.users}<span>People</span></button>
+        <button data-act="more">${icons.grid}<span>More</span></button>
       </div>
       <div class="life-panel light-ui" id="lifePanel" hidden>
         <div class="row life-panel-h"><div class="seg" id="lifeTabs"><button data-tab="chat" class="on">Chat</button><button data-tab="people">People here</button></div><span class="grow"></span><button class="btn btn-link" id="lifeClose" aria-label="Close">${icons.close}</button></div>
@@ -243,8 +276,9 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     floatEmote(kind, `You & ${nameOf(other)}`);
     note(`You and ${nameOf(other)} ${k.did}.`);
     if (kind === 'dance') world.doAct('dance');
+    else if (kind === 'kiss') { world.me.gesture = 'kiss'; world.me.gestureT = 1.6; }
     else world.doAct('wave');
-    world.peerGesture(other, kind === 'highfive' ? 'highfive' : 'wave');
+    world.peerGesture(other, kind === 'highfive' ? 'highfive' : kind === 'kiss' ? 'kiss' : 'wave');
     if (kind === 'photo') setTimeout(takePhoto, 900);
     sfx.coin();
   }
@@ -262,17 +296,24 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
   function botSheet(b: Person) {
     const ov = document.createElement('div');
     ov.className = 'overlay sheet-overlay fade-in';
-    const staff = b.act === 'vendor' || b.act === 'dj';
+    const staff = b.act === 'vendor' || b.act === 'dj' || b.act === 'sing' || b.act === 'crew';
     ov.innerHTML = `<div class="sheet light-ui ev-person-sheet">
       <div class="row"><span class="ev-person big" style="--c:${colorOf(b.key)}"><i>${initial(b.name)}</i></span><div class="grow"><h2 class="title" style="font-size:24px;margin:0">${esc(b.name)}</h2><small class="muted">${esc([b.hall, ACT_LABEL[b.act]].filter(Boolean).join(' · '))}</small></div><button class="btn btn-link" data-close>${icons.close}</button></div>
-      ${staff ? `<p class="muted small">${b.act === 'dj' ? 'Running the music tonight.' : 'Serving food. Tap Eat to get something.'}</p>` : ''}
-      ${staff ? '' : `<div class="row" style="gap:8px"><button class="btn btn-primary btn-sm grow" data-talk="chat">${icons.chat} Talk to ${esc(b.name.split(' ')[0])}</button>${adult ? `<button class="btn btn-ghost btn-sm" data-talk="flirt">${icons.heart} Flirt</button>` : ''}</div>`}
-      <div class="ev-asks">${ASKS.filter((a) => !a.adult).map((a) => `<button class="ev-emote" data-ask="${a.id}">${a.icon}<span>${a.label}</span></button>`).join('')}</div>
+      ${staff ? `<p class="muted small">${b.act === 'vendor' ? 'Serving food and drinks.' : 'On stage right now.'}</p><button class="btn btn-primary" data-staff>${b.act === 'vendor' ? `${icons.food} See the menu` : `${icons.music} Request a song`}</button>` : `<div class="ev-asks life-inter">
+        <button class="ev-emote" data-ask="hi">${icons.hand}<span>Wave</span></button>
+        <button class="ev-emote" data-talk="chat">${icons.chat}<span>Talk</span></button>
+        <button class="ev-emote" data-ask="dance">${icons.dance}<span>Dance together</span></button>
+        <button class="ev-emote" data-ask="photo">${icons.camera}<span>Take photo</span></button>
+        <button class="ev-emote" data-ask="highfive">${icons.highfive}<span>High five</span></button>
+        ${adult ? `<button class="ev-emote" data-talk="flirt">${icons.heart}<span>Flirt</span></button><button class="ev-emote" data-ask="kiss">${icons.heartFill}<span>Kiss</span></button>` : ''}
+      </div>
+      <p class="muted small">${adult ? `A kiss only happens if ${esc(b.name.split(' ')[0])} says yes.` : 'Be friendly. Flirting is for riders 18 and over.'}</p>`}
     </div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', (ev) => {
       const t = ev.target as HTMLElement;
       if (t === ov || t.closest('[data-close]')) return ov.remove();
+      if (t.closest('[data-staff]')) { ov.remove(); return b.act === 'vendor' ? foodSheet() : stageSheet(); }
       const talk = t.closest<HTMLElement>('[data-talk]')?.dataset.talk;
       if (talk) {
         ov.remove();
@@ -280,23 +321,24 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
         partner = b;
         lastMeet = Date.now();
         openPanel('chat');
-        if (talk === 'flirt') send(QUICK_FLIRT[(Math.random() * QUICK_FLIRT.length) | 0]);
+        if (talk === 'flirt') { void world.askBot(b, 'flirt'); send(QUICK_FLIRT[(Math.random() * QUICK_FLIRT.length) | 0]); }
         else setTimeout(() => { if (!gone) botSays(b, introFor(b, venue.theme, Math.random)); }, 1400);
         return;
       }
       const a = t.closest<HTMLElement>('[data-ask]')?.dataset.ask as Ask | undefined;
-      if (!a) return;
+      if (!a || (ASKS.find((x) => x.id === a)?.adult && !adult)) return;
       ov.remove();
       partner = b;
-      toast(`${icons.hand} Asking ${esc(b.name.split(' ')[0])}…`, 1800);
+      toast(`${a === 'kiss' ? icons.heart : icons.hand} Asking ${esc(b.name.split(' ')[0])}…`, 1800);
       void world.askBot(b, a).then((yes) => {
         if (gone) return;
-        if (!yes) return toast(`${esc(b.name.split(' ')[0])} said maybe later`);
+        if (!yes) return toast(a === 'kiss' ? `${esc(b.name.split(' ')[0])} wants to take it slow. Keep talking!` : `${esc(b.name.split(' ')[0])} said maybe later`);
         const k = ASKS.find((x) => x.id === a)!;
         floatEmote(a, `You & ${b.name.split(' ')[0]}`);
         toast(`${k.icon} You and ${esc(b.name.split(' ')[0])} ${k.did}`);
         sfx.coin();
         if (a === 'photo') setTimeout(takePhoto, 1600);
+        if (a === 'kiss') setTimeout(() => { if (!gone) for (let i = 0; i < 3; i++) setTimeout(() => floatEmote('heart', ''), i * 250); }, 900);
       });
     });
   }
@@ -311,8 +353,8 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     const canHeart = adult && !!them?.state.adult;
     ov.innerHTML = `<div class="sheet light-ui ev-person-sheet">
       <div class="row"><span class="ev-person big" style="--c:${colorOf(k)}"><i>${initial(name)}</i></span><h2 class="title" style="font-size:24px">${esc(name)}</h2><span class="grow"></span><button class="btn btn-link" data-close>${icons.close}</button></div>
-      ${them ? `<div class="ev-asks">${ASKS.filter((a) => !a.adult || canHeart).map((a) => `<button class="ev-emote" data-ask="${a.id}">${a.icon}<span>${a.label}</span></button>`).join('')}</div>
-      <p class="muted small">${esc(name)} gets a request and chooses to accept or decline.${adult ? '' : ' Hearts are for riders 18 and over.'}</p>` : `<p class="muted small">${esc(name)} has left.</p>`}
+      ${them ? `<div class="ev-asks"><button class="ev-emote" data-talkto>${icons.chat}<span>Talk</span></button>${ASKS.filter((a) => !a.adult || canHeart).map((a) => `<button class="ev-emote" data-ask="${a.id}">${a.icon}<span>${a.label}</span></button>`).join('')}</div>
+      <p class="muted small">${esc(name)} gets a request and chooses to accept or decline.${adult ? '' : ' Hearts and kisses are for riders 18 and over.'}</p>` : `<p class="muted small">${esc(name)} has left.</p>`}
       <div class="two"><button class="btn btn-ghost" data-act="mute">${isMuted ? 'Unmute' : 'Mute'}</button><button class="btn btn-ghost vx-danger" data-act="block">${icons.lock} Block</button></div>
       <b class="small">Report ${esc(name)}</b>
       <div class="ev-reasons">${REPORT_REASONS.map((r) => `<button class="chip" data-reason="${esc(r)}">${esc(r)}</button>`).join('')}</div>
@@ -324,6 +366,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
       if (t === ov || t.closest('[data-close]')) return close();
       const a = t.closest<HTMLElement>('[data-ask]');
       if (a) { close(); ask(k, a.dataset.ask as Ask); return; }
+      if (t.closest('[data-talkto]')) { close(); openPanel('chat'); input.value = `@${name.split(' ')[0]} `; input.focus(); return; }
       const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
       if (act === 'mute') { setMuted(isMuted ? muted().filter((x) => x !== k) : [...muted(), k]); close(); drawLog(); return; }
       if (act === 'block') { block(k, name); world.setPeer(k, name, null); close(); drawPeople(); drawLog(); note(`You blocked ${name}. You won't see them again.`); return; }
@@ -491,16 +534,160 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
   addEventListener('keyup', keyUp);
 
   // ---------- buttons ----------
-  h.app.querySelectorAll<HTMLElement>('[data-act]').forEach((b) => b.addEventListener('click', () => {
-    const a = b.dataset.act as 'dance' | 'wave' | 'sit' | 'eat' | 'photo' | 'meet';
+  $('.life-acts')!.querySelectorAll<HTMLElement>('[data-act]').forEach((b) => b.addEventListener('click', () => doAct(b.dataset.act!)));
+  function doAct(a: string) {
     if (a === 'photo') return takePhoto();
-    if (a === 'meet') { meet(true); return; }
+    if (a === 'meet') return meet(true);
+    if (a === 'food') return foodSheet();
+    if (a === 'stage') return stageSheet();
+    if (a === 'more') return moreSheet();
+    if (a === 'people') return openPanel('people');
+    if (a === 'games') return gamesSheet();
+    if (a === 'giveaway') return giveaway();
     if (a === 'dance' && world.me.act === 'dance') { world.doAct('stop'); return; }
+    if (a !== 'dance' && a !== 'wave' && a !== 'sit') return;
     world.doAct(a);
     if (a === 'wave') ch?.send('emote', { k: me, name: p.name, e: 'wave' });
-    if (a === 'eat') toast(`${icons.food} Getting something to eat…`);
     buzz(8);
-  }));
+  }
+  $('#lifeStage')!.addEventListener('click', () => stageSheet());
+  $('#lifeFree')?.addEventListener('click', () => foodSheet());
+
+  // ---------- sheets ----------
+  function sheet(html: string, cls = '') {
+    const ov = document.createElement('div');
+    ov.className = 'overlay sheet-overlay fade-in';
+    ov.innerHTML = `<div class="sheet light-ui life-sheet ${cls}">${html}</div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', (ev) => { const t = ev.target as HTMLElement; if (t === ov || t.closest('[data-close]')) ov.remove(); });
+    return ov;
+  }
+  const head = (title: string, sub = '') => `<div class="row"><div class="grow"><h2 class="title" style="font-size:24px;margin:0">${title}</h2>${sub ? `<small class="muted">${sub}</small>` : ''}</div><button class="btn btn-link" data-close aria-label="Close">${icons.close}</button></div>`;
+
+  // food and drinks: pay in Rush Coins, or free while a sponsor is paying
+  function foodSheet() {
+    const freeId = free && !dailyDone(`free:${venue.id}`) ? free.item.id : '';
+    const vend = world.staff('vendor');
+    const row = (m: MenuItem) => {
+      const isFree = m.id === freeId;
+      return `<button class="life-food${isFree ? ' free' : ''}" data-buy="${esc(m.id)}"><i>${m.emoji}</i><span class="grow"><b>${esc(m.name)}</b>${m.id === venue.special?.id ? `<small class="life-only">Only at ${esc(venue.name)}</small>` : ''}</span>${isFree ? '<em>FREE</em>' : `<span class="life-price">${icons.coin}${m.price}</span>`}</button>`;
+    };
+    const foods = menu.filter((m) => !m.drink), drinks = menu.filter((m) => m.drink);
+    const ov = sheet(`${head(`${icons.food} Food & drinks`, `${vend ? `${esc(vend.name.split(' ')[0])} is serving · ` : ''}You have ${icons.coin}<b id="lifeCoins">${p.coins}</b>`)}
+      ${free ? `<p class="life-banner free">${free.item.emoji} <b>FREE ${esc(free.item.name.toUpperCase())}</b> by ${esc(free.by)}${freeId ? '. One each, while it lasts!' : '. You’ve had yours today.'}</p>` : ''}
+      <b class="small">Food</b><div class="life-menu">${foods.map(row).join('')}</div>
+      <b class="small">Drinks</b><div class="life-menu">${drinks.map(row).join('')}</div>`, 'life-food-sheet');
+    ov.addEventListener('click', (ev) => {
+      const id = (ev.target as HTMLElement).closest<HTMLElement>('[data-buy]')?.dataset.buy;
+      const m = menu.find((x) => x.id === id);
+      if (!m) return;
+      const isFree = m.id === freeId;
+      if (!isFree && !spend(p, { coins: m.price })) { toast(`${icons.coin} Not enough coins for ${esc(m.name)}. Ride or race to earn more.`); return; }
+      if (isFree) dailySet(`free:${venue.id}`);
+      ov.remove();
+      world.doAct(m.drink ? 'drink' : 'eat');
+      sfx.coin();
+      buzz(10);
+      toast(`${m.emoji} ${isFree ? `Free ${esc(m.name)}, thanks to ${esc(free!.by)}!` : `${esc(m.name)} · ${m.price} coins`}`);
+      note(isFree ? `You got a free ${m.name} from ${free!.by}.` : `You bought ${m.name} for ${m.price} coins.`);
+      if (vend) world.speak(vend.key, ['Enjoy! 😋', 'Thank you, come again!', `One ${m.name}, coming up!`, 'Chop well o!'][(Math.random() * 4) | 0]);
+    });
+  }
+
+  // the stage: who's on, what's next, and request a song
+  let lastRequest = 0;
+  function stageSheet() {
+    const perf = world.staff('stage');
+    const canRequest = show.kind === 'dj' || show.kind === 'live' || show.kind === 'karaoke' || show.kind === 'dance';
+    const mins = Math.max(1, Math.round((show.ends - Date.now()) / 60e3));
+    const ov = sheet(`${head(`${show.emoji} ${esc(show.label)}`, `Now on stage · ${mins} min left`)}
+      <div class="life-stage-card"><b>${esc(show.who)}</b><p class="muted small">${esc(show.line)}</p><small class="muted">Up next: ${esc(show.next)}</small></div>
+      ${perf ? `<button class="btn btn-ghost" data-go>${icons.walk} Walk to the stage</button>` : ''}
+      ${canRequest ? `<b class="small">Request a song</b><div class="life-genres">${GENRES.map((g) => `<button class="chip${g.id === style ? ' on' : ''}" data-genre="${g.id}">${esc(g.label)}</button>`).join('')}</div>` : ''}
+      <button class="btn btn-primary" data-cheer>${icons.sparkle} Cheer</button>`);
+    ov.addEventListener('click', (ev) => {
+      const t = ev.target as HTMLElement;
+      if (t.closest('[data-go]') && perf) { ov.remove(); world.walkTo(perf.x, perf.z, 3); return; }
+      if (t.closest('[data-cheer]')) { ov.remove(); world.cheer(); floatEmote('heart', 'The crowd'); sfx.coin(); if (perf) world.speak(perf.key, ['Make some noise! 🙌', 'Legon, I see you!', 'Thank you! 🔥'][(Math.random() * 3) | 0]); return; }
+      const g = GENRES.find((x) => x.id === t.closest<HTMLElement>('[data-genre]')?.dataset.genre);
+      if (!g) return;
+      ov.remove();
+      if (Date.now() - lastRequest < 30e3) { toast(`${icons.clock} One request at a time. Try again in a bit.`); return; }
+      lastRequest = Date.now();
+      toast(`${icons.music} You asked for ${esc(g.label)}`, 2000);
+      setTimeout(() => {
+        if (gone) return;
+        style = g.id;
+        if (musicOn) startParty(style, { people: world.count(), horn: venue.horn });
+        world.cheer();
+        if (perf) world.speak(perf.key, `${g.line} This one’s for ${p.name.split(' ')[0]}!`);
+        note(`${perf?.name ?? 'The DJ'} played your ${g.label} request.`);
+        floatEmote('dance', 'Everyone');
+      }, 2500);
+    });
+  }
+
+  function moreSheet() {
+    const items: [string, string, string][] = [
+      ['wave', icons.hand, 'Wave'], ['sit', icons.seat, 'Sit down'], ['people', icons.users, 'People here'],
+      ['games', icons.target, 'Mini-games'], ['giveaway', icons.gift, dailyDone(`give:${venue.id}`) ? 'Giveaway (collected)' : 'Giveaway'],
+    ];
+    const ov = sheet(`${head('More to do')}<div class="ev-asks">${items.map(([id, ic, l]) => `<button class="ev-emote" data-more="${id}">${ic}<span>${esc(l)}</span></button>`).join('')}</div>`);
+    ov.addEventListener('click', (ev) => { const a = (ev.target as HTMLElement).closest<HTMLElement>('[data-more]')?.dataset.more; if (a) { ov.remove(); doAct(a); } });
+  }
+
+  function giveaway() {
+    if (dailyDone(`give:${venue.id}`)) return toast(`${icons.gift} You already collected today's giveaway here. Come back tomorrow!`);
+    dailySet(`give:${venue.id}`);
+    const coins = 20 + Math.floor(Math.random() * 7) * 10;
+    grant(p, { coins, xp: 20 });
+    world.doAct('wave');
+    sfx.coin();
+    buzz([20, 30, 20]);
+    floatEmote('heart', `+${coins} coins`);
+    const ov = sheet(`<div class="life-gift"><span>🎁</span><h2 class="title" style="font-size:26px">Giveaway!</h2><p>You got <b>${coins} Rush Coins</b> and <b>20 XP</b> at ${esc(venue.name)}.</p><button class="btn btn-primary" data-close>Nice!</button></div>`);
+    void ov;
+  }
+
+  function gamesSheet() {
+    const ov = sheet(`${head(`${icons.target} Mini-games`, 'Play while you hang out. Your first game here each day pays coins.')}${GAMES.map((g) => `<button class="life-food" data-game="${g.id}"><i>${g.icon}</i><span class="grow"><b>${esc(g.name)}</b><small class="muted">${esc(g.blurb)}</small></span></button>`).join('')}`);
+    ov.addEventListener('click', (ev) => {
+      const id = (ev.target as HTMLElement).closest<HTMLElement>('[data-game]')?.dataset.game as GameId | undefined;
+      if (!id) return;
+      ov.remove();
+      playGame(id, (score) => {
+        if (gone || score === null) return;
+        const k = `game:${venue.id}`;
+        const coins = dailyDone(k) ? 0 : Math.min(60, Math.round(score / 30));
+        if (coins) { dailySet(k); grant(p, { coins }); }
+        toast(`${icons.target} ${score} points${coins ? ` · +${coins} coins` : ''}`, 3200);
+        note(`You scored ${score} in ${GAMES.find((g) => g.id === id)!.name}.`);
+      });
+    });
+  }
+
+  // walking up to someone: a little prompt to interact
+  const nearEl = $('#lifeNear')!;
+  let nearKey = '';
+  const nearTimer = window.setInterval(() => {
+    const c = world.closest();
+    const show2 = c && c.d < 2.3 && !(c.p.act === 'vendor' && c.d > 2);
+    const k = show2 ? c!.p.key : '';
+    if (k === nearKey) return;
+    nearKey = k;
+    nearEl.hidden = !k;
+    if (!k) return;
+    const q = c!.p;
+    const what = q.act === 'vendor' ? `${icons.food} Buy food from ${esc(q.name.split(' ')[0])}` : q.act === 'dj' || q.act === 'sing' || q.act === 'crew' ? `${icons.music} ${esc(q.name)}: request a song` : `${icons.hand} ${esc(q.name.split(' ')[0])} · Wave, talk, dance…`;
+    nearEl.innerHTML = what;
+  }, 400);
+  nearEl.addEventListener('click', () => {
+    const q = world.closest()?.p;
+    if (!q) return;
+    if (q.act === 'vendor') return foodSheet();
+    if (q.act === 'dj' || q.act === 'sing' || q.act === 'crew') return stageSheet();
+    personSheet(q.key);
+  });
   const openPanel = (tab: string) => {
     panel.hidden = false;
     panel.dataset.tab = tab;
@@ -554,7 +741,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
   // the crowd talks in the chat too: someone says something every little while and others answer
   let chatTimer = window.setTimeout(function again() {
     if (gone) return;
-    const crowd = world.people().filter((x) => x.bot && !x.bike && x.act !== 'vendor' && x.act !== 'dj' && x !== partner);
+    const crowd = world.people().filter((x) => x.bot && !x.bike && !['vendor', 'dj', 'sing', 'crew'].includes(x.act) && x !== partner);
     const a = crowd[(Math.random() * crowd.length) | 0];
     if (a) {
       const line = lineFor(venue.theme, Math.random);
@@ -566,7 +753,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
   }, 5e3);
   $('#evMusic')!.addEventListener('click', () => {
     musicOn = !musicOn;
-    if (musicOn) startParty(venue.style, { people: world.count(), horn: venue.horn }); else stopParty();
+    if (musicOn) startParty(style, { people: world.count(), horn: venue.horn }); else stopParty();
     $('#evMusic')!.classList.toggle('on', musicOn);
     $('#evEq')!.classList.toggle('on', musicOn);
   });
@@ -578,6 +765,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     clearTimeout(stayTimer);
     clearInterval(hereTimer);
     clearInterval(posTimer);
+    clearInterval(nearTimer);
     clearTimeout(meetTimer);
     clearTimeout(chatTimer);
     for (const x of pending.values()) clearTimeout(x.timer);

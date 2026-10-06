@@ -372,10 +372,10 @@
 .life-here { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 999px; background: #e5484d; font-size: 13px; font-weight: 800; }
 .life-here .ev-dot { background: #fff; }
 .life-floats { position: absolute; left: 0; right: 0; top: 80px; height: 40%; pointer-events: none !important; }
-.life-toast { position: absolute; left: 50%; top: calc(70px + var(--safe-t)); transform: translateX(-50%); margin: 0; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 32px); padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.95); color: #111; font-size: 13px; font-weight: 700; box-shadow: 0 6px 18px rgba(0,0,0,0.2); pointer-events: none !important; }
+.life-toast { position: absolute; left: 50%; top: calc(124px + var(--safe-t)); transform: translateX(-50%); margin: 0; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 32px); padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.95); color: #111; font-size: 13px; font-weight: 700; box-shadow: 0 6px 18px rgba(0,0,0,0.2); pointer-events: none !important; }
 .life-toast[hidden] { display: none; }
 .life-toast .i { width: 16px; height: 16px; }
-.life-hint { position: absolute; left: 16px; right: 16px; bottom: calc(96px + var(--safe-b)); margin: 0; text-align: center; font-size: 13px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.8); pointer-events: none !important; transition: opacity 0.8s; }
+.life-hint { position: absolute; left: 16px; right: 16px; bottom: calc(140px + var(--safe-b)); margin: 0; text-align: center; font-size: 13px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.8); pointer-events: none !important; transition: opacity 0.8s; }
 .life-hint.gone { opacity: 0; }
 .life-acts { position: absolute; left: 50%; bottom: calc(12px + var(--safe-b)); transform: translateX(-50%); display: flex; gap: 4px; max-width: calc(100% - 16px); overflow-x: auto; padding: 6px; border-radius: 22px; background: rgba(8,14,32,0.6); backdrop-filter: blur(10px); scrollbar-width: none; }
 .life-acts::-webkit-scrollbar { display: none; }
@@ -405,3 +405,45 @@
 .ev-quick::-webkit-scrollbar { display: none; }
 .ev-quick button { flex: none; border: 1px solid rgba(16, 33, 63, 0.15); background: #fff; color: #10213f; border-radius: 999px; padding: 6px 11px; font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; }
 .ev-quick button:active { background: #fff6d6; }
+
+/* Events: what's on, free food, food menu, the stage, walking up to someone */
+.life-pills { position: absolute; top: calc(64px + var(--safe-t)); left: 12px; right: 12px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; pointer-events: none; }
+.life-pills::-webkit-scrollbar { display: none; }
+.life-pill { pointer-events: auto; flex: none; display: inline-flex; align-items: center; gap: 8px; max-width: 78vw; padding: 5px 12px 5px 6px; border-radius: 999px; border: 0; background: rgba(8,14,32,0.62); color: #fff; backdrop-filter: blur(8px); text-align: left; }
+.life-pill i { font-style: normal; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.14); font-size: 16px; }
+.life-pill span { display: flex; flex-direction: column; min-width: 0; }
+.life-pill small { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--gold); }
+.life-pill b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.life-pill.free { background: rgba(46,139,58,0.88); }
+.life-pill.free small { color: #fff; }
+.life-near { position: absolute; left: 50%; bottom: calc(92px + var(--safe-b)); transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 32px); padding: 10px 16px; border: 0; border-radius: 999px; background: #fff; color: #111; font-size: 14px; font-weight: 800; box-shadow: 0 8px 22px rgba(0,0,0,0.3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: life-pop 0.25s ease-out; }
+.life-near[hidden] { display: none; }
+.life-near .i { width: 18px; height: 18px; color: var(--accent, #c8102e); }
+.life-sheet { gap: 12px; max-height: 82vh; overflow-y: auto; }
+.life-menu { display: grid; grid-template-columns: 1fr; gap: 6px; }
+@media (min-width: 560px) { .life-menu { grid-template-columns: 1fr 1fr; } }
+.life-food { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(0,0,0,0.08); background: #fff; color: #111; text-align: left; }
+.life-food:active { transform: scale(0.98); }
+.life-food > i { font-style: normal; font-size: 24px; width: 40px; height: 40px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; background: #f6f1e6; }
+.life-food > i .i { width: 22px; height: 22px; }
+.life-food span { display: flex; flex-direction: column; min-width: 0; }
+.life-food b { font-size: 15px; }
+.life-food em { font-style: normal; font-weight: 900; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: #2e8b3a; color: #fff; }
+.life-food.free { border-color: #2e8b3a; background: #effaef; }
+.life-price { display: inline-flex; align-items: center; gap: 3px; font-weight: 800; font-size: 14px; }
+.life-price .i { width: 16px; height: 16px; color: #d9a300; }
+.life-only { font-size: 11px; font-weight: 800; color: #b26b00; }
+.life-banner { margin: 0; padding: 10px 12px; border-radius: 14px; font-size: 14px; }
+.life-banner.free { background: #2e8b3a; color: #fff; }
+.life-stage-card { padding: 14px; border-radius: 16px; background: #111a33; color: #fff; display: flex; flex-direction: column; gap: 4px; }
+.life-stage-card b { font-family: var(--display); font-size: 22px; }
+.life-stage-card .muted { color: rgba(255,255,255,0.75); margin: 0; }
+.life-genres { display: flex; flex-wrap: wrap; gap: 6px; }
+.life-genres .chip.on { background: var(--gold); color: #111; }
+.life-gift { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; }
+.life-gift > span { font-size: 56px; animation: life-pop 0.4s ease-out; }
+.life-gift p { margin: 0; }
+.life-inter { grid-template-columns: repeat(3, 1fr); }
+.life-count.free { background: #2e8b3a; }
+.life-onstage { font-weight: 800; color: var(--gold) !important; }
+.ev-nextup { margin: 0 0 12px; display: flex; align-items: center; gap: 6px; }

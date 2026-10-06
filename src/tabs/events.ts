@@ -93,9 +93,9 @@ function listHtml() {
 
   return `
     ${serverOk === false ? `<p class="ev-offline">${icons.wifiOff} Showing official events. Rider events and join counts load when you're online.</p>` : ''}
-    ${campusLifeHtml()}
+    ${campusLifeHtml(live.map((e) => eventCard(e, { joined: isJoined(p, e.key) })).join(''), live.length)}
     ${rail('Your events', mine, icons.check)}
-    ${live.length ? rail('Live now', live, '<i class="ev-dot"></i>') : `<div class="ev-nolive">${icons.clock}<span><b>Nothing live right now.</b> ${next ? `Next: ${esc(next.name)} in ${countdown(next.start - t)}.` : ''}</span></div>`}
+    ${!live.length && next ? `<p class="muted small ev-nextup">${icons.clock} Next event: <b>${esc(next.name)}</b> in ${countdown(next.start - t)}.</p>` : ''}
     ${rail('Later today', today, icons.clock)}
     ${rail('This week', week, icons.events)}
     ${series.length ? `<section class="ev-sec"><div class="ev-sec-h"><h2>${icons.sparkle}Event series</h2><span class="muted small">${series.length}</span></div><div class="ev-rail">${series.map(seriesCard).join('')}</div></section>` : ''}
