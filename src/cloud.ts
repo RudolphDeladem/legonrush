@@ -220,6 +220,14 @@ function mergeFeatures(local: Profile, remote: Profile) {
     },
     // Map: discoveries rewarded and collection rewards claimed (union, so nothing is paid twice)
     mapDex: { seen: union(local.mapDex?.seen, remote.mapDex?.seen), claimed: union(local.mapDex?.claimed, remote.mapDex?.claimed) },
+    // Community choices: the newer copy wins; badge counters keep the most of each
+    social: (() => {
+      const l = local.social, r = remote.social;
+      if (!l || !r) return l ?? r;
+      const newer = (l.updatedAt ?? 0) >= (r.updatedAt ?? 0) ? l : r;
+      const c = (k: 'posts' | 'reactions' | 'messages' | 'events') => Math.max(l.counts?.[k] ?? 0, r.counts?.[k] ?? 0);
+      return { ...newer, counts: { posts: c('posts'), reactions: c('reactions'), messages: c('messages'), events: c('events'), rodeWith: union(l.counts?.rodeWith, r.counts?.rodeWith), met: union(l.counts?.met, r.counts?.met) } };
+    })(),
   };
 }
 

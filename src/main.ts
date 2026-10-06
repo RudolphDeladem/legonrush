@@ -31,6 +31,7 @@ import { tabView, type TabId } from './tabs/registry';
 import * as garage from './features/garage/garage';
 import { openStore } from './tabs/store';
 import { showSystem, takeDue } from './features/notify';
+import * as community from './features/community';
 import './tabs';
 import type { EventRide } from './features/events/ride-hook';
 import { rememberRidePos } from './features/map/where';
@@ -1000,7 +1001,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     if (lr.kind === 'vibe' && vibe) vibe.onPos = sink;
     else lr.ch.on('pos', sink);
   }
-  setStatus('riding');
+  setStatus('riding', { place: route.to.name }); // COMMUNITY: place is only shared with "show me on map"
   // Vibe Ride: the chat rides with you
   const rideChat = app.querySelector<HTMLElement>('#rideChat');
   if (rideChat && vibe) {
@@ -1154,6 +1155,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     if (lr) lr.ch.send('done', { k: myId(), name: p.name, km: r.distance / 1000, finished: r.finished, time: r.time });
     if (lr?.kind === 'vibe') {
       for (const f of lr.riders) if (r.distance > 200 && !m.friends.includes(f.id)) m.friends.push(f.id);
+      for (const f of lr.riders) if (r.distance > 200) community.rodeWith(p, f.id); // COMMUNITY: 'You rode together'
       const rw = applyRide(p, result, finishReward(route));
       cloud.record({ hall: p.hall, department: p.department, km: r.distance / 1000 });
       vibe?.msgs.push({ sys: true, text: `${r.finished ? `You reached ${route.to.name}` : 'You stopped'} · ${km(r.distance)} km · +${rw.coins} coins`, at: Date.now() });
@@ -2224,14 +2226,19 @@ interface RiderState {
   mood?: vb.VibeMood;
   gender?: 'male' | 'female';
   riderType?: RiderType | '';
+  /** COMMUNITY: where you're riding (only sent with "show me on map"), and set when "show online" is off */
+  place?: string;
+  map?: boolean;
+  hidden?: boolean;
   at: number;
 }
 
-const riderState = (status: Status, extra: Partial<RiderState> = {}): RiderState => ({
+// COMMUNITY hook: presence follows the rider's privacy (hidden hall/course, show online, show me on map)
+const riderState = (status: Status, extra: Partial<RiderState> = {}): RiderState => community.maskPresence({
   id: myId(), name: profile?.name ?? 'Rider', hall: profile?.hall ?? 'none', department: profile?.department ?? '',
   jersey: profile ? riderLook(profile).jersey : '#f5c518', level: levelFor(profile?.xp ?? 0), status, at: Date.now(),
   gender: profile?.gender, riderType: profile?.about.riderType ?? '', ...extra,
-});
+}, profile);
 
 let lobby: Promise<live.Channel | null> | null = null;
 let lobbyCh: live.Channel | null = null;
@@ -2289,7 +2296,10 @@ function setStatus(status: Status, extra: Partial<RiderState> = {}) {
   lobbyCh?.track({ ...myStatus });
 }
 
+/** COMMUNITY: screens that follow who is online */
+const onlineWatchers = new Set<() => void>();
 function refreshOnline() {
+  onlineWatchers.forEach((fn) => fn());
   const list = app.querySelector<HTMLElement>('#onlineList');
   const count = app.querySelector<HTMLElement>('#onlineCount');
   if (count) count.textContent = onlineCountText();
@@ -2331,6 +2341,8 @@ const inviteText = (name: string) => `${name} is inviting you to ride with them`
 
 function gotInvite(n: Notice) {
   if (notices.some((x) => x.code === n.code) || vibe?.code === n.code || vb.isBlocked(n.from.id)) return;
+  // COMMUNITY hook: "who can invite me to Vibe Ride" (invites left on the server are checked there too)
+  if (!n.dbId && !n.id.startsWith('cm-') && !community.allowVibeInvite(profile, n.from.id)) return;
   notices.unshift(n);
   notices = notices.slice(0, 10);
   sfx.coin?.();
@@ -3763,6 +3775,18 @@ fx.initFeatures({
   explore: (from, to) => explorePicker(from, to),
   garage: () => garageScreen(),
   bike3d: { style: (s) => game.setBikeStyle(s), view: (v) => game.viewBike(v), yaw: () => game.bikeYaw, scene: (t) => game.setTimeOfDay(t), refresh: (p) => applyLook(p ?? profile) },
+  // COMMUNITY hooks: live presence, Vibe Ride entry points, sign-in and toasts
+  online: () => online,
+  onlineState: () => lobbyState,
+  watchOnline: (fn) => { onlineWatchers.add(fn); return () => void onlineWatchers.delete(fn); },
+  vibe: {
+    setup: () => vibeSetup(),
+    room: (code, host) => void joinVibe(code, host),
+    inviteOnline: (key) => void inviteOnline(key),
+    notice: (code, from) => gotInvite({ id: `cm-${code}`, code, from, at: Date.now() }),
+  },
+  signIn: () => authScreen('in', () => home('community')),
+  toast: (html, actions, ms) => toast(html, actions, ms),
 });
 money.initMoney();
 

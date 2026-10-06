@@ -4,4 +4,5 @@ import './garage';
 import './store';
 import './events';
 import './map';
+import './community';
 export {};

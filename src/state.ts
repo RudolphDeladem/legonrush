@@ -1,4 +1,6 @@
 import type { BikeStyle } from './game/models';
+import { newSocial, normalizeSocial, type SocialSettings } from './features/community/model';
+
 export interface Profile {
   name: string;
   username: string;
@@ -68,6 +70,9 @@ export interface Profile {
   // ---- Map (src/features/map) ----
   /** campus map collection: places already rewarded as discovered, and collection rewards claimed */
   mapDex: { seen: string[]; claimed: string[] };
+  // ---- COMMUNITY (src/features/community) ----
+  /** Community: social status, privacy, dating choices and social badge counts (the server keeps the copy others see) */
+  social: SocialSettings;
 }
 
 // ---------- Garage & Store (src/features/garage) ----------
@@ -256,6 +261,7 @@ export function newProfile(): Profile {
     garage: newGarage(),
     events: newEventsProgress(),
     mapDex: { seen: [], claimed: [] },
+    social: newSocial(),
   };
 }
 
@@ -288,6 +294,7 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.garage = migrateGarage(p);
   p.events = { ...newEventsProgress(), ...p.events };
   p.mapDex = { seen: p.mapDex?.seen ?? [], claimed: p.mapDex?.claimed ?? [] };
+  p.social = normalizeSocial(p.social);
   return p;
 }
 
