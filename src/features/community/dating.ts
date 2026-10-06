@@ -9,7 +9,7 @@ import * as api from './api';
 import { changed, remember, social, syncNow } from './local';
 import type { Card, DatingCard } from './model';
 import { chatWith } from './chat';
-import { inviteToRide, reportSheet } from './people';
+import { reportSheet } from './people';
 import { act, avatar, bindSignIn, ci, empty, hallName, loading, problemBox, sheet, sheetHead, toast } from './ui';
 
 export const INTERESTS = ['Cycling', 'Music', 'Gaming', 'Sports', 'Events', 'Exploring campus', 'Food', 'Movies', 'Fashion', 'Faith', 'Tech', 'Books'];
@@ -46,8 +46,7 @@ function optIn(from: () => void, head: string) {
   const p = H().profile();
   const s = social(p);
   const check = vb.dateCheck(p);
-  const prefs = vb.loadPrefs(p);
-  const genders: Gender[] = s.dating.genders.length ? [...s.dating.genders] : prefs.who === 'anyone' ? [] : [prefs.who];
+  const genders: Gender[] = [...s.dating.genders];
   const interests = new Set(s.dating.interests);
   let min = s.dating.ageMin, max = s.dating.ageMax;
   const ages = Array.from({ length: 23 }, (_, i) => 18 + i);
@@ -145,11 +144,10 @@ async function discover(box: HTMLElement, from: () => void) {
 
 function matched(d: DatingCard, from: () => void) {
   remember({});
-  const s = sheet(`<div class="cm-match">${ci.heart}<h2>You and ${esc(d.name)} connected</h2><p class="muted">You can message each other now, or start a Date vibe ride.</p>
-    <button class="btn btn-primary" id="cmMsg">${ci.chat} Say hi</button><button class="btn btn-ghost" id="cmRide">${ci.bike} Invite to Vibe Ride</button><button class="btn btn-link" data-close>Later</button></div>`, 'cm-match-sheet');
+  const s = sheet(`<div class="cm-match">${ci.heart}<h2>You and ${esc(d.name)} connected</h2><p class="muted">You can message each other now.</p>
+    <button class="btn btn-primary" id="cmMsg">${ci.chat} Say hi</button><button class="btn btn-link" data-close>Later</button></div>`, 'cm-match-sheet');
   const c = { id: d.id, name: d.name, hall: d.hall } as Card;
   s.el.querySelector('#cmMsg')!.addEventListener('click', () => { s.close(); void chatWith(c, () => datingScreen(from, 'matches')); });
-  s.el.querySelector('#cmRide')!.addEventListener('click', () => { s.close(); void inviteToRide(c); });
 }
 
 async function matches(box: HTMLElement, from: () => void) {
@@ -158,11 +156,10 @@ async function matches(box: HTMLElement, from: () => void) {
     const list = await api.datingMatches();
     remember({ matches: list.map((m) => m.id) });
     box.innerHTML = list.length ? list.map((d) => `<div class="cm-person" data-id="${esc(d.id)}">${avatar({ name: d.name, hall: d.hall })}<span class="cm-p-main"><b>${esc(d.name)}${d.age ? `, ${d.age}` : ''}</b><small>${(d.interests ?? []).slice(0, 3).map(esc).join(' · ')}</small></span>
-      <span class="cm-row-acts"><button class="icon-btn cm-mini" data-msg="${esc(d.id)}" aria-label="Message">${ci.chat}</button><button class="icon-btn cm-mini" data-ride="${esc(d.id)}" aria-label="Vibe Ride">${ci.bike}</button><button class="icon-btn cm-mini" data-more="${esc(d.id)}" aria-label="More">${ci.more}</button></span></div>`).join('')
+      <span class="cm-row-acts"><button class="icon-btn cm-mini" data-msg="${esc(d.id)}" aria-label="Message">${ci.chat}</button><button class="icon-btn cm-mini" data-more="${esc(d.id)}" aria-label="More">${ci.more}</button></span></div>`).join('')
       : empty(ci.heart, 'No connections yet', 'When you and someone both tap Connect, they show up here.');
     const find = (id: string) => list.find((x) => x.id === id)!;
     box.querySelectorAll<HTMLElement>('[data-msg]').forEach((b) => b.addEventListener('click', () => { const d = find(b.dataset.msg!); void chatWith({ id: d.id, name: d.name, hall: d.hall } as Card, () => datingScreen(from, 'matches')); }));
-    box.querySelectorAll<HTMLElement>('[data-ride]').forEach((b) => b.addEventListener('click', () => { const d = find(b.dataset.ride!); void inviteToRide({ id: d.id, name: d.name }); }));
     box.querySelectorAll<HTMLElement>('[data-more]').forEach((b) => b.addEventListener('click', () => {
       const d = find(b.dataset.more!);
       const s = sheet(`${sheetHead(esc(d.name))}<button class="btn btn-ghost" data-a="unmatch">${ci.x} Unmatch</button><button class="btn btn-ghost" data-a="report">${ci.flag} Report</button><button class="btn btn-ghost cm-danger" data-a="block">${ci.block} Block</button>`);

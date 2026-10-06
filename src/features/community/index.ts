@@ -1,6 +1,6 @@
 // Community: the social layer of LEGONRUSH. The tab lives in src/tabs/community.ts; this file
 // starts the background parts (activity sender, live notifications, map pins) and holds the
-// small hooks main.ts calls (presence privacy, Vibe Ride invite privacy, riders you rode with).
+// small hooks main.ts calls (presence privacy).
 import type { Profile } from '../../state';
 import { showSystem } from '../notify';
 import { registerPinSource, type Pin } from '../pins';
@@ -8,7 +8,7 @@ import { H, esc } from '../host';
 import * as api from './api';
 import { chatWith } from './chat';
 import { flushActivity, startActivity } from './feed';
-import { isFriend, rodeWith as rodeLocal, social } from './local';
+import { isFriend, social } from './local';
 import { notifIcon, openNotification } from './home';
 import { openPerson, setOpenChat } from './people';
 import { onlineNow } from './presence';
@@ -16,7 +16,6 @@ import { ci, toast } from './ui';
 import './community.css';
 
 export { maskPresence } from './presence';
-export { allowVibeInvite } from './local';
 export { registerCrewAction } from './crews';
 export { setChallengeHook } from './people';
 export { render, bind } from './home';
@@ -45,11 +44,8 @@ export function initCommunity() {
     const notify = social(p).notify;
     if (e.type === 'notification') {
       const n = e.n;
-      // Vibe Ride invites use the app's own invite card (Accept / Not now)
-      if (n.kind === 'vibe_invite' && n.ref && n.actor) {
-        if (notify.vibe) H().vibe.notice(n.ref, { id: n.actor, name: n.text.replace(/ wants to ride with you$/, ''), hall: 'none' });
-        return;
-      }
+      // Vibe Ride is its own thing on Home, so Community never shows its invites
+      if (n.kind === 'vibe_invite') return;
       const group = n.kind.startsWith('friend') || n.kind === 'follow' ? 'friends' : n.kind.startsWith('crew') ? 'crews' : n.kind.startsWith('dating') ? 'dating' : n.kind === 'react' ? 'feed' : null;
       if (group && !notify[group]) return;
       toast(`${notifIcon(n)} ${esc(n.text)}`, [['Open', () => openNotification(n), true]]);
@@ -70,8 +66,3 @@ export function initCommunity() {
   addEventListener('online', kick);
 }
 
-/** main.ts: after a Vibe Ride with someone (for "You rode together" and the Riding buddies badge) */
-export function rodeWith(p: Profile, partnerId: string) {
-  rodeLocal(p, partnerId);
-  if (api.signedIn() && /^[0-9a-f-]{36}$/.test(partnerId)) void api.rodeWith(partnerId).catch(() => undefined);
-}

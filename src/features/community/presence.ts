@@ -35,15 +35,14 @@ export const lobbyState = () => { try { return H().onlineState(); } catch { retu
 export const isAccount = (key: string) => /^[0-9a-f-]{36}$/.test(key);
 export const onlineById = (id: string) => onlineNow().find((o) => o.key === id);
 
-export type Doing = 'online' | 'riding' | 'racing' | 'vibe' | 'event';
+export type Doing = 'online' | 'riding' | 'racing' | 'event';
 /** what a rider in the lobby is doing now */
 export function doing(o: OnlinePeer | undefined): Doing | null {
   if (!o) return null;
   const s = o.state.status;
   if (o.state.event) return 'event';
-  if (s === 'riding') return 'riding';
+  if (s === 'riding' || s === 'room' || s === 'vibe') return 'riding';
   if (s === 'match') return 'racing';
-  if (s === 'room' || s === 'vibe') return 'vibe';
   return 'online';
 }
-export const DOING_TEXT: Record<Doing, string> = { online: 'Online', riding: 'Riding', racing: 'Racing', vibe: 'In a Vibe Ride', event: 'At an event' };
+export const DOING_TEXT: Record<Doing, string> = { online: 'Online', riding: 'Riding', racing: 'Racing', event: 'At an event' };

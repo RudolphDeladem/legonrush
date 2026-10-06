@@ -114,7 +114,7 @@ export function problemBox(e: unknown, retryId = '') {
   const p = api.problemOf(e);
   if (p === 'signin') return empty(ci.users, 'Sign in to connect', 'Make friends, join crews and message riders with a free account. Your progress comes with you.', '<button class="btn btn-primary btn-sm" data-cm-signin>Sign in or create an account</button>');
   if (p === 'offline') return empty(icons.wifiOff, "You're offline", 'Community needs a connection. Solo rides still work.', retryId ? `<button class="btn btn-ghost btn-sm" id="${retryId}">Try again</button>` : '');
-  if (p === 'setup') return empty(icons.gear, 'Community is being set up', 'Friends, crews and messages switch on as soon as the campus server is ready. Vibe Ride and Riders Online already work.');
+  if (p === 'setup') return empty(icons.gear, 'Community is being set up', 'Friends, crews and messages switch on as soon as the campus server is ready. Riders Online already works.');
   return empty(fx.info, "Couldn't load this", api.problemText(e), retryId ? `<button class="btn btn-ghost btn-sm" id="${retryId}">Try again</button>` : '');
 }
 

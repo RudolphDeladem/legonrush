@@ -930,7 +930,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
         ${isTouch && !isExplore(route) ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : '<span class="hud-slot"></span>'}
       </div>
       <canvas class="minimap" id="minimap" width="240" height="240" aria-hidden="true"></canvas>
-      ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="rc-log" id="rcLog"></div>${quickActions(true)}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
+      ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="vx-ride-acts"><button id="vxStop">${icons.pause} <span>Stop</span></button><button id="vxSnap">${icons.camera} Photo</button><button id="vxEnd">End ride</button></div><div class="rc-log" id="rcLog"></div>${quickActions(true)}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
     </div>`, 'none');
 
   const $ = (id: string) => app.querySelector<HTMLElement>('#' + id)!;
@@ -1183,7 +1183,6 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     if (lr) lr.ch.send('done', { k: myId(), name: p.name, km: r.distance / 1000, finished: r.finished, time: r.time });
     if (lr?.kind === 'vibe') {
       for (const f of lr.riders) if (r.distance > 200 && !m.friends.includes(f.id)) m.friends.push(f.id);
-      for (const f of lr.riders) if (r.distance > 200) community.rodeWith(p, f.id); // COMMUNITY: 'You rode together'
       const rw = applyRide(p, result, finishReward(route));
       cloud.record({ hall: p.hall, department: p.department, km: r.distance / 1000 });
       vibe?.msgs.push({ sys: true, text: `${r.finished ? `You reached ${route.to.name}` : 'You stopped'} · ${km(r.distance)} km · +${rw.coins} coins`, at: Date.now() });
@@ -1425,6 +1424,36 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       try { localStorage.setItem(key, String(kmh)); } catch { /* private mode */ }
     });
     for (const ev of ['pointerdown', 'touchstart', 'keydown'] as const) $('paceBox').addEventListener(ev, (e) => e.stopPropagation());
+    // Vibe Ride: stop somewhere and talk, take a photo together, end the ride whenever you want
+    if (lr?.kind === 'vibe') {
+      let stopped = false;
+      const stopBtn = $('vxStop');
+      stopBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        stopped = !stopped;
+        if (stopped) game.cruiseSpeed = 0; else setPace(kmh);
+        stopBtn.innerHTML = stopped ? `${icons.ride} <span>Continue</span>` : `${icons.pause} <span>Stop</span>`;
+        stopBtn.classList.toggle('on', stopped);
+      });
+      $('vxSnap').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        let url = '';
+        try { url = game.capture(); } catch { return toast('Could not take a photo here.'); }
+        if (vibe) { vibe.msgs.push({ sys: true, text: 'You took a photo together.', at: Date.now() }); vibe.redraw?.('chat'); }
+        try {
+          const blob = await (await fetch(url)).blob();
+          const file = new File([blob], 'legonrush-vibe-ride.png', { type: 'image/png' });
+          if (navigator.canShare?.({ files: [file] })) return void (await navigator.share({ files: [file], title: 'Our LEGONRUSH Vibe Ride' }));
+        } catch { /* fall back to download */ }
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'legonrush-vibe-ride.png';
+        a.click();
+        toast(`${icons.camera} Photo saved`);
+      });
+      $('vxEnd').addEventListener('click', (e) => { e.stopPropagation(); cleanup(); leave(); });
+      for (const ev of ['pointerdown', 'touchstart'] as const) app.querySelector('.vx-ride-acts')!.addEventListener(ev, (e) => e.stopPropagation());
+    }
   }
   const guideCard = $('guideCard');
   const canSpeak = 'speechSynthesis' in window;
@@ -2281,7 +2310,7 @@ function home(next: Tab = 'home') {
     if (m === 'explore') explorePicker();
     if (m === 'match') quickMatch();
     if (m === 'missions') fx.levelsScreen(() => home(tab));
-    if (m === 'vibe') home('social');
+    if (m === 'vibe') vibeSetup();
   });
   on('[data-mission]', 'click', (_, el) => {
     if (claimMission(p, el.dataset.mission!)) sfx.finish();
@@ -2391,9 +2420,10 @@ interface RiderState {
   jersey: string;
   level: number;
   status: Status;
-  /** Vibe Ride match preferences while looking: from where, who and what for (features/vibe.ts) */
-  want?: vb.VibeFrom;
+  /** Vibe Ride match preferences while looking: who, which hall and department, and what for (features/vibe.ts) */
   who?: vb.VibeWho;
+  wantHall?: string;
+  wantDept?: string;
   mood?: vb.VibeMood;
   gender?: 'male' | 'female';
   riderType?: RiderType | '';
@@ -2512,8 +2542,6 @@ const inviteText = (name: string) => `${name} is inviting you to ride with them`
 
 function gotInvite(n: Notice) {
   if (notices.some((x) => x.code === n.code) || vibe?.code === n.code || vb.isBlocked(n.from.id)) return;
-  // COMMUNITY hook: "who can invite me to Vibe Ride" (invites left on the server are checked there too)
-  if (!n.dbId && !n.id.startsWith('cm-') && !community.allowVibeInvite(profile, n.from.id)) return;
   notices.unshift(n);
   notices = notices.slice(0, 10);
   sfx.coin?.();
@@ -2576,7 +2604,7 @@ function socialView() {
       <div class="card stack" style="gap:10px">
         <b>Find a rider</b>
         <p class="muted small">We pair you with someone online who wants a ride too. Choose who you'd like to meet: anyone, male or female riders, your hall or department, and your vibe.</p>
-        <p class="small vx-partner-line">${esc(vb.prefsSummary(vb.loadPrefs(profile!)))}</p>
+        <p class="small vx-partner-line">${esc(vb.prefsSummary(vb.loadPrefs(profile!), (h) => hallById(h).name))}</p>
         <button class="btn btn-primary" id="vibeFind">Find a rider</button>
       </div>
       <div class="card stack" style="gap:10px">
@@ -2606,15 +2634,15 @@ function bindSocial() {
   on('#deptStand', 'click', () => boardScreen('depts', () => home('social')));
 }
 
-/** Vibe Ride preferences (who, from where, what vibe), or invite a friend instead */
-function vibeSetup() {
+/** Vibe Ride (from Home): ready, preferences, then the search; or ride with someone you know */
+function vibeSetup(step: 'ready' | 'prefs' = 'ready') {
   if (needsRider()) return;
   vb.vibeSetup({
     find: (prefs) => vibeFind(prefs),
     create: () => void joinVibe(live.newCode(), true),
     join: (code) => void joinVibe(code, false),
-    back: () => home('social'),
-  });
+    back: () => home('home'),
+  }, step);
 }
 
 /** Vibe Ride needs a name others can see, so guests make a rider first. */
@@ -2675,14 +2703,14 @@ async function vibeFind(prefs: vb.VibePrefs = vb.loadPrefs(profile!), fresh = tr
   stopSearching();
   if (fresh) vibeSkipped.clear();
   const again = () => vibeFind(prefs, false);
-  searchScreen(`${icons.heart} ${esc(vb.prefsSummary(prefs))}`, prefs.mood === 'date' ? 'Finding your match' : 'Finding a rider', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
+  searchScreen(`${icons.heart} ${esc(vb.prefsSummary(prefs, (h) => hallById(h).name))}`, 'Finding your vibe', 'Looking for someone online who wants to ride…', 'Invite a friend instead');
   app.firstElementChild?.classList.add('vibe-warm');
   on('#fallback', 'click', () => { stopSearching(); void joinVibe(live.newCode(), true); });
-  on('#cancel', 'click', () => { stopSearching(); setStatus('menu'); vibeSetup(); });
-  onBack(() => { stopSearching(); setStatus('menu'); vibeSetup(); });
+  on('#cancel', 'click', () => { stopSearching(); setStatus('menu'); vibeSetup('prefs'); });
+  onBack(() => { stopSearching(); setStatus('menu'); vibeSetup('prefs'); });
   const ch = await connectLobby();
   if (!ch) return searchFailed('You need to be online to find a rider.');
-  setStatus('vibe', { want: prefs.from, who: prefs.who, mood: prefs.mood });
+  setStatus('vibe', { who: prefs.who, wantHall: prefs.hall, wantDept: prefs.dept, mood: prefs.mood });
   const looking = myStatus;
   const fits = (s: RiderState) => s.status === 'vibe' && !vibeSkipped.has(s.id) && vb.fits(looking, s);
   const answer = (to: string, code: string, ok: boolean, busy = false) => ch.send('pairAns', { to, code, from: myId(), ok, busy });
@@ -2716,7 +2744,7 @@ async function vibeFind(prefs: vb.VibePrefs = vb.loadPrefs(profile!), fresh = tr
       if (mine) finish(true);
     };
     const hall = hallById(them.hall);
-    const waiting = vb.matchPreview({ name: them.name, hallName: hall.name, hallColor: hall.color, riderType: them.riderType, mood: them.mood, level: them.level }, {
+    const waiting = vb.matchPreview({ name: them.name, hallName: hall.name, hallColor: hall.color, department: them.department, riderType: them.riderType, mood: them.mood, level: them.level, score: vb.matchScore(looking, them) }, {
       accept: () => {
         if (mine || over) return;
         mine = true;
@@ -2923,7 +2951,7 @@ async function joinVibe(code: string, host: boolean, partnerName = '', mood: vb.
   const ch = await live.join(`vibe:${code}`, myId(), { ...me });
   if (!ch) {
     toast("Couldn't connect. Check your data or Wi-Fi and try again.");
-    return home('social');
+    return home('home');
   }
   setStatus('room');
   const p = profile;
@@ -2946,14 +2974,14 @@ async function joinVibe(code: string, host: boolean, partnerName = '', mood: vb.
     if (earlier.length >= 2) {
       leaveVibe();
       toast('That ride already has two riders.');
-      return home('social');
+      return home('home');
     }
     const partner = peers.sort((a, b) => a.state.at - b.state.at)[0] ?? null;
     // someone you blocked: never ride with them
     if (partner && vb.isBlocked(partner.key)) {
       leaveVibe();
       toast("You've blocked that rider, so you left the ride.");
-      if (!game.isRiding) home('social');
+      if (!game.isRiding) home('home');
       return;
     }
     // a weak connection drops for a moment: only say they left if they stay gone
@@ -3104,13 +3132,13 @@ function blockPartner() {
   vb.block(p.key, p.state.name);
   leaveVibe();
   toast(`You blocked ${esc(p.state.name)}. You won't be matched with them again.`, [], 5000);
-  if (!game.isRiding) home('social');
+  if (!game.isRiding) home('home');
   else hideRideChat();
 }
 
 function leaveFromSafety() {
   leaveVibe();
-  if (!game.isRiding) return home('social');
+  if (!game.isRiding) return home('home');
   hideRideChat();
   toast('You left the Vibe Ride. Keep riding solo, or pause to stop.', [], 5000);
 }
@@ -3211,7 +3239,7 @@ function vibeLink(code: string) {
 /** the room: who you're riding with, where you're going, the invite and the chat */
 function vibeRoom() {
   const s = vibe;
-  if (!s || !profile) return home('social');
+  if (!s || !profile) return home('home');
   game.showcase();
   applyLook();
   const partner = s.partner?.state;
@@ -3279,8 +3307,8 @@ function vibeRoom() {
   };
   refreshOnline();
   on('[data-invite]', 'click', (_, el) => inviteOnline(el.dataset.invite!));
-  on('#leave', 'click', () => { leaveVibe(); home('social'); });
-  onBack(() => { leaveVibe(); home('social'); });
+  on('#leave', 'click', () => { leaveVibe(); home('home'); });
+  onBack(() => { leaveVibe(); home('home'); });
   on('#vxSafety', 'click', () => safety());
   on('#vxMem', 'click', () => s.memory && void vb.memorySheet(s.memory));
   on('#vFrom', 'change', (_, el) => setVibeRoute((el as HTMLSelectElement).value, s.to));

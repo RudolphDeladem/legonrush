@@ -193,7 +193,6 @@ export function fillBoard(box: HTMLElement, tab: BoardTab, again: () => void) {
 interface SocialBadge { id: string; icon: string; title: string; text: string; goal: number; got: (p: Profile) => number; soon?: string }
 export const SOCIAL_BADGES: SocialBadge[] = [
   { id: 'social-first', icon: ci.userPlus, title: 'First connection', text: 'Make your first friend.', goal: 1, got: () => known().friends.length },
-  { id: 'social-buddies', icon: ci.bike, title: 'Riding buddies', text: 'Ride with 10 different riders.', goal: 10, got: (p) => social(p).counts.rodeWith.length },
   { id: 'social-butterfly', icon: ci.party, title: 'Social butterfly', text: 'Attend 10 events.', goal: 10, got: (p) => social(p).counts.events },
   { id: 'social-connector', icon: ci.globe, title: 'Campus connector', text: 'Interact with 50 different riders.', goal: 50, got: (p) => social(p).counts.met.length },
   { id: 'social-crew', icon: ci.shield, title: 'Crew champion', text: 'Win 10 crew challenges.', goal: 10, got: (p) => (p.stats as Record<string, number>).crewWins ?? 0, soon: 'Crew challenges are coming with Challenges.' },

@@ -58,7 +58,7 @@ export function privacyScreen(from: () => void = () => H().home('social')) {
   const levels = ['', '100', '200', '300', '400', '500', '600'];
   screen(`
     <div class="cm-head"><span class="cm-head-ico">${ci.shield}</span><div><h1 class="title">Privacy &amp; safety</h1><p class="muted">You decide who finds you and what they see. These apply everywhere in LEGONRUSH.</p></div></div>
-    ${api.signedIn() ? '' : `<div class="cm-note">${fx.info}<span>You're playing as a guest. These choices are saved on this phone and apply to Riders Online and Vibe Ride.</span></div>`}
+    ${api.signedIn() ? '' : `<div class="cm-note">${fx.info}<span>You're playing as a guest. These choices are saved on this phone and apply to Riders Online.</span></div>`}
     <section class="card stack cm-form">
       <b class="cm-label">Who can find me?</b>
       ${seg<Privacy['findMe']>('findMe', [['everyone', 'Everyone'], ['fof', 'Friends of friends'], ['hall', 'Same hall'], ['course', 'Same course'], ['nobody', 'Nobody']], pr.findMe)}
@@ -67,8 +67,6 @@ export function privacyScreen(from: () => void = () => H().home('social')) {
       <p class="muted small">Connections: friends, crew mates and Dating connections.</p>
       <b class="cm-label">Who can send me friend requests?</b>
       ${seg<Privacy['requests']>('requests', [['everyone', 'Everyone'], ['shared', 'Shared connections'], ['nobody', 'Nobody']], pr.requests)}
-      <b class="cm-label">Who can invite me to Vibe Ride?</b>
-      ${seg<Privacy['vibeInvites']>('vibeInvites', [['everyone', 'Everyone'], ['friends', 'Friends'], ['dating', 'Dating connections'], ['nobody', 'Nobody']], pr.vibeInvites)}
       <b class="cm-label">Who sees my game activity?</b>
       ${seg<Privacy['activity']>('activity', [['everyone', 'Everyone'], ['friends', 'Friends'], ['off', 'Nobody']], pr.activity)}
     </section>
@@ -83,7 +81,7 @@ export function privacyScreen(from: () => void = () => H().home('social')) {
     </section>
     <section class="card stack cm-form">
       <b class="cm-label">${ci.bell} Notifications</b>
-      ${(([['friends', 'Friends', 'Requests, accepts and follows'], ['messages', 'Messages', 'New private and crew messages'], ['crews', 'Crews', 'Join requests and crew news'], ['vibe', 'Vibe Ride', 'Ride invitations'], ['dating', 'Dating', 'New connections'], ['feed', 'Reactions', 'When someone reacts to your post']]) as [NotifyGroup, string, string][]).map(([k, t, x]) => sw(`n:${k}`, t, x, s.notify[k])).join('')}
+      ${(([['friends', 'Friends', 'Requests, accepts and follows'], ['messages', 'Messages', 'New private and crew messages'], ['crews', 'Crews', 'Join requests and crew news'], ['dating', 'Dating', 'New connections'], ['feed', 'Reactions', 'When someone reacts to your post']]) as [NotifyGroup, string, string][]).map(([k, t, x]) => sw(`n:${k}`, t, x, s.notify[k])).join('')}
     </section>
     <section class="card stack cm-form">
       <b class="cm-label">${ci.block} Blocked riders</b>

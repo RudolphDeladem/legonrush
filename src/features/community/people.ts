@@ -28,11 +28,10 @@ export async function openPerson(id: string, hint?: Partial<Card>, after?: () =>
   const base: Card = { id, name: hint?.name ?? peer?.state.name ?? 'Rider', ...hint } as Card;
   const s = sheet(`<div class="cm-pv">${personHead(base, peer)}<div class="cm-pv-body">${isAccount(id) && api.signedIn() ? loading(2) : ''}</div></div>`, 'cm-person-sheet');
   const body = s.el.querySelector<HTMLElement>('.cm-pv-body')!;
-  // guests in the lobby, or you're not signed in: what presence shows, plus Vibe Ride and block
+  // guests in the lobby, or you're not signed in: what presence shows, plus report and block
   if (!isAccount(id) || !api.signedIn()) {
     body.innerHTML = `
-      ${peer ? `<button class="btn btn-primary" data-act="vibe">${ci.heart} Invite to Vibe Ride</button>` : ''}
-      ${!api.signedIn() ? `<p class="muted small">Sign in to add friends, follow and message riders.</p><button class="btn btn-ghost btn-sm" data-cm-signin>Sign in</button>` : '<p class="muted small">This rider is playing as a guest, so only Vibe Ride is available.</p>'}
+      ${!api.signedIn() ? `<p class="muted small">Sign in to add friends, follow and message riders.</p><button class="btn btn-ghost btn-sm" data-cm-signin>Sign in</button>` : '<p class="muted small">This rider is playing as a guest, so they can\'t be added or messaged yet.</p>'}
       ${safetyRow(base, false)}`;
     bindSignIn(body);
     bindActions(s, base, after);
@@ -87,10 +86,9 @@ function personBody(c: Card, online: boolean) {
     ${c.rel === 'received' ? `<div class="two">${friendButton(c)}<button class="btn btn-ghost" data-act="decline">Decline</button></div>` : `<div class="two">${friendButton(c)}<button class="btn btn-ghost" data-act="follow">${c.following ? `${ci.check} Following` : `${ci.plus} Follow`}</button></div>`}
     <div class="cm-pv-acts">
       <button class="cm-act" data-act="message" ${c.can_message ? '' : 'disabled'}>${ci.chat}<span>Message</span></button>
-      <button class="cm-act" data-act="vibe" ${c.can_vibe || (online && isFriend(c.id)) ? '' : 'disabled'}>${ci.heart}<span>Vibe Ride</span></button>
       <button class="cm-act" data-act="challenge">${icons.flag}<span>Challenge</span></button>
     </div>
-    ${!c.can_message || !c.can_vibe ? `<p class="muted small cm-why">${ci.lock} ${!c.can_message && !c.can_vibe ? 'Messages and Vibe Ride invites' : !c.can_message ? 'Messages' : 'Vibe Ride invites'} follow ${esc(c.name)}'s privacy settings.</p>` : ''}
+    ${!c.can_message ? `<p class="muted small cm-why">${ci.lock} Messages follow ${esc(c.name)}'s privacy settings.</p>` : ''}
     ${safetyRow(c, true)}`;
 }
 
@@ -140,26 +138,12 @@ function bindActions(s: { el: HTMLElement; close: () => void }, c: Card, after?:
     }
     if (a === 'report') { s.close(); reportSheet(c, 'user', null); }
     if (a === 'message') { s.close(); openChatWith?.(c); }
-    if (a === 'vibe') { s.close(); void inviteToRide(c); }
     if (a === 'challenge') {
       s.close();
       if (challengeHook) challengeHook({ id: c.id, name: c.name });
       else { H().home('race'); toast(`${icons.flag} Pick a race, then send ${esc(c.name)} the challenge link`); }
     }
   }));
-}
-
-/** Vibe Ride invite: live through the lobby if they're online, or left for them to accept later */
-export async function inviteToRide(c: Pick<Card, 'id' | 'name'>) {
-  const p = H().profile();
-  if (p.guest) return toast('Create your rider first, so people know who they are riding with.');
-  if (onlineById(c.id)) return H().vibe.inviteOnline(c.id);
-  if (!isAccount(c.id)) return toast(`${esc(c.name)} isn't online right now.`);
-  const code = live.newCode();
-  const ok = await act(null, () => api.vibeInvite(c.id, code));
-  if (ok === undefined) return;
-  toast(`${ci.heart} Invite sent. The ride starts when ${esc(c.name)} accepts.`);
-  H().vibe.room(code, true);
 }
 
 export function reportSheet(c: Pick<Card, 'id' | 'name'>, kind: 'user' | 'post' | 'message' | 'crew', target: string | null, context?: unknown) {
@@ -191,7 +175,7 @@ export function reportSheet(c: Pick<Card, 'id' | 'name'>, kind: 'user' | 'post' 
 export type Category = 'friends_status' | 'buddies' | 'social' | 'compete' | 'hall' | 'course' | 'level' | 'search' | 'suggest';
 const CATS: Record<Category, [string, string, string]> = {
   friends_status: [ci.users, 'Looking for friends', 'Riders who set their status to Friends.'],
-  buddies: [ci.bike, 'Riding buddies', 'Riders looking for people to ride with. Invite one to a Vibe Ride.'],
+  buddies: [ci.bike, 'Riding buddies', 'Riders looking for people to ride with.'],
   social: [ci.party, 'Socializing', 'Riders who want to meet people and join activities.'],
   compete: [ci.trophy, 'Competitors', 'Riders looking for a race. Send them a challenge.'],
   hall: [ci.hall, 'Hall mates', 'Riders from your hall who show their hall.'],
@@ -304,10 +288,10 @@ export function friendsScreen(tab: FriendsTab = 'friends', from: () => void = ba
   })();
 }
 
-/** friends sorted into Online / Riding / Racing / In a Vibe Ride / At events / Offline */
+/** friends sorted into Online / Riding / Racing / At events / Offline */
 function groupByDoing(rows: Card[]) {
   const groups = new Map<string, Card[]>();
-  const order = ['Riding', 'Racing', 'In a Vibe Ride', 'At an event', 'Online', 'Offline'];
+  const order = ['Riding', 'Racing', 'At an event', 'Online', 'Offline'];
   for (const c of rows) {
     const d = doing(onlineById(c.id));
     const k = d ? DOING_TEXT[d] : 'Offline';
@@ -327,21 +311,17 @@ export function onlineScreen(from: () => void = back) {
     if (n) n.textContent = st === 'on' ? `${plural(list.length + 1, 'rider')} online on this campus, including you` : st === 'off' ? 'Offline' : 'Connecting…';
     if (!box) return;
     if (st === 'off') { box.innerHTML = empty(icons.wifiOff, 'Live riders unavailable', 'Riders online show here when you are connected.'); return; }
-    if (!list.length) { box.innerHTML = empty(ci.users, st === 'on' ? "You're the only one here" : 'Looking for riders…', st === 'on' ? 'Invite a friend to Vibe Ride, or check back soon.' : ''); return; }
+    if (!list.length) { box.innerHTML = empty(ci.users, st === 'on' ? "You're the only one here" : 'Looking for riders…', st === 'on' ? 'Check back soon.' : ''); return; }
     box.innerHTML = list.map((o) => {
       const d = doing(o)!;
       const c: Card = { id: o.key, name: o.state.name, hall: o.state.hall, level: o.state.level } as Card;
-      return personRow(c, `<span class="cm-row-acts"><button class="btn btn-ghost btn-sm" data-ride="${esc(o.key)}">${ci.heart} Ride</button></span>`, `<span class="cm-live-t"><i class="cm-dot"></i>${DOING_TEXT[d]}</span> · Level ${o.state.level}${hallName(o.state.hall) ? ` · ${esc(hallName(o.state.hall))}` : ''}`);
+      return personRow(c, '', `<span class="cm-live-t"><i class="cm-dot"></i>${DOING_TEXT[d]}</span> · Level ${o.state.level}${hallName(o.state.hall) ? ` · ${esc(hallName(o.state.hall))}` : ''}`);
     }).join('');
-    box.querySelectorAll<HTMLElement>('[data-ride]').forEach((b) => b.addEventListener('click', () => {
-      const o = list.find((x) => x.key === b.dataset.ride)!;
-      void inviteToRide({ id: o.key, name: o.state.name });
-    }));
     bindPeople(box, list.map((o) => ({ id: o.key, name: o.state.name, hall: o.state.hall, level: o.state.level }) as Card));
   };
   screen(`
     <div class="cm-head"><span class="cm-head-ico">${ci.users}</span><div><h1 class="title">Riders online</h1><p class="muted"><i class="cm-dot"></i> <span id="cmOnlineN"></span></p></div></div>
-    <p class="muted small">${fx.info} Riders who turned off "Show online status" aren't listed. Invites to ride need the other rider to accept.</p>
+    <p class="muted small">${fx.info} Riders who turned off "Show online status" aren't listed.</p>
     <div id="cmList" class="cm-list"></div>`, from, 'cm-screen');
   draw();
   const stop = H().watchOnline(() => { if (H().app.querySelector('.cm-screen #cmOnlineN')) draw(); else stop(); });

@@ -5,40 +5,50 @@ import { saveProfile, type Gender, type Profile, type RiderType } from '../state
 import { icons } from '../ui/icons';
 import { fx } from './icons';
 import { H, esc, on, screen } from './host';
+import { HALLS } from '../data/campus';
+import { DEPARTMENTS } from '../data/departments';
 import './vibe.css';
 
 // ---------- preferences ----------
 
-export type VibeWho = 'anyone' | 'male' | 'female';
-export type VibeFrom = 'anyone' | 'hall' | 'dept';
-export type VibeMood = 'ride' | 'friends' | 'date';
+export type VibeWho = 'anyone' | 'male' | 'female' | 'other';
+/** what the ride is for; 'any' lets the system find someone faster */
+export type VibeMood = 'any' | 'ride' | 'friends' | 'social' | 'date';
 export interface VibePrefs {
   who: VibeWho;
-  from: VibeFrom;
+  /** a hall id, or 'any' */
+  hall: string;
+  /** a department name, or 'any' */
+  dept: string;
   mood: VibeMood;
 }
 
-const PREFS_KEY = 'legonrush.vibeprefs.v1';
-const DEFAULT_PREFS: VibePrefs = { who: 'anyone', from: 'anyone', mood: 'ride' };
+const PREFS_KEY = 'legonrush.vibeprefs.v2';
+const DEFAULT_PREFS: VibePrefs = { who: 'anyone', hall: 'any', dept: 'any', mood: 'any' };
 
-const MOODS: [VibeMood, string, string, string][] = [
-  ['ride', icons.bike, 'Just ride', 'Easy company, no pressure.'],
-  ['friends', fx.friends, 'Make friends', 'Chat and meet someone new.'],
-  ['date', icons.heart, 'Date vibe', '18+ only. Matches other Date vibe riders.'],
+export const WHO_OPTS: [VibeWho, string][] = [['anyone', 'Any'], ['male', 'Male'], ['female', 'Female'], ['other', 'Other / Prefer not to say']];
+export const MOODS: [VibeMood, string, string, string][] = [
+  ['any', icons.sparkle, 'Any', 'Find someone faster.'],
+  ['ride', icons.bike, 'Just Ride', 'Easy company, no pressure.'],
+  ['friends', fx.friends, 'Make Friends', 'Chat and meet someone new.'],
+  ['social', icons.chat, 'Social', 'Hang out and talk while you ride.'],
+  ['date', icons.heart, 'Dating', '18+ only. Matches other Dating riders.'],
 ];
-export const MOOD_LINE: Record<VibeMood, string> = { ride: 'Here to just ride', friends: 'Here to make friends', date: 'Here for a date vibe' };
+export const MOOD_LINE: Record<VibeMood, string> = { any: 'Open to anything', ride: 'Here to just ride', friends: 'Here to make friends', social: 'Here to socialise', date: 'Here for dating' };
 const RIDER_TYPE: Record<RiderType, string> = { racer: 'Racer', explorer: 'Explorer', social: 'Social Rider', speedster: 'Speedster', chill: 'Chill Rider' };
+export const riderTypeName = (t?: RiderType | '') => (t ? RIDER_TYPE[t] : 'Rider');
 
-/** the last choice on this phone; Date vibe falls back to Just ride if the rider can't pick it */
+/** the last choice on this phone; Dating falls back to Any if the rider can't pick it */
 export function loadPrefs(p?: Profile): VibePrefs {
   let v: Partial<VibePrefs> = {};
   try { v = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') ?? {}; } catch { /* private mode */ }
   const prefs: VibePrefs = {
-    who: (['anyone', 'male', 'female'] as const).includes(v.who as VibeWho) ? v.who! : DEFAULT_PREFS.who,
-    from: (['anyone', 'hall', 'dept'] as const).includes(v.from as VibeFrom) ? v.from! : DEFAULT_PREFS.from,
-    mood: (['ride', 'friends', 'date'] as const).includes(v.mood as VibeMood) ? v.mood! : DEFAULT_PREFS.mood,
+    who: WHO_OPTS.some(([w]) => w === v.who) ? v.who! : DEFAULT_PREFS.who,
+    hall: typeof v.hall === 'string' && v.hall ? v.hall : 'any',
+    dept: typeof v.dept === 'string' && v.dept ? v.dept : 'any',
+    mood: MOODS.some(([m]) => m === v.mood) ? v.mood! : DEFAULT_PREFS.mood,
   };
-  if (prefs.mood === 'date' && p && dateCheck(p) !== 'ok') prefs.mood = 'ride';
+  if (prefs.mood === 'date' && p && dateCheck(p) !== 'ok') prefs.mood = 'any';
   return prefs;
 }
 
@@ -46,10 +56,13 @@ export function savePrefs(prefs: VibePrefs) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* private mode */ }
 }
 
-export function prefsSummary(prefs: VibePrefs) {
-  const who = { anyone: 'Anyone', male: 'Male riders', female: 'Female riders' }[prefs.who];
-  const from = { anyone: '', hall: ' from my hall', dept: ' from my department' }[prefs.from];
-  return `${who}${from} · ${MOODS.find((m) => m[0] === prefs.mood)![2]}`;
+export function prefsSummary(prefs: VibePrefs, hallName: (id: string) => string = (x) => x) {
+  return [
+    prefs.who === 'anyone' ? 'Anyone' : WHO_OPTS.find((w) => w[0] === prefs.who)![1],
+    prefs.hall === 'any' ? '' : hallName(prefs.hall),
+    prefs.dept === 'any' ? '' : prefs.dept,
+    MOODS.find((m) => m[0] === prefs.mood)![2],
+  ].filter(Boolean).join(' · ');
 }
 
 // ---------- age ----------
@@ -64,7 +77,7 @@ export function ageOf(dob: string, now = new Date()): number | null {
   return age >= 0 && age < 120 ? age : null;
 }
 
-/** can this rider pick Date vibe: 18 or over, under 18, or no birthday yet */
+/** can this rider pick Dating: 18 or over, under 18, or no birthday yet */
 export function dateCheck(p: Profile): 'ok' | 'young' | 'unknown' {
   const age = ageOf(p.about.dob);
   return age === null ? 'unknown' : age >= 18 ? 'ok' : 'young';
@@ -79,30 +92,48 @@ export interface Seeker {
   department: string;
   gender?: Gender;
   riderType?: RiderType | '';
-  /** from where: anyone, their hall or their department */
-  want?: VibeFrom;
   who?: VibeWho;
+  /** the hall and department they want, or 'any' */
+  wantHall?: string;
+  wantDept?: string;
   mood?: VibeMood;
 }
 
 /** does a's filter let b through */
 function accepts(a: Seeker, b: Seeker) {
   const who = a.who ?? 'anyone';
-  const from = a.want ?? 'anyone';
-  if (who !== 'anyone' && b.gender !== who) return false;
-  if (from === 'hall' && a.hall !== b.hall) return false;
-  if (from === 'dept' && (!a.department || a.department !== b.department)) return false;
+  if (who === 'other' ? b.gender === 'male' || b.gender === 'female' : who !== 'anyone' && b.gender !== who) return false;
+  if (a.wantHall && a.wantHall !== 'any' && a.wantHall !== b.hall) return false;
+  if (a.wantDept && a.wantDept !== 'any' && a.wantDept !== b.department) return false;
   return true;
 }
 
-/** Two riders match only if both filters let the other through, Date vibe only meets Date vibe, and you haven't blocked them. */
-export function fits(me: Seeker, them: Seeker) {
-  return me.id !== them.id && !isBlocked(them.id) && (me.mood === 'date') === (them.mood === 'date') && accepts(me, them) && accepts(them, me);
+/** the vibes fit: Dating only meets Dating; Any meets every other vibe; otherwise the same vibe */
+function moodsFit(a: VibeMood = 'any', b: VibeMood = 'any') {
+  if (a === 'date' || b === 'date') return a === b;
+  return a === 'any' || b === 'any' || a === b;
 }
 
-/** the room's vibe once two riders meet: Date vibe only when both chose it */
-export const roomMood = (a?: VibeMood, b?: VibeMood): VibeMood =>
-  a === 'date' && b === 'date' ? 'date' : a === 'friends' || b === 'friends' ? 'friends' : 'ride';
+/** Two riders match only if both filters let the other through, the vibes fit, and you haven't blocked them. */
+export function fits(me: Seeker, them: Seeker) {
+  return me.id !== them.id && !isBlocked(them.id) && moodsFit(me.mood, them.mood) && accepts(me, them) && accepts(them, me);
+}
+
+/** the room's vibe once two riders meet */
+export const roomMood = (a: VibeMood = 'any', b: VibeMood = 'any'): VibeMood => (a !== 'any' ? a : b !== 'any' ? b : 'ride');
+
+/** how well two riders fit, 60–99%: same hall, same department, same vibe, same rider type, close in level */
+export function matchScore(me: Seeker & { level?: number }, them: Seeker & { level?: number }) {
+  let s = 62;
+  if (me.hall && me.hall === them.hall) s += 10;
+  if (me.department && me.department === them.department) s += 10;
+  if (me.mood && me.mood === them.mood && me.mood !== 'any') s += 8;
+  if (me.riderType && me.riderType === them.riderType) s += 5;
+  if (me.level && them.level) s += Math.max(0, 4 - Math.abs(me.level - them.level));
+  // a little spread so two riders who share nothing still differ
+  const h = [...(me.id + them.id)].reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % 5;
+  return Math.min(99, s + h);
+}
 
 /** "Explorer · Volta Hall · Here to make friends" */
 export function vibeLine(s: Pick<Seeker, 'riderType' | 'mood'>, hallName: string) {
@@ -259,51 +290,81 @@ export function floatIcon(svg: string) {
   setTimeout(() => el.remove(), 1800);
 }
 
-// ---------- the setup screen: preferences, or invite a friend ----------
+// ---------- the Vibe Ride screens: ready, preferences ----------
 
-const seg = <T extends string>(id: string, opts: [T, string][], value: T) =>
-  `<div class="seg wide" id="${id}">${opts.map(([v, l]) => `<button data-v="${v}" class="${v === value ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+const photoUrl = (n: string) => `${import.meta.env.BASE_URL}photos/${n}.webp`;
+const hallLabel = (id: string) => HALLS.find((h) => h.id === id)?.name ?? id;
 
-/** Preferences before searching, with Invite a friend as the other way in. */
-export function vibeSetup(o: { find: (p: VibePrefs) => void; create: () => void; join: (code: string) => void; back: () => void }) {
+/** Vibe Ride, opened from Home: "Ready to meet someone?", then preferences, then the search. */
+export function vibeSetup(o: { find: (p: VibePrefs) => void; create: () => void; join: (code: string) => void; back: () => void }, step: 'ready' | 'prefs' = 'ready') {
+  if (step === 'prefs') return vibePrefs(o);
+  const prefs = loadPrefs(H().profile());
+  screen(`
+    <p class="kicker">${icons.heart} Vibe Ride</p>
+    <div class="vx-hero" style="--vx-img:url('${photoUrl('mode-vibe')}')">
+      <div class="vx-hero-txt">
+        <h1>Ready to meet someone?</h1>
+        <p>Find a rider online and start a spontaneous ride around campus.</p>
+        <button class="btn btn-primary" id="vxGo">Find My Vibe →</button>
+      </div>
+    </div>
+    <p class="vx-tagline">Meet someone. Match instantly. Ride together.</p>
+    <div class="vx-steps">
+      <div><span>1</span><b>Set your preferences</b><small>${esc(prefsSummary(prefs, hallLabel))}</small></div>
+      <div><span>2</span><b>Get a live match</b><small>Someone online right now, not a list of profiles.</small></div>
+      <div><span>3</span><b>Ride together</b><small>No race, no winner. Ride, chat and stop whenever you like.</small></div>
+    </div>
+    <button class="btn btn-link" id="vxPrefs">${icons.gear} Change preferences</button>
+    <details class="card vx-friend">
+      <summary><b>Ride with someone you know</b><small>Create a private ride, or join with a code</small></summary>
+      <div class="stack" style="gap:10px;margin-top:10px">
+        <button class="btn btn-ghost" id="vxNew">Create a private ride</button>
+        <div class="row"><input class="code-in" id="vxCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Got a code?"><button class="btn btn-ghost btn-sm" id="vxJoin">Join</button></div>
+      </div>
+    </details>`, o.back, 'vibe-warm vx-setup');
+  on('#vxGo', 'click', () => vibePrefs(o));
+  on('#vxPrefs', 'click', () => vibePrefs(o));
+  on('#vxNew', 'click', () => o.create());
+  on('#vxJoin', 'click', () => {
+    const code = (H().app.querySelector<HTMLInputElement>('#vxCode')!.value || '').trim().toUpperCase();
+    if (/^[A-Z0-9]{6}$/.test(code)) o.join(code);
+  });
+}
+
+function vibePrefs(o: Parameters<typeof vibeSetup>[0]) {
   const p = H().profile();
   const prefs = loadPrefs(p);
   const check = dateCheck(p);
-  const moodNote = check === 'young' ? 'Date vibe is for riders 18 and over.' : check === 'unknown' ? 'Date vibe is 18+. Add your date of birth to unlock it.' : '';
+  const moodNote = check === 'young' ? 'Dating is for riders 18 and over.' : check === 'unknown' ? '18+. Add your date of birth below to unlock it.' : '';
+  const opt = (v: string, l: string, cur: string) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`;
   screen(`
     <p class="kicker">${icons.heart} Vibe Ride</p>
-    <h1 class="title">Find your ride</h1>
-    <p class="muted">Tell us who you'd like to ride with. You only meet riders whose choices fit yours too.</p>
+    <h1 class="title">Set your preferences</h1>
+    <p class="muted">Choose who you'd like to be matched with. You only meet riders whose choices fit yours too.</p>
     <div class="card stack vx-prefs" style="gap:10px">
-      <b class="vx-label">Ride with</b>
-      ${seg<VibeWho>('vxWho', [['anyone', 'Anyone'], ['male', 'Male'], ['female', 'Female']], prefs.who)}
-      <b class="vx-label">From</b>
-      ${seg<VibeFrom>('vxFrom', [['anyone', 'Anyone'], ['hall', 'My hall'], ['dept', 'My department']], prefs.from)}
-      ${prefs.from === 'dept' && !p.department ? '<p class="muted small">Add your department in your profile to match by department.</p>' : ''}
-      <b class="vx-label">Vibe</b>
+      <b class="vx-label">Gender</b>
+      <div class="vx-chips" id="vxWho">${WHO_OPTS.map(([v, l]) => `<button data-v="${v}" class="${v === prefs.who ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <label class="vx-label" for="vxHall">Hall</label>
+      <select class="vx-select" id="vxHall">${opt('any', 'Any Hall', prefs.hall)}${HALLS.filter((h) => h.id !== 'none').map((h) => opt(h.id, h.name, prefs.hall)).join('')}</select>
+      <label class="vx-label" for="vxDept">Department</label>
+      <select class="vx-select" id="vxDept">${opt('any', 'Any Department', prefs.dept)}${DEPARTMENTS.map((g) => `<optgroup label="${esc(g.college)}">${g.departments.map((d) => opt(d, d, prefs.dept)).join('')}</optgroup>`).join('')}</select>
+      <b class="vx-label">Connection type</b>
       <div class="vx-moods" id="vxMood">${MOODS.map(([v, ico, t, x]) => {
         const off = v === 'date' && check !== 'ok';
         return `<button class="vx-mood ${v === prefs.mood ? 'on' : ''} ${v === 'date' ? 'date' : ''}" data-v="${v}" ${off ? 'disabled aria-disabled="true"' : ''}><span class="vx-mood-ico">${ico}</span><span><b>${t}</b><small>${off ? moodNote : x}</small></span></button>`;
       }).join('')}</div>
       ${check === 'unknown' ? `<form class="vx-dob" id="vxDob"><label for="vxDobIn" class="muted small">Date of birth (asked once, kept on your profile)</label><div class="row"><input id="vxDobIn" type="date" max="${new Date().toISOString().slice(0, 10)}" required><button class="btn btn-ghost btn-sm">Save</button></div><p class="muted small vx-note" hidden></p></form>` : ''}
       <p class="vx-tip" id="vxTip" ${prefs.mood === 'date' ? '' : 'hidden'}>${fx.shield} ${SAFETY_TIP}</p>
-      <button class="btn btn-primary" id="vxFind">Find a rider</button>
-    </div>
-    <p class="vx-or"><span>or</span></p>
-    <div class="card stack" style="gap:10px">
-      <b>Invite a friend</b>
-      <p class="muted small">Create a private ride and share the link or code on Snapchat, WhatsApp or anywhere.</p>
-      <button class="btn btn-ghost" id="vxNew">Create a private ride</button>
-      <div class="row"><input class="code-in" id="vxCode" maxlength="6" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Got a code?"><button class="btn btn-ghost btn-sm" id="vxJoin">Join</button></div>
-    </div>`, o.back, 'vibe-warm vx-setup');
+      <button class="btn btn-primary" id="vxFind">Find My Vibe →</button>
+    </div>`, () => vibeSetup(o), 'vibe-warm vx-setup');
   const app = H().app;
-  const pickSeg = (id: string, key: 'who' | 'from') => on(`#${id} button`, 'click', (_, el) => {
-    (prefs as unknown as Record<string, string>)[key] = el.dataset.v!;
-    app.querySelectorAll(`#${id} button`).forEach((b) => b.classList.toggle('on', b === el));
+  on('#vxWho button', 'click', (_, el) => {
+    prefs.who = el.dataset.v as VibeWho;
+    app.querySelectorAll('#vxWho button').forEach((b) => b.classList.toggle('on', b === el));
     savePrefs(prefs);
   });
-  pickSeg('vxWho', 'who');
-  pickSeg('vxFrom', 'from');
+  on('#vxHall', 'change', (_, el) => { prefs.hall = (el as HTMLSelectElement).value; savePrefs(prefs); });
+  on('#vxDept', 'change', (_, el) => { prefs.dept = (el as HTMLSelectElement).value; savePrefs(prefs); });
   on('#vxMood button', 'click', (_, el) => {
     if ((el as HTMLButtonElement).disabled) return;
     prefs.mood = el.dataset.v as VibeMood;
@@ -320,19 +381,14 @@ export function vibeSetup(o: { find: (p: VibePrefs) => void; create: () => void;
     p.about.dob = v;
     saveProfile(p);
     if (age >= 18) savePrefs({ ...prefs, mood: 'date' });
-    vibeSetup(o);
+    vibePrefs(o);
   });
   on('#vxFind', 'click', () => { savePrefs(prefs); o.find({ ...prefs }); });
-  on('#vxNew', 'click', () => o.create());
-  on('#vxJoin', 'click', () => {
-    const code = (app.querySelector<HTMLInputElement>('#vxCode')!.value || '').trim().toUpperCase();
-    if (/^[A-Z0-9]{6}$/.test(code)) o.join(code);
-  });
 }
 
-// ---------- the match preview: who they are, Accept or Skip ----------
+// ---------- the match: "We found your vibe!", Start or Skip ----------
 
-export interface PreviewRider { name: string; hallName: string; hallColor: string; riderType?: RiderType | ''; mood?: VibeMood; level?: number }
+export interface PreviewRider { name: string; hallName: string; hallColor: string; department?: string; riderType?: RiderType | ''; mood?: VibeMood; level?: number; score: number }
 
 /** Shows the matched rider before joining. Returns a function that switches it to "waiting for them". */
 export function matchPreview(r: PreviewRider, o: { accept: () => void; skip: () => void }) {
@@ -342,16 +398,20 @@ export function matchPreview(r: PreviewRider, o: { accept: () => void; skip: () 
     <div class="screen scrim fade-in vibe-warm vx-preview ${r.mood === 'date' ? 'date' : ''}">
       <div class="grow"></div>
       <div class="wrap stack center-text">
-        <p class="kicker">${icons.heart} We found someone</p>
+        <p class="kicker">${icons.heart} Vibe Ride</p>
+        <h2 class="vx-found">We found your vibe!</h2>
         <div class="vx-match-card">
           <span class="avatar vx-avatar" style="background:${r.hallColor}">${esc(r.name.slice(0, 1).toUpperCase())}</span>
           <h1 class="title">${esc(r.name)}</h1>
-          <p class="vx-vline">${esc(vibeLine(r, r.hallName))}</p>
-          ${r.level ? `<span class="badge gold">Level ${r.level}</span>` : ''}
+          <p class="vx-mline">${esc(r.hallName)}</p>
+          ${r.department ? `<p class="vx-mline muted">${esc(r.department)}</p>` : ''}
+          <div class="vx-mchips"><span>${icons.bike} ${esc(riderTypeName(r.riderType))}</span><span class="on"><i class="vx-dot"></i> Online</span>${r.mood && r.mood !== 'any' ? `<span>${esc(MOOD_LINE[r.mood])}</span>` : ''}</div>
+          <p class="vx-score"><b>${r.score}%</b> Match</p>
         </div>
         ${r.mood === 'date' ? `<p class="vx-tip">${fx.shield} ${SAFETY_TIP}</p>` : ''}
-        <p class="muted small" id="vxWait">Accept to ride together, or skip to keep looking.</p>
-        <div class="two" id="vxBtns"><button class="btn btn-ghost" id="vxSkip">Skip</button><button class="btn btn-primary" id="vxAccept">Accept</button></div>
+        <p class="muted small" id="vxWait">If you both accept, you ride together.</p>
+        <button class="btn btn-primary" id="vxAccept">Start Vibe Ride →</button>
+        <button class="btn btn-ghost" id="vxSkip">Skip →</button>
       </div>
     </div>`;
   on('#vxAccept', 'click', () => o.accept());
@@ -359,7 +419,7 @@ export function matchPreview(r: PreviewRider, o: { accept: () => void; skip: () 
   H().onBack(() => o.skip());
   return () => {
     const w = app.querySelector<HTMLElement>('#vxWait');
-    if (w) w.textContent = `Waiting for ${r.name}…`;
+    if (w) w.textContent = `Waiting for ${r.name} to accept…`;
     const a = app.querySelector<HTMLButtonElement>('#vxAccept');
     if (a) { a.disabled = true; a.textContent = 'Accepted'; }
   };

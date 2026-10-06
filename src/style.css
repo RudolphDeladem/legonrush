@@ -483,3 +483,8 @@ i.desk-only { font-style: normal; }
 .pace-box span { opacity: 0.8; }
 .pace-box b { font-size: 12px; }
 .pace-box input { grid-column: 1 / -1; width: 100%; accent-color: #f5c518; height: 28px; margin: 0; }
+.vx-ride-acts { display: flex; gap: 6px; }
+.vx-ride-acts button { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 999px; border: 0; background: rgba(10,16,32,0.72); color: #fff; font: 700 13px/1 inherit; font-family: inherit; }
+.vx-ride-acts button .i { width: 16px; height: 16px; }
+.vx-ride-acts button.on { background: #f5c518; color: #0b1530; }
+.vx-ride-acts #vxEnd { margin-left: auto; background: rgba(200,40,60,0.85); }

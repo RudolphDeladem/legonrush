@@ -369,7 +369,7 @@ export async function notificationsSheet() {
   const s = sheet(`${sheetHead(`${ci.bell} Notifications`)}<div id="cmNotifs" class="cm-list">${api.signedIn() ? loading(3) : ''}</div>`);
   const box = s.el.querySelector<HTMLElement>('#cmNotifs')!;
   if (!api.signedIn()) {
-    box.innerHTML = empty(ci.bell, 'Sign in for notifications', 'Friend requests, messages, crew news and Vibe Ride invites show up here.', '<button class="btn btn-primary btn-sm" data-cm-signin>Sign in</button>');
+    box.innerHTML = empty(ci.bell, 'Sign in for notifications', 'Friend requests, messages, and crew news show up here.', '<button class="btn btn-primary btn-sm" data-cm-signin>Sign in</button>');
     bindSignIn(box);
     return;
   }
@@ -386,7 +386,7 @@ export async function notificationsSheet() {
 
 export function notifIcon(n: Notification) {
   const k = n.kind;
-  return k.startsWith('friend') ? ci.userPlus : k === 'follow' ? ci.star : k.startsWith('crew') ? ci.shield : k.startsWith('dating') || k.startsWith('vibe') ? ci.heart : k === 'react' ? icons.flame : ci.bell;
+  return k.startsWith('friend') ? ci.userPlus : k === 'follow' ? ci.star : k.startsWith('crew') ? ci.shield : k.startsWith('dating') ? ci.heart : k === 'react' ? icons.flame : ci.bell;
 }
 
 export function openNotification(n: Notification) {
@@ -396,6 +396,5 @@ export function openNotification(n: Notification) {
   if (k.startsWith('crew') && n.ref) return openCrew(Number(n.ref), here);
   if (k === 'dating_match') return datingScreen(here, 'matches');
   if (k === 'react') return feedScreen('home', here);
-  if (k === 'vibe_invite' && n.ref) return H().vibe.room(n.ref, false);
   here();
 }

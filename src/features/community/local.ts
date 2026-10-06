@@ -64,16 +64,6 @@ export function remember(patch: Partial<Cache>) {
 }
 export const isFriend = (id: string) => cache.friends.includes(id);
 
-/** Vibe Ride invites that arrive live: follow "who can invite me to Vibe Ride" and blocks */
-export function allowVibeInvite(p: Profile | null, fromId: string) {
-  if (!p || vb.isBlocked(fromId)) return false;
-  const who = social(p).privacy.vibeInvites;
-  if (who === 'everyone') return true;
-  if (who === 'nobody') return false;
-  if (who === 'friends') return cache.friends.includes(fromId);
-  return cache.matches.includes(fromId);
-}
-
 /** a block also keeps them out of Vibe Ride matching on this phone */
 export function blockLocal(id: string, name: string) {
   vb.block(id, name);
