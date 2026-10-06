@@ -27,6 +27,9 @@ import * as fx from './features';
 import * as money from './features/money-ui';
 import * as vb from './features/vibe';
 import { tabView, type TabId } from './tabs/registry';
+// Garage & Store: bike looks and the stats rides use
+import * as garage from './features/garage/garage';
+import { openStore } from './tabs/store';
 import { showSystem, takeDue } from './features/notify';
 import './tabs';
 
@@ -142,6 +145,7 @@ const riderLook = (p: Profile) => ({ ...p.look, gender: p.gender, jersey: p.look
 function applyLook(p: Profile | null = profile) {
   if (!p) return;
   game.setLook(riderLook(p), fx.bikePaint(p));
+  game.setBikeStyle(garage.styleFor(p));
 }
 
 // ---------- splash + welcome ----------
@@ -863,7 +867,8 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   if (!profile) return;
   applyLook();
   if (!opts.live && !opts.rivals && !opts.challenge) saveLastRide(route);
-  const bike = bikeById(money.isPrizeRide(route.id) ? money.PRIZE_BIKE : profile.bike);
+  // the Garage's stats (bike + parts) ride; prize rides all use the same plain bike
+  const bike = money.isPrizeRide(route.id) ? bikeById(money.PRIZE_BIKE) : garage.rideSpec(profile);
   // the first ride lends rim brakes, so the brake tip has something to teach
   const brakes = tutorial ? Math.max(1, profile.gear.brakes) : profile.gear.brakes;
   const RING = 2 * Math.PI * 52;
@@ -1431,7 +1436,12 @@ function challengeIntro(ch: Challenge | null) {
   onBack(() => home());
 }
 
+/** the Garage tab (src/tabs/garage.ts); the older all-in-one screen below is kept only as a fallback */
 function garageScreen() {
+  if (tabView('garage')) return home('garage');
+  oldGarageScreen();
+}
+function oldGarageScreen() {
   const p = profile!;
   const owns = (b: BikeSpec) => (!b.price && !b.event) || p.ownedBikes.includes(b.id);
   const card = (b: BikeSpec) => {
@@ -1552,7 +1562,7 @@ function nextStep(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras,
   if (explore) return { label: 'Go somewhere else', run: () => explorePicker(route.id === 'explore' ? route.to.name : undefined) };
   if (!r.finished) {
     // out of helmets and able to buy one: the shop is the fix
-    if (!p.gear.helmets && p.coins >= SHOP.helmet.price) return { label: `Get a helmet · ${fmt(SHOP.helmet.price)} coins`, run: () => garageScreen() };
+    if (!p.gear.helmets && p.coins >= SHOP.helmet.price) return { label: `Get a helmet · ${fmt(SHOP.helmet.price)} coins`, run: () => openStore('gear') };
     return { label: 'Retry', run: again };
   }
   const level = levelFor(p.xp);
@@ -1560,7 +1570,7 @@ function nextStep(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras,
   if (next) return { label: `Next race: ${next.name}`, run: () => play(false, raceRoute(next)) };
   const bike = GARAGE_BIKES.find((b) => b.price && !p.ownedBikes.includes(b.id) && p.coins >= b.price);
   const brake = SHOP.brakes.find((b) => b.level > p.gear.brakes && p.coins >= b.price);
-  if (bike || brake) return { label: `Shop: ${bike ? bike.name : brake!.name}`, run: () => garageScreen() };
+  if (bike || brake) return { label: `Shop: ${bike ? bike.name : brake!.name}`, run: () => openStore(bike ? 'bikes' : 'parts') };
   return { label: 'Ride again', run: again };
 }
 
@@ -1899,7 +1909,7 @@ function home(next: Tab = 'home') {
   tabCleanup = null;
   // tabs not rebuilt yet open their older screens
   if (want === 'map' && !tabView('map')) return explorePicker();
-  if (want === 'garage' && !tabView('garage')) return garageScreen();
+  if (want === 'garage' && !tabView('garage')) return oldGarageScreen();
   if (want === 'store' && !tabView('store')) return money.buyCoinsScreen();
   tab = want as TabId | 'ride';
   game.showcase();
@@ -3742,6 +3752,7 @@ fx.initFeatures({
   home: (t) => home(t),
   explore: (from, to) => explorePicker(from, to),
   garage: () => garageScreen(),
+  bike3d: { style: (s) => game.setBikeStyle(s), view: (v) => game.viewBike(v), yaw: () => game.bikeYaw, scene: (t) => game.setTimeOfDay(t), refresh: (p) => applyLook(p ?? profile) },
 });
 money.initMoney();
 

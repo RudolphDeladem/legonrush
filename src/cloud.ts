@@ -3,7 +3,7 @@
 // signs in or opens a leaderboard, so guests never download it.
 // Tables and rules live in supabase/schema.sql.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { newGear, normalizeProfile, type Gear, type Profile } from './state';
+import { newGarage, newGear, normalizeProfile, type Gear, type GarageSave, type Profile } from './state';
 import { SUPABASE_KEY, SUPABASE_REF, SUPABASE_URL, weekStart } from './cloud-config';
 
 const AUTH_KEY = `sb-${SUPABASE_REF}-auth-token`;
@@ -210,6 +210,22 @@ function mergeFeatures(local: Profile, remote: Profile) {
     missionBest,
     diamonds: Math.max(local.diamonds ?? 0, remote.diamonds ?? 0),
     items: maxEach(local.items ?? {}, remote.items ?? {}),
+    garage: mergeGarage(local.garage, remote.garage),
+  };
+}
+
+/** Garage & Store: the newer device's looks, parts and loadouts; the best of both for everything earned */
+function mergeGarage(a?: GarageSave, b?: GarageSave): GarageSave {
+  if (!a || !b) return (a ?? b ?? newGarage());
+  const newer = (a.at ?? 0) >= (b.at ?? 0) ? a : b;
+  return {
+    ...newer,
+    levels: maxEach(a.levels, b.levels),
+    wishlist: union(a.wishlist, b.wishlist),
+    hallWeeks: union(a.hallWeeks, b.hallWeeks),
+    daily: (a.daily ?? '') > (b.daily ?? '') ? a.daily : b.daily,
+    starter: !!(a.starter || b.starter),
+    v: Math.max(a.v ?? 0, b.v ?? 0),
   };
 }
 

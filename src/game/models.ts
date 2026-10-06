@@ -21,8 +21,111 @@ export interface RiderRig {
   crank: THREE.Object3D;
   legs: [THREE.Object3D, THREE.Object3D];
   setJersey(color: string): void;
+  /** paints the whole frame one colour */
   setBikeColor(color: string): void;
   setLook(look: RiderLook): void;
+  /** the garage's customisation: colours, finish, frame, wheels, bars, decal, lights and accessories */
+  setBikeStyle(style: BikeStyle): void;
+  /** hide the rider to show the bike on its own */
+  showRider(on: boolean): void;
+}
+
+export type BikeFinish = 'gloss' | 'matte' | 'metallic' | 'carbon' | 'chrome' | 'neon';
+/** How a bike looks (see the Garage's Customize screen). Colours are hex. */
+export interface BikeStyle {
+  primary: string;
+  secondary: string;
+  accent: string;
+  finish: BikeFinish;
+  frame: 'diamond' | 'step' | 'mtb';
+  wheel: 'spoke' | 'deep' | 'disc' | 'fat';
+  tyre: string;
+  bars: 'flat' | 'drop' | 'riser';
+  grips: 'dark' | 'accent';
+  seat: 'race' | 'comfy';
+  pedals: 'dark' | 'accent';
+  /** a printed pattern on the frame tubes; colour defaults to the accent */
+  decal: { pattern: string; color?: string; text?: string } | null;
+  /** lamp colour, '' for none; glow adds a light strip under the frame */
+  light: string;
+  glow: boolean;
+  basket: boolean;
+  rack: boolean;
+  bottle: boolean;
+}
+
+/** paint finishes: how shiny, how metallic, carbon weave or a neon glow */
+let carbonTex: THREE.CanvasTexture | null = null;
+function finishMaterial(m: THREE.MeshStandardMaterial, f: BikeFinish) {
+  const set: Record<BikeFinish, [number, number]> = { gloss: [0.32, 0.55], matte: [0.85, 0.08], metallic: [0.22, 0.9], carbon: [0.38, 0.35], chrome: [0.06, 1], neon: [0.4, 0.1] };
+  const [rough, metal] = set[f] ?? set.gloss;
+  m.roughness = rough;
+  m.metalness = metal;
+  m.emissive.set(f === 'neon' ? m.color : '#000000');
+  m.emissiveIntensity = f === 'neon' ? 0.55 : 1;
+  const map = f === 'carbon' ? (carbonTex ??= weave()) : null;
+  if (m.map !== map) {
+    m.map = map;
+    m.needsUpdate = true;
+  }
+}
+function weave() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#9a9a9a';
+  g.fillRect(0, 0, 32, 32);
+  g.fillStyle = '#5a5a5a';
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) if ((x + y) % 2) g.fillRect(x * 8, y * 8, 8, 8);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 12);
+  return t;
+}
+
+/** A decal printed round a tube: the canvas runs across (u) and along (v) the tube. */
+function decalTexture(pattern: string, color: string, base: string, text?: string) {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 512;
+  const g = c.getContext('2d')!;
+  const along = (fn: () => void) => {
+    // draw in "along the tube" space: x runs down the tube, y round it
+    g.save();
+    g.translate(128, 0);
+    g.rotate(Math.PI / 2);
+    fn();
+    g.restore();
+  };
+  const word = (t: string, size = 54) => along(() => {
+    g.font = `800 ${size}px system-ui, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = color;
+    g.fillText(t, 256, 64, 480);
+  });
+  g.fillStyle = color;
+  if (pattern === 'stripe') { g.fillRect(0, 0, 128, 512); g.fillStyle = base; g.fillRect(0, 60, 128, 120); g.fillRect(0, 330, 128, 120); }
+  else if (pattern === 'speed') for (let i = -4; i < 16; i++) { g.beginPath(); g.moveTo(0, i * 40); g.lineTo(128, i * 40 + 90); g.lineTo(128, i * 40 + 104); g.lineTo(0, i * 40 + 14); g.fill(); }
+  else if (pattern === 'checker') for (let y = 0; y < 16; y++) for (let x = 0; x < 4; x++) { if ((x + y) % 2) g.fillRect(x * 32, y * 32, 32, 32); }
+  else if (pattern === 'kente') {
+    const bands = ['#f2b705', '#0f7b3a', '#c8102e', '#111111'];
+    for (let i = 0; i < 16; i++) { g.fillStyle = bands[i % 4]; g.fillRect(0, i * 32, 128, 32); g.fillStyle = i % 2 ? '#f2b705' : '#111111'; g.fillRect(16 + (i % 2) * 48, i * 32 + 8, 32, 16); }
+  } else if (pattern === 'flames') for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(0, 512 - i * 60); g.quadraticCurveTo(64, 420 - i * 60, 128, 512 - i * 60 - 140); g.lineTo(128, 512); g.lineTo(0, 512); g.globalAlpha = 0.35 + i * 0.1; g.fill(); }
+  else if (pattern === 'sunset') { const gr = g.createLinearGradient(0, 0, 0, 512); gr.addColorStop(0, '#ffcf4a'); gr.addColorStop(0.5, '#ff7a3d'); gr.addColorStop(1, '#c2366b'); g.fillStyle = gr; g.fillRect(0, 0, 128, 512); }
+  else if (pattern === 'dots') for (let y = 0; y < 16; y++) for (let x = 0; x < 4; x++) { g.beginPath(); g.arc(16 + x * 32 + (y % 2) * 16, 16 + y * 32, 7, 0, Math.PI * 2); g.fill(); }
+  else if (pattern === 'map') { g.lineWidth = 6; g.strokeStyle = color; g.setLineDash([18, 14]); g.beginPath(); g.moveTo(64, 0); for (let y = 0; y <= 512; y += 64) g.lineTo(y % 128 ? 20 : 108, y); g.stroke(); g.setLineDash([]); g.lineWidth = 10; g.beginPath(); g.moveTo(40, 420); g.lineTo(88, 470); g.moveTo(88, 420); g.lineTo(40, 470); g.stroke(); }
+  else if (pattern === 'hall') { g.fillRect(0, 0, 128, 70); g.fillRect(0, 442, 128, 70); word(text ?? '', 64); }
+  else word(text ?? 'LEGONRUSH');
+  if (text && pattern !== 'hall' && pattern !== 'word') { g.clearRect(0, 196, 128, 120); word(text, 46); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  // printed twice round the tube, so it reads from either side
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.set(2, 1);
+  return t;
 }
 
 const Y = new THREE.Vector3(0, 1, 0);
@@ -67,7 +170,10 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
   root.add(body);
 
   // ---------- bike (faces -z) ----------
+  // primary paints the main triangle, secondary the fork and rear stays, accent the rims, grips and chain
   const frameMat = std(bikeColor, { metalness: 0.55, roughness: 0.32 });
+  const stayMat = std(bikeColor, { metalness: 0.55, roughness: 0.32 });
+  const accentMat = std('#c9ccd2', { metalness: 0.85, roughness: 0.28 });
   const dark = std('#17191d', { roughness: 0.55 });
   const rubber = std('#141518', { roughness: 0.92 });
   const metal = std('#c9ccd2', { metalness: 0.85, roughness: 0.28 });
@@ -79,21 +185,27 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
 
   const wheelR = 0.34;
   const hubY = wheelR + 0.03;
-  // one wheel geometry shared by both: tyre, and rim + spokes + hub in metal
+  // one wheel geometry shared by both: tyre, rim and hub in the accent colour, spokes in metal
   const tyreGeo = new THREE.TorusGeometry(wheelR, 0.03, 8, 36).rotateY(Math.PI / 2);
-  const spokes: THREE.BufferGeometry[] = [new THREE.TorusGeometry(wheelR - 0.032, 0.013, 5, 36).rotateY(Math.PI / 2)];
-  spokes.push(new THREE.CylinderGeometry(0.028, 0.028, 0.11, 10).rotateZ(Math.PI / 2));
+  const rimRingGeo = merge([
+    new THREE.TorusGeometry(wheelR - 0.032, 0.013, 5, 36).rotateY(Math.PI / 2),
+    new THREE.CylinderGeometry(0.028, 0.028, 0.11, 10).rotateZ(Math.PI / 2),
+  ]);
+  const spokes: THREE.BufferGeometry[] = [];
   for (let i = 0; i < 18; i++) {
     const a = (i / 18) * Math.PI * 2;
     const side = i % 2 ? 0.035 : -0.035;
     spokes.push(tubeGeo(v3(side, 0, 0), v3(0, Math.sin(a) * (wheelR - 0.04), Math.cos(a) * (wheelR - 0.04)), 0.0035, 3));
   }
-  const rimGeo = merge(spokes);
+  const spokeGeo = merge(spokes);
   const wheels: THREE.Object3D[] = [];
+  const tyres: THREE.Mesh[] = [];
+  const spokeMeshes: THREE.Mesh[] = [];
   for (const z of [-0.55, 0.55]) {
     const w = new THREE.Group();
-    add(tyreGeo, rubber, w);
-    add(rimGeo, metal, w);
+    tyres.push(add(tyreGeo, rubber, w));
+    add(rimRingGeo, accentMat, w);
+    spokeMeshes.push(add(spokeGeo, metal, w));
     w.position.set(0, hubY, z);
     body.add(w);
     wheels.push(w);
@@ -105,24 +217,45 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
   const headLow = v3(0, 0.71, -0.45);
   const rearHub = (s: number) => v3(s * 0.065, hubY, 0.55);
   const frontHub = (s: number) => v3(s * 0.055, hubY, -0.55);
-  add(
-    merge([
-      tubeGeo(seatTop, headTop.clone().add(v3(0, -0.03, 0)), 0.024, 10),
-      tubeGeo(bb, headLow.clone().add(v3(0, 0.03, 0)), 0.032, 10),
-      tubeGeo(bb.clone().add(v3(0, -0.02, 0)), seatTop.clone().add(v3(0, 0.03, 0)), 0.024, 10),
-      tubeGeo(headLow.clone().add(v3(0, -0.03, -0.01)), headTop.clone().add(v3(0, 0.03, 0.01)), 0.034, 12),
+  // the main triangle in three styles: diamond (road), step-through (cruiser) and a chunkier sloping MTB frame
+  const frameGeos = new Map<string, THREE.BufferGeometry>();
+  const frameGeo = (kind: string) => {
+    let g = frameGeos.get(kind);
+    if (g) return g;
+    const t = kind === 'mtb' ? 1.35 : 1;
+    const top = kind === 'step'
+      ? [tubeGeo(headTop.clone().add(v3(0, -0.06, 0.01)), v3(0, 0.5, 0.02), 0.026, 10), tubeGeo(v3(0, 0.5, 0.02), v3(0, 0.56, 0.13), 0.022, 8)]
+      : kind === 'mtb'
+      ? [tubeGeo(seatTop.clone().add(v3(0, -0.1, -0.03)), headTop.clone().add(v3(0, -0.03, 0)), 0.026 * t, 10)]
+      : [tubeGeo(seatTop, headTop.clone().add(v3(0, -0.03, 0)), 0.024, 10)];
+    g = merge([
+      ...top,
+      tubeGeo(bb, headLow.clone().add(v3(0, 0.03, 0)), 0.032 * t, 10),
+      tubeGeo(bb.clone().add(v3(0, -0.02, 0)), seatTop.clone().add(v3(0, 0.03, 0)), 0.024 * t, 10),
+      tubeGeo(headLow.clone().add(v3(0, -0.03, -0.01)), headTop.clone().add(v3(0, 0.03, 0.01)), 0.034 * t, 12),
       new THREE.CylinderGeometry(0.04, 0.04, 0.085, 12).rotateZ(Math.PI / 2).translate(bb.x, bb.y, bb.z),
-      ...[-1, 1].flatMap((s) => [
-        tubeGeo(bb, rearHub(s), 0.013, 6),
-        tubeGeo(seatTop.clone().add(v3(s * 0.015, -0.02, 0)), rearHub(s), 0.011, 6),
-        // fork blades with a little rake
-        tubeGeo(headLow.clone().add(v3(s * 0.035, -0.02, 0)), v3(s * 0.05, 0.47, -0.5), 0.016, 6),
-        tubeGeo(v3(s * 0.05, 0.47, -0.5), frontHub(s), 0.013, 6),
-      ]),
-    ]),
-    frameMat,
-  );
-  // seatpost, stem, cassette and chain
+    ]);
+    frameGeos.set(kind, g);
+    return g;
+  };
+  const frameMesh = add(frameGeo('diamond'), frameMat);
+  const stayGeos = new Map<string, THREE.BufferGeometry>();
+  const stayGeo = (kind: string) => {
+    let g = stayGeos.get(kind);
+    if (g) return g;
+    const t = kind === 'mtb' ? 1.5 : 1;
+    g = merge([-1, 1].flatMap((s) => [
+      tubeGeo(bb, rearHub(s), 0.013 * t, 6),
+      tubeGeo(seatTop.clone().add(v3(s * 0.015, -0.02, 0)), rearHub(s), 0.011 * t, 6),
+      // fork blades with a little rake (fat suspension legs on the MTB)
+      tubeGeo(headLow.clone().add(v3(s * 0.035, -0.02, 0)), v3(s * 0.05, 0.47, -0.5), 0.016 * t, 6),
+      tubeGeo(v3(s * 0.05, 0.47, -0.5), frontHub(s), 0.013 * (kind === 'mtb' ? 1.2 : 1), 6),
+    ]));
+    stayGeos.set(kind, g);
+    return g;
+  };
+  const stayMesh = add(stayGeo('diamond'), stayMat);
+  // seatpost, stem and cassette
   const stemTop = v3(0, 0.99, -0.44);
   add(
     merge([
@@ -133,22 +266,66 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
     ]),
     metal,
   );
+  // handlebars in three shapes; grips (or bar tape) can take the accent colour
+  const barY = 0.995, barZ = -0.47;
+  const barShapes: Record<string, () => [THREE.BufferGeometry, THREE.BufferGeometry]> = {
+    flat: () => [
+      merge([
+        new THREE.CylinderGeometry(0.012, 0.012, 0.6, 8).rotateZ(Math.PI / 2).translate(0, barY, barZ),
+        ...[-1, 1].map((s) => tubeGeo(v3(s * 0.17, barY, barZ - 0.01), v3(s * 0.22, barY - 0.01, barZ - 0.08), 0.006, 4)),
+      ]),
+      merge([-1, 1].map((s) => new THREE.CylinderGeometry(0.019, 0.019, 0.12, 10).rotateZ(Math.PI / 2).translate(s * 0.24, barY, barZ))),
+    ],
+    drop: () => {
+      const p = (s: number) => [v3(s * 0.2, barY, barZ), v3(s * 0.21, barY - 0.01, barZ - 0.09), v3(s * 0.21, barY - 0.1, barZ - 0.1), v3(s * 0.21, barY - 0.12, barZ - 0.01)];
+      return [
+        merge([new THREE.CylinderGeometry(0.012, 0.012, 0.4, 8).rotateZ(Math.PI / 2).translate(0, barY, barZ), ...[-1, 1].flatMap((s) => { const q = p(s); return [tubeGeo(q[0], q[1], 0.012, 6), tubeGeo(q[1], q[2], 0.012, 6), tubeGeo(q[2], q[3], 0.012, 6)]; })]),
+        merge([-1, 1].flatMap((s) => { const q = p(s); return [tubeGeo(q[0].clone().lerp(q[1], 0.3), q[1], 0.017, 8), tubeGeo(q[2], q[3], 0.016, 8), new THREE.BoxGeometry(0.03, 0.05, 0.035).translate(s * 0.21, barY + 0.015, barZ - 0.09)]; })),
+      ];
+    },
+    riser: () => {
+      const end = (s: number) => v3(s * 0.33, barY + 0.06, barZ + 0.04);
+      return [
+        merge([-1, 1].flatMap((s) => [tubeGeo(v3(0, barY, barZ), v3(s * 0.1, barY, barZ), 0.013, 8), tubeGeo(v3(s * 0.1, barY, barZ), v3(s * 0.2, barY + 0.05, barZ + 0.02), 0.013, 8), tubeGeo(v3(s * 0.2, barY + 0.05, barZ + 0.02), end(s), 0.013, 8)])),
+        merge([-1, 1].map((s) => tubeGeo(v3(s * 0.25, barY + 0.057, barZ + 0.028), end(s).add(v3(s * 0.03, 0, 0.003)), 0.02, 10))),
+      ];
+    },
+  };
+  const barGeos = new Map<string, [THREE.BufferGeometry, THREE.BufferGeometry]>();
+  const barGeo = (k: string) => {
+    if (!barGeos.has(k)) barGeos.set(k, (barShapes[k] ?? barShapes.flat)());
+    return barGeos.get(k)!;
+  };
+  const barMesh = add(barGeo('flat')[0], dark);
+  const gripMesh = add(barGeo('flat')[1], dark);
+  // saddle: a race saddle tapering to the nose, or a wide leather comfort saddle on springs
+  const seatGeos = new Map<string, THREE.BufferGeometry>();
+  const seatGeo = (k: string) => {
+    let g = seatGeos.get(k);
+    if (g) return g;
+    g = k === 'comfy'
+      ? merge([
+          place(new THREE.SphereGeometry(1, 14, 8), 0, 0.94, 0.24, 0, 0, 0, 0.12, 0.04, 0.1),
+          place(new THREE.CapsuleGeometry(0.035, 0.08, 4, 8), 0, 0.945, 0.15, Math.PI / 2 + 0.06, 0, 0, 1.1, 1, 0.8),
+          ...[-1, 1].map((s) => new THREE.TorusGeometry(0.012, 0.004, 4, 8).rotateY(Math.PI / 2).scale(1, 1.6, 1).translate(s * 0.05, 0.905, 0.29)),
+        ])
+      : merge([
+          place(new THREE.SphereGeometry(1, 14, 8), 0, 0.93, 0.25, 0, 0, 0, 0.085, 0.028, 0.08),
+          place(new THREE.CapsuleGeometry(0.03, 0.14, 4, 8), 0, 0.935, 0.17, Math.PI / 2 + 0.06, 0, 0, 1, 1, 0.75),
+        ]);
+    seatGeos.set(k, g);
+    return g;
+  };
+  const seatMesh = add(seatGeo('race'), dark);
+  const leather = std('#6b4428', { roughness: 0.6 });
+  // chain runs, in a dark shade of the accent once styled
+  const chainMat = std('#17191d', { roughness: 0.5, metalness: 0.4 });
   add(
     merge([
-      // flat handlebar with grips and brake levers
-      new THREE.CylinderGeometry(0.012, 0.012, 0.6, 8).rotateZ(Math.PI / 2).translate(0, 0.995, -0.47),
-      ...[-1, 1].flatMap((s) => [
-        new THREE.CylinderGeometry(0.019, 0.019, 0.12, 10).rotateZ(Math.PI / 2).translate(s * 0.24, 0.995, -0.47),
-        tubeGeo(v3(s * 0.17, 0.995, -0.48), v3(s * 0.22, 0.985, -0.55), 0.006, 4),
-      ]),
-      // saddle: wide at the back, tapering to the nose
-      place(new THREE.SphereGeometry(1, 14, 8), 0, 0.93, 0.25, 0, 0, 0, 0.085, 0.028, 0.08),
-      place(new THREE.CapsuleGeometry(0.03, 0.14, 4, 8), 0, 0.935, 0.17, Math.PI / 2 + 0.06, 0, 0, 1, 1, 0.75),
-      // chain runs
       tubeGeo(v3(0.07, bb.y + 0.1, bb.z), v3(0.07, hubY + 0.05, 0.55), 0.006, 4),
       tubeGeo(v3(0.07, bb.y - 0.1, bb.z), v3(0.07, hubY - 0.05, 0.55), 0.006, 4),
     ]),
-    dark,
+    chainMat,
   );
   // a bottle on the down tube
   const bottle = add(
@@ -174,8 +351,121 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
     metal,
     crank,
   );
-  add(merge([new THREE.BoxGeometry(0.09, 0.022, 0.07).translate(0.14, -0.17, 0), new THREE.BoxGeometry(0.09, 0.022, 0.07).translate(-0.14, 0.17, 0)]), dark, crank);
+  const pedalMesh = add(merge([new THREE.BoxGeometry(0.09, 0.022, 0.07).translate(0.14, -0.17, 0), new THREE.BoxGeometry(0.09, 0.022, 0.07).translate(-0.14, 0.17, 0)]), dark, crank);
   body.add(crank);
+
+  // extras are made the first time a style asks for them, so rival riders never pay for them
+  const extras: Record<string, THREE.Object3D> = {};
+  const extra = (key: string, make: () => THREE.Object3D, parent: THREE.Object3D = body) => {
+    if (!extras[key]) {
+      extras[key] = shadowed(make());
+      parent.add(extras[key]);
+    }
+    return extras[key];
+  };
+  let decalMat: THREE.MeshStandardMaterial | null = null;
+  let decalKey = '';
+  let lampMat: THREE.MeshStandardMaterial | null = null;
+  let glowMat: THREE.MeshBasicMaterial | null = null;
+  const fillMat = std('#c9ccd2', { metalness: 0.6, roughness: 0.3, side: THREE.DoubleSide });
+  const setBikeStyle = (s: BikeStyle) => {
+    frameMat.color.set(s.primary);
+    stayMat.color.set(s.secondary);
+    accentMat.color.set(s.accent);
+    fillMat.color.set(s.accent);
+    chainMat.color.set(s.accent).multiplyScalar(0.45);
+    for (const m of [frameMat, stayMat]) finishMaterial(m, s.finish);
+    finishMaterial(accentMat, s.finish === 'matte' ? 'matte' : s.finish === 'chrome' ? 'chrome' : 'metallic');
+    // frame shape
+    frameMesh.geometry = frameGeo(s.frame);
+    stayMesh.geometry = stayGeo(s.frame);
+    // bars, grips, saddle and pedals
+    const [bar, grip] = barGeo(s.bars);
+    barMesh.geometry = bar;
+    gripMesh.geometry = grip;
+    gripMesh.material = s.grips === 'accent' ? accentMat : dark;
+    seatMesh.geometry = seatGeo(s.seat);
+    seatMesh.material = s.seat === 'comfy' ? leather : dark;
+    pedalMesh.material = s.pedals === 'accent' ? accentMat : dark;
+    // wheels: tyre colour and width, spokes, deep rims or discs
+    rubber.color.set(s.tyre);
+    const fat = s.wheel === 'fat';
+    for (const t of tyres) t.scale.set(fat ? 1.8 : 1, fat ? 1.03 : 1, fat ? 1.03 : 1);
+    for (const sp of spokeMeshes) sp.visible = s.wheel !== 'disc';
+    wheels.forEach((w, i) => {
+      extra('deep' + i, () => new THREE.Mesh(new THREE.RingGeometry(wheelR - 0.12, wheelR - 0.03, 36, 1).rotateY(Math.PI / 2), fillMat), w).visible = s.wheel === 'deep';
+      extra('disc' + i, () => new THREE.Mesh(new THREE.CircleGeometry(wheelR - 0.03, 36).rotateY(Math.PI / 2), fillMat), w).visible = s.wheel === 'disc';
+    });
+    bottle.visible = s.bottle;
+    // decal: a printed sleeve on the down tube and top tube
+    decalMat ??= new THREE.MeshStandardMaterial({ transparent: true, roughness: 0.4, metalness: 0.2, depthWrite: false });
+    const dk = s.decal ? `${s.decal.pattern}|${s.decal.text ?? ''}|${s.decal.color ?? s.accent}|${s.primary}` : '';
+    if (dk !== decalKey) {
+      decalKey = dk;
+      decalMat.map?.dispose();
+      decalMat.map = s.decal ? decalTexture(s.decal.pattern, s.decal.color ?? s.accent, s.primary, s.decal.text) : null;
+      decalMat.needsUpdate = true;
+    }
+    const sleeve = extra('decal', () => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(tubeGeo(bb.clone().lerp(headLow, 0.2), bb.clone().lerp(headLow, 0.82), 0.0345, 14), decalMat!));
+      g.add(new THREE.Mesh(tubeGeo(seatTop.clone().lerp(headTop, 0.18), seatTop.clone().lerp(headTop, 0.8), 0.0265, 12), decalMat!));
+      g.traverse((c) => { c.castShadow = false; });
+      return g;
+    });
+    // on the step-through and MTB frames only the down tube is where the classic one is
+    sleeve.visible = !!s.decal;
+    sleeve.children[1].visible = s.frame === 'diamond';
+    sleeve.children[0].scale.setScalar(s.frame === 'mtb' ? 1.35 : 1);
+    // lights: a front lamp and rear light, plus a glow under the frame for the coloured ones
+    lampMat ??= new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff6d8', emissiveIntensity: 1.4, roughness: 0.2 });
+    glowMat ??= new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.8, depthWrite: false });
+    const lamp = extra('lamp', () => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.024, 0.06, 12).rotateX(Math.PI / 2).translate(0, 0.955, -0.5), dark));
+      g.add(new THREE.Mesh(new THREE.CircleGeometry(0.024, 12).rotateY(Math.PI).translate(0, 0.955, -0.531), lampMat!));
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.025, 0.02).translate(0, 0.86, 0.235), std('#ff2a2a', { emissive: '#ff1a1a', emissiveIntensity: 1.2 })));
+      return g;
+    });
+    lamp.visible = !!s.light;
+    const glow = extra('glow', () => {
+      const m = new THREE.Mesh(tubeGeo(bb.clone().lerp(headLow, 0.08).add(v3(0, -0.045, 0)), bb.clone().lerp(headLow, 0.9).add(v3(0, -0.04, 0)), 0.012, 6), glowMat!);
+      m.castShadow = false;
+      return m;
+    });
+    glow.visible = !!s.light && s.glow;
+    if (s.light) glowMat.color.set(s.light);
+    // a wicker basket on the front; a rack with a bag on the back
+    const basket = extra('basket', () => {
+      const w = 0.15, h = 0.16, d = 0.12, y0 = 0.86, z0 = -0.66;
+      const c = (x: number, y: number, z: number) => v3(x, y0 + y, z0 + z);
+      const rods: THREE.BufferGeometry[] = [];
+      for (const y of [0, h * 0.5, h]) for (const [a, b] of [[c(-w, y, -d), c(w, y, -d)], [c(-w, y, d), c(w, y, d)], [c(-w, y, -d), c(-w, y, d)], [c(w, y, -d), c(w, y, d)]]) rods.push(tubeGeo(a, b, 0.005, 4));
+      for (let i = 0; i <= 6; i++) {
+        const x = -w + (i / 6) * 2 * w;
+        rods.push(tubeGeo(c(x, 0, -d), c(x, h, -d), 0.004, 3), tubeGeo(c(x, 0, d), c(x, h, d), 0.004, 3));
+      }
+      rods.push(tubeGeo(c(0, 0, d), v3(0, 0.62, -0.49), 0.007, 4));
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(merge(rods), std('#b8864b', { roughness: 0.8 })));
+      g.add(new THREE.Mesh(new THREE.BoxGeometry(w * 2, 0.008, d * 2).translate(0, y0, z0), std('#8a6238', { roughness: 0.9 })));
+      return g;
+    });
+    basket.visible = s.basket;
+    const rack = extra('rack', () => {
+      const g = new THREE.Group();
+      const y = 0.74;
+      g.add(new THREE.Mesh(merge([
+        ...[-1, 1].flatMap((k) => [tubeGeo(v3(k * 0.07, y, 0.3), v3(k * 0.07, y, 0.78), 0.006, 4), tubeGeo(v3(k * 0.07, y, 0.72), rearHub(k), 0.006, 4)]),
+        tubeGeo(v3(-0.07, y, 0.78), v3(0.07, y, 0.78), 0.006, 4),
+        tubeGeo(v3(0, y, 0.3), seatTop.clone().lerp(bb, 0.15), 0.006, 4),
+      ]), metal));
+      g.add(new THREE.Mesh(new RoundedBoxGeometry(0.2, 0.13, 0.3, 2, 0.03).translate(0, y + 0.07, 0.55), stayMat));
+      return g;
+    });
+    rack.visible = s.rack;
+  };
+  const bikeParts = new Set(body.children);
 
   // ---------- rider ----------
   const jerseyMat = std(jersey, { roughness: 0.6 });
@@ -429,12 +719,19 @@ export function buildRider(jersey: string, bikeColor: string): RiderRig {
     for (const g of gloves) g.visible = has('gloves');
   };
 
+  // everything that isn't the bike is the rider, so the garage can show the bike on its own
+  const riderGroup = new THREE.Group();
+  for (const c of [...body.children]) if (!bikeParts.has(c)) riderGroup.add(c);
+  body.add(riderGroup);
+
   shadowed(root);
   const rig: RiderRig = {
     root, body, wheels, crank, legs: legs as [THREE.Object3D, THREE.Object3D],
     setJersey: (c) => jerseyMat.color.set(c),
-    setBikeColor: (c) => frameMat.color.set(c),
+    setBikeColor: (c) => { frameMat.color.set(c); stayMat.color.set(c); },
     setLook,
+    setBikeStyle,
+    showRider: (on) => { riderGroup.visible = on; },
   };
   setLook({ gender: 'male', body: 'regular', skin: '#7a4b2e', outfit: 'jersey', jersey, helmet: '#f5c518', accessories: ['helmet'] });
   return rig;

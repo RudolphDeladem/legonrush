@@ -6,18 +6,20 @@ import { icons } from '../ui/icons';
 import { sfx } from '../audio';
 import { fx } from './icons';
 import { esc, fmt, on } from './host';
+import { rideUpgrades, styleFor } from './garage/garage';
 
 /** What the next ride starts with. The lead passes these to Game.setUpgrades / setRideItems. */
 export function rideSetup(p: Profile) {
   const g = p.gear;
   return {
-    upgrades: { ...g.upgrades } as Record<Upgrade, number>,
+    // the Garage's bike stats (parts and their levels) decide grip and boost
+    upgrades: rideUpgrades(p),
     /** drink one energy drink this ride (longer boost) */
     energy: g.energyOn && g.energy > 0,
     repairKits: g.repairKits,
     /** cosmetics: bell id ('' none) and light colour ('' none) */
     bell: g.bell,
-    light: SHOP.lights.find((l) => l.id === g.light)?.color ?? '',
+    light: styleFor(p).light,
   };
 }
 
@@ -29,7 +31,7 @@ export function useRideItems(p: Profile, used: { energy?: boolean; repairKits?: 
 }
 
 /** the bike's colour with any paint job fitted */
-export const bikePaint = (p: Profile) => SHOP.paints.find((x) => x.id === p.gear.paint)?.color ?? bikeById(p.bike).color;
+export const bikePaint = (p: Profile) => styleFor(p).primary;
 
 const price = (n: number, p: Profile, attr: string) => `<button class="btn btn-primary btn-sm" ${attr} ${p.coins < n ? 'disabled' : ''}>${fmt(n)} ${icons.coin}</button>`;
 const pips = (lv: number) => `<span class="fx-pips">${[1, 2, 3].map((i) => `<i class="${i <= lv ? 'on' : ''}"></i>`).join('')}</span>`;

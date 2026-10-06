@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import type { BikeSpec } from '../data/campus';
 import { CAMPUS_LOOP, type Route, type RideStep } from './routes';
 import { sfx } from '../audio';
-import { buildCoin, buildObstacle, buildRider, OBSTACLES, type ObstacleKind, type ObstacleSpec, type RiderLook, type RiderRig } from './models';
+import { buildCoin, buildObstacle, buildRider, OBSTACLES, type BikeStyle, type ObstacleKind, type ObstacleSpec, type RiderLook, type RiderRig } from './models';
 import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
 import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES, ROAD_HALF } from './world';
@@ -452,6 +452,31 @@ export class Game {
     this.rider.setBikeColor(bikeColor);
   }
 
+  /** the Garage's customisation of your bike (colours, finish, wheels, decal, lights...) */
+  setBikeStyle(style: BikeStyle) {
+    this.rider.setBikeStyle(style);
+  }
+
+  /**
+   * Garage camera (menus only): orbits the bike where the page wants it. rect is the screen box
+   * (CSS pixels) the bike should sit in; yaw turns round the bike (0 behind, PI/2 side, PI front),
+   * zoom 1 fills the box. null goes back to the normal menu camera. showcase() clears it.
+   */
+  viewBike(v: BikeView | null) {
+    this.bikeView = v ? { ...v } : null;
+    this.rider.showRider(!v || v.rider !== false);
+    if (!v) {
+      this.camera.clearViewOffset();
+      this.camera.fov = innerWidth < innerHeight ? 72 : 60;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+  /** where the Garage camera has turned to (it keeps turning while spin is on) */
+  get bikeYaw() {
+    return this.bikeView?.yaw ?? Math.PI * 0.62;
+  }
+  private bikeView: BikeView | null = null;
+
   setTimeOfDay(t: TimeOfDay) {
     setNightLights(t === 'night');
     const k = SKIES[t];
@@ -575,6 +600,7 @@ export class Game {
     this.reset();
     this.phase = 'showcase';
     this.dressing = false;
+    if (this.bikeView) this.viewBike(null);
     this.setTimeOfDay('day');
   }
 
@@ -589,6 +615,7 @@ export class Game {
 
   start(bike: BikeSpec, tutorial: boolean) {
     this.reset();
+    if (this.bikeView) this.viewBike(null);
     this.bike = bike;
     this.holdSpawns = tutorial;
     this.nextSpawn = tutorial ? 200 : 90;
@@ -880,7 +907,7 @@ export class Game {
         this.boostTime -= dt;
       }
       // stamina: long boosts tire the legs, cruising brings them back
-      if (boosting) this.stamina = Math.max(0, this.stamina - dt * 0.2);
+      if (boosting) this.stamina = Math.max(0, this.stamina - dt * 0.2 * (1.3 - 0.1 * (this.bike?.endurance ?? 3)));
       else this.stamina = Math.min(1, this.stamina + dt * (this.braking || this.repairT > 0 ? 0.3 : 0.14) - dt * 0.015 * this.rhythm);
       if (this.stamina < 0.3) target *= 0.82 + 0.18 * (this.stamina / 0.3);
       // pedal rhythm fades without steady taps
@@ -1589,6 +1616,8 @@ export class Game {
     } else if (this.phase === 'cinematic') {
       cam.position.copy(this.cine.pos);
       cam.lookAt(this.cine.look);
+    } else if (this.phase === 'showcase' && this.bikeView) {
+      this.garageCamera(this.bikeView, dt);
     } else if (this.phase === 'showcase') {
       const a = this.orbit;
       const p = this.pose(this.d);
@@ -1624,4 +1653,39 @@ export class Game {
     this.renderer.render(this.scene, cam);
   }
   private camTarget = new THREE.Vector3();
+
+  /** the Garage camera: frames the bike inside the page's box, turning slowly unless the rider is dragging it */
+  private garageCamera(v: BikeView, dt: number) {
+    const cam = this.camera;
+    const W = innerWidth, H = innerHeight;
+    const r = v.rect ?? { x: 0, y: 0, w: W, h: H };
+    const fov = W < H ? 50 : 40;
+    if (cam.fov !== fov) cam.fov = fov;
+    // the bike's centre sits in the middle of the box
+    cam.setViewOffset(W, H, W / 2 - (r.x + r.w / 2), H / 2 - (r.y + r.h / 2), W, H);
+    const t = Math.tan(((fov / 2) * Math.PI) / 180);
+    const size = v.rider === false ? 1.75 : 2.1;
+    const dist = Math.max(size / (1.5 * (r.h / H) * t), size / (1.7 * (r.w / W) * t * cam.aspect)) * (v.zoom ?? 1);
+    v.yaw ??= Math.PI * 0.62;
+    if (v.spin && !this.reducedMotion) v.yaw += dt * 0.22;
+    const a = this.rider.root.rotation.y + v.yaw;
+    const e = v.pitch ?? 0.12;
+    const c = this.rider.root.position;
+    const cy = c.y + (v.rider === false ? 0.55 : 0.8);
+    cam.position.set(c.x + Math.sin(a) * Math.cos(e) * dist, cy + Math.sin(e) * dist, c.z + Math.cos(a) * Math.cos(e) * dist);
+    cam.lookAt(c.x, cy, c.z);
+    cam.updateProjectionMatrix();
+  }
+}
+
+/** where the Garage camera looks from (see Game.viewBike) */
+export interface BikeView {
+  rect?: { x: number; y: number; w: number; h: number };
+  yaw?: number;
+  pitch?: number;
+  zoom?: number;
+  /** keep turning slowly */
+  spin?: boolean;
+  /** false shows the bike without the rider */
+  rider?: boolean;
 }

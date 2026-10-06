@@ -2,6 +2,9 @@
 import type { Profile, Settings } from '../state';
 import type { Route } from '../game/routes';
 import type { MissionRun } from './missions';
+import type { TabId } from '../tabs/registry';
+import type { BikeStyle } from '../game/models';
+import type { BikeView } from '../game/Game';
 import './features.css';
 
 export interface RideExtras {
@@ -18,10 +21,20 @@ export interface FeatureHost {
   /** show the 3D campus behind menus */
   showcase: () => void;
   play: (route: Route, extras: RideExtras) => void;
-  home: (tab?: 'home' | 'ride' | 'race' | 'events' | 'social' | 'you') => void;
+  home: (tab?: TabId | 'ride' | 'race' | 'social') => void;
   explore: (from?: string, to?: string) => void;
   garage: () => void;
   share: (text: string, url: string, note: HTMLElement) => void;
+  /** Garage & Store: the 3D bike behind the menus (look, camera, time of day) */
+  bike3d: {
+    style: (s: BikeStyle) => void;
+    view: (v: BikeView | null) => void;
+    /** where the garage camera has turned to */
+    yaw: () => number;
+    scene: (t: 'day' | 'sunset' | 'night') => void;
+    /** puts the rider's look and bike style back (or a draft profile's, for previews) */
+    refresh: (p?: Profile) => void;
+  };
 }
 
 let host: FeatureHost | null = null;

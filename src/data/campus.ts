@@ -41,6 +41,8 @@ export interface BikeSpec {
   speed: number;
   acceleration: number;
   handling: number;
+  /** how long boosts last before the legs tire (1..5, 3 when not set); the Garage sets it */
+  endurance?: number;
   color: string;
   /** Rush Coins to buy it in the garage; starter bikes have none */
   price?: number;

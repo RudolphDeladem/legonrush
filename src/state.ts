@@ -1,3 +1,4 @@
+import type { BikeStyle } from './game/models';
 export interface Profile {
   name: string;
   username: string;
@@ -56,6 +57,65 @@ export interface Profile {
   missionBest: Record<string, number>;
   /** this week's treasure hunt */
   treasure: { week: string; found: number; claimed: boolean };
+
+  // ---------- Garage & Store (src/features/garage) ----------
+  /** each bike's look and fitted parts, part levels, loadouts, wishlist and the store's free items */
+  garage: GarageSave;
+}
+
+// ---------- Garage & Store (src/features/garage) ----------
+/** a bike's saved look (any field missing uses the bike's own) and its performance parts by slot */
+export interface GarageBike { style?: Partial<BikeStyle>; parts?: Record<string, string> }
+export interface GarageLoadout { name: string; bike: string; parts: Record<string, string> }
+export interface GarageSave {
+  /** save format: 1 once the older shop items were moved into items */
+  v: number;
+  bikes: Record<string, GarageBike>;
+  /** upgrade level (1..5) of each performance part owned */
+  levels: Record<string, number>;
+  /** three saved setups; null is an empty slot */
+  loadouts: (GarageLoadout | null)[];
+  wishlist: string[];
+  /** local date (YYYY-MM-DD) the store's free daily item was claimed */
+  daily: string;
+  /** the free First Ride bundle was claimed */
+  starter: boolean;
+  /** the garage background: day, sunset or night */
+  scene: string;
+  /** Hall Week ids completed (hall bike editions unlock with these) */
+  hallWeeks: string[];
+  /** when any of this last changed, so the newer device wins when syncing */
+  at: number;
+}
+export const newGarage = (): GarageSave => ({ v: 0, bikes: {}, levels: {}, loadouts: [null, null, null], wishlist: [], daily: '', starter: false, scene: 'day', hallWeeks: [], at: 0 });
+
+/** Moves the older shop's purchases (bikes, paints, bells, lights, jerseys, brakes, upgrades) into items. */
+function migrateGarage(p: Profile) {
+  const g: GarageSave = { ...newGarage(), ...p.garage };
+  g.loadouts = [0, 1, 2].map((i) => g.loadouts?.[i] ?? null);
+  if (g.v >= 1) return g;
+  const give = (id: string) => { p.items[id] = Math.max(1, p.items[id] ?? 0); };
+  for (const b of p.ownedBikes ?? []) give('bike:' + b);
+  for (const x of p.gear.paints) give('paint:' + x);
+  for (const x of p.gear.bells) give('bell:' + x);
+  for (const x of p.gear.lights) give('light:' + x);
+  for (const x of p.gear.jerseys) give('jersey:' + x);
+  if (p.gear.brakes >= 1) give('part:brakes-rim');
+  if (p.gear.brakes >= 2) give('part:brakes-disc');
+  // the old upgrades (0..3, on every bike) become the stock parts' levels (1..4)
+  const u = p.gear.upgrades;
+  g.levels['part:gearing-stock'] = Math.max(g.levels['part:gearing-stock'] ?? 1, 1 + (u.speed ?? 0));
+  g.levels['part:tires-stock'] = Math.max(g.levels['part:tires-stock'] ?? 1, 1 + (u.grip ?? 0));
+  g.levels['part:boost-stock'] = Math.max(g.levels['part:boost-stock'] ?? 1, 1 + (u.boost ?? 0));
+  // the paint and light that were fitted go on the bike being ridden
+  const paint = SHOP.paints.find((x) => x.id === p.gear.paint)?.color;
+  const light = SHOP.lights.find((x) => x.id === p.gear.light);
+  if (paint || light) {
+    const b = (g.bikes[p.bike] ??= {});
+    b.style = { ...b.style, ...(paint ? { primary: paint } : {}), ...(light ? { light: light.color, glow: light.id !== 'white' } : {}) };
+  }
+  g.v = 1;
+  return g;
 }
 
 export type Upgrade = 'speed' | 'grip' | 'boost';
@@ -173,6 +233,7 @@ export function newProfile(): Profile {
     weekly: { id: '', n: {}, claimed: [] }, dailyStreak: { last: '', count: 0 }, stats: {}, badges: [], visited: [], favourites: [],
     missionBest: {}, treasure: { week: '', found: 0, claimed: false },
     diamonds: 0, items: {},
+    garage: newGarage(),
   };
 }
 
@@ -202,6 +263,7 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.dailyStreak = { ...d.dailyStreak, ...p.dailyStreak };
   p.treasure = { ...d.treasure, ...p.treasure };
   p.stats ??= {};
+  p.garage = migrateGarage(p);
   return p;
 }
 
