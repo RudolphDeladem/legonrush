@@ -1,0 +1,1 @@
+import{i as e}from"./store-ui-DhgYadAK.js";export{e as productPage};

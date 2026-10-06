@@ -1,0 +1,1 @@
+import{r as e}from"./people-BO9XCCp9.js";export{e as friendsScreen};

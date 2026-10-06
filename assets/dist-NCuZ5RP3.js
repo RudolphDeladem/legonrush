@@ -1,0 +1,1 @@
+import{n as e}from"./supabase-CaqyHqUJ.js";export{e as createClient};

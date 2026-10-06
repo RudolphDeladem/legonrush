@@ -1,0 +1,1 @@
+import{u as e}from"./money-ui-C5hq2n2t.js";export{e as notice};
