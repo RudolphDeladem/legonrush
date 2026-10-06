@@ -341,3 +341,168 @@ export function setAmbience(o: { night?: boolean; rain?: boolean; market?: numbe
   if (o.rain !== undefined) ambState.rain = o.rain;
   if (o.market !== undefined) ambState.market = Math.max(0, Math.min(1, o.market));
 }
+
+// ---------- Campus Life sound system ----------
+// The speakers at a hangout (Night Market, Campus Jam, a hall party...) and the crowd around
+// them. Four grooves made from oscillators and noise, a murmur of voices, the odd cheer and a
+// DJ air horn. `level` (0..1) is how close you stand to the speakers.
+export type PartyStyle = 'afrobeats' | 'amapiano' | 'highlife' | 'chill';
+interface Party {
+  out: GainNode;
+  music: GainNode;
+  lp: BiquadFilterNode;
+  crowd: GainNode;
+  sources: AudioScheduledSourceNode[];
+  timer: number;
+  style: PartyStyle;
+  bpm: number;
+  step: number;
+  next: number;
+  /** ctx time of step 0, for the beat clock */
+  t0: number;
+  level: number;
+  people: number;
+  horn: boolean;
+}
+let party: Party | null = null;
+const PARTY_BPM: Record<PartyStyle, number> = { afrobeats: 104, amapiano: 113, highlife: 112, chill: 86 };
+// chord tones per bar (MIDI), four bars that loop
+const PIANO = [[57, 60, 64], [53, 57, 60], [55, 59, 62], [52, 55, 59]];
+const CHILL = [[62, 65, 69, 72], [60, 64, 67, 71], [57, 60, 64, 67], [59, 62, 65, 69]];
+
+function partyStep(p: Party, t: number, s: number) {
+  const out = p.music;
+  const bar = Math.floor(s / 16) % 4;
+  const i = s % 16;
+  const sx = 60 / p.bpm / 4;
+  switch (p.style) {
+    case 'afrobeats':
+      marketBeat(t, s, out);
+      if (i === 0) for (const n of PIANO[bar]) voice(t, hz(n + 12), sx * 6, 'triangle', 0.05, out);
+      if (i === 7 || i === 10) voice(t, hz(PIANO[bar][2] + 12), sx * 2, 'triangle', 0.05, out);
+      break;
+    case 'amapiano': {
+      if (i % 4 === 0) voice(t, 100, 0.18, 'sine', 0.6, out, 45);
+      shaker(t, i % 2 ? 0.09 : 0.16, out);
+      if (i === 4 || i === 12) shaker(t, 0.3, out);
+      // the log drum: deep sliding notes that give amapiano its bounce
+      if (i === 3 || i === 6 || i === 10 || (i === 14 && bar % 2)) { const f = hz(PIANO[bar][0] - 12); voice(t, f * 1.5, sx * 3, 'sine', 0.75, out, f); }
+      if (i === 0 || i === 6 || i === 11) for (const n of PIANO[bar]) voice(t, hz(n + 12), sx * 1.6, 'triangle', 0.045, out);
+      break;
+    }
+    case 'highlife': {
+      if (i % 8 === 0 || i % 8 === 5) voice(t, 120, 0.22, 'sine', 0.8, out, 45);
+      if (i % 8 === 4) shaker(t, 0.4, out);
+      shaker(t, i % 2 ? 0.1 : 0.18, out);
+      if (i % 4 === 2) voice(t, 1567, 0.04, 'square', 0.035, out);
+      const b = BASS[s % 32];
+      if (b) voice(t, hz(b), sx * 2.5, 'triangle', 0.45, out);
+      const l = LEAD[s % 64];
+      if (l) voice(t, hz(l), sx * 1.6, 'triangle', 0.13, out);
+      break;
+    }
+    case 'chill':
+      if (i === 0 || i === 10) voice(t, 90, 0.25, 'sine', 0.45, out, 50);
+      if (i === 4 || i === 12) shaker(t, 0.16, out);
+      if (i % 2) shaker(t, 0.05, out);
+      if (i === 0) for (const n of CHILL[bar]) voice(t, hz(n), sx * 14, 'sine', 0.06, out);
+      if (i === 6 || i === 9 || i === 14) voice(t, hz(CHILL[bar][((i / 3) | 0) % 4] + 12), sx * 3, 'sine', 0.05, out);
+      break;
+  }
+}
+
+/** a cheer or a laugh from somewhere in the crowd: a few rising vowel-ish tones */
+function cheer(t: number, out: AudioNode) {
+  const dest = panned(out, Math.random() * 1.6 - 0.8);
+  const f = 260 + Math.random() * 220;
+  if (Math.random() < 0.5) for (let i = 0; i < 4; i++) voice(t + i * 0.11, f * (1.1 - i * 0.05), 0.08, 'sawtooth', 0.012, dest, f * 0.9);
+  else voice(t, f, 0.5, 'sawtooth', 0.014, dest, f * 1.6);
+}
+/** the DJ's air horn */
+function airHorn(t: number, out: AudioNode) {
+  for (let k = 0; k < 3; k++) {
+    const at = t + k * 0.22;
+    voice(at, 466, 0.18, 'sawtooth', 0.05, out, 470);
+    voice(at, 587, 0.18, 'sawtooth', 0.04, out, 590);
+  }
+}
+
+function partyTick() {
+  if (!ctx || !party) return;
+  const p = party;
+  const now = ctx.currentTime;
+  p.music.gain.setTargetAtTime(0.15 + p.level * 0.55, now, 0.4);
+  p.lp.frequency.setTargetAtTime(700 + p.level * 6000, now, 0.4);
+  p.crowd.gain.setTargetAtTime(Math.min(0.2, 0.03 + p.people * 0.005), now, 1);
+  const sx = 60 / p.bpm / 4;
+  while (p.next < now + 0.3) {
+    partyStep(p, p.next, p.step);
+    if (p.step % 4 === 0 && Math.random() < p.people * 0.0012) cheer(p.next, p.out);
+    if (p.horn && p.step % 128 === 120 && Math.random() < 0.5) airHorn(p.next, p.music);
+    p.next += sx;
+    p.step++;
+  }
+}
+
+/** Starts the speakers (after unlockAudio). Calling again changes the style. */
+export function startParty(style: PartyStyle, o: { people?: number; horn?: boolean } = {}) {
+  if (party) { stopParty(); }
+  if (!enabled || volume <= 0 || !ctx || !master) return;
+  const out = ctx.createGain();
+  out.gain.value = 0;
+  out.gain.setTargetAtTime(Math.max(0.3, musicVolume * 1.6), ctx.currentTime, 0.6);
+  out.connect(master);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2000;
+  const musicG = ctx.createGain();
+  musicG.gain.value = 0.3;
+  musicG.connect(lp).connect(out);
+  // the crowd: a band of noise that swells and dips like many conversations
+  const crowd = ctx.createGain();
+  crowd.gain.value = 0;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 700;
+  bp.Q.value = 0.7;
+  const n = noiseLoop();
+  n.playbackRate.value = 3.2;
+  n.connect(bp).connect(crowd).connect(out);
+  const lfo = ctx.createOscillator();
+  const lfoG = ctx.createGain();
+  lfo.frequency.value = 0.35;
+  lfoG.gain.value = 0.03;
+  lfo.connect(lfoG).connect(crowd.gain);
+  n.start();
+  lfo.start();
+  const bpm = PARTY_BPM[style];
+  const t0 = ctx.currentTime + 0.1;
+  party = { out, music: musicG, lp, crowd, sources: [n, lfo], timer: 0, style, bpm, step: 0, next: t0, t0, level: 0.5, people: o.people ?? 20, horn: !!o.horn };
+  partyTick();
+  party.timer = window.setInterval(partyTick, 100);
+}
+
+/** how close you stand to the speakers (0..1) and how many people are around */
+export function setParty(o: { level?: number; people?: number }) {
+  if (!party) return;
+  if (o.level !== undefined) party.level = Math.max(0, Math.min(1, o.level));
+  if (o.people !== undefined) party.people = o.people;
+}
+
+/** beats since the music started (float), for dancing in time; null when silent */
+export function partyBeat(): { beat: number; bpm: number } | null {
+  if (!party || !ctx) return null;
+  return { beat: Math.max(0, (ctx.currentTime - party.t0) * party.bpm / 60), bpm: party.bpm };
+}
+
+export function stopParty() {
+  if (!party || !ctx) return;
+  const p = party;
+  party = null;
+  clearInterval(p.timer);
+  p.out.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+  setTimeout(() => {
+    for (const s of p.sources) s.stop();
+    p.out.disconnect();
+  }, 1600);
+}

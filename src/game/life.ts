@@ -98,6 +98,8 @@ for (const [name, hx, hz, dz] of [['Night Market', 22, 22, -6], ['Great Hall', 8
   if (p) keepOut.push([p.x, p.z + dz, hx, hz]);
 }
 const inKeepOut = (x: number, z: number, pad = 0) => keepOut.some(([kx, kz, hx, hz]) => Math.abs(x - kx) < hx + pad && Math.abs(z - kz) < hz + pad);
+/** inside a landmark model's footprint (Night Market roofs, Great Hall, Balme Library) */
+export const inLandmark = (x: number, z: number, pad = 0) => inKeepOut(x, z, pad);
 const freeSpot = (x: number, z: number, r: number) => roadClearance(x, z, r + 6) > r && !buildingAt(x, z, r) && !inKeepOut(x, z, r);
 
 // ---------- the sign atlas ----------

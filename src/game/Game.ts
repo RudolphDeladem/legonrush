@@ -17,6 +17,13 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Weather = 'clear' | 'rain';
 /** shop upgrade levels, 0..3 each */
 export interface Upgrades { speed: number; grip: number; boost: number }
+/** something that borrows the campus scene (Campus Life hangouts) */
+export interface SceneGuest {
+  root: THREE.Object3D;
+  focus: THREE.Vector3;
+  update(dt: number, cam: THREE.PerspectiveCamera): void;
+}
+
 /** one-ride items from the shop */
 export interface RideItems { energy: boolean; repairKits: number }
 
@@ -608,8 +615,28 @@ export class Game {
     }
   }
 
+  /**
+   * Campus Life: a hangout borrows the campus (buildings, sky, lights) and drives the camera and
+   * its own crowd until hangout(null). `focus` is where the shadows and the fog culling centre.
+   */
+  hangout(g: SceneGuest | null) {
+    if (g) {
+      this.reset();
+      this.phase = 'showcase';
+      this.sleep = false;
+      if (this.bikeView) this.viewBike(null);
+      this.scene.add(g.root);
+    } else if (this.guest) this.scene.remove(this.guest.root);
+    this.guest = g;
+    this.rider.root.visible = !g;
+    if (this.routeLayer) this.routeLayer.visible = !g;
+  }
+  private guest: SceneGuest | null = null;
+  get world() { return this.scene; }
+
   /** Idle camera orbiting the rider, used behind menus. */
   showcase() {
+    if (this.guest) this.hangout(null);
     this.sleep = false;
     this.reset();
     this.phase = 'showcase';
@@ -748,7 +775,8 @@ export class Game {
 
   /** The current view as a PNG data URL. */
   capture(): string {
-    this.render(0);
+    if (this.guest) this.renderer.render(this.scene, this.camera);
+    else this.render(0);
     return this.renderer.domElement.toDataURL('image/png');
   }
 
@@ -900,6 +928,18 @@ export class Game {
           this.onSlow();
         }
       }
+    }
+    if (this.guest) {
+      const cam = this.camera;
+      if (!this.paused) this.guest.update(dt, cam);
+      this.sky.position.copy(cam.position);
+      const f = this.guest.focus;
+      this.rider.root.position.set(f.x, 0, f.z);
+      this.sun.position.set(f.x + this.sunOffset.x, this.sunOffset.y, f.z + this.sunOffset.z);
+      this.sun.target.position.set(f.x, 0, f.z);
+      this.wfx?.update(dt, cam);
+      this.renderer.render(this.scene, cam);
+      return;
     }
     if (!this.paused && !this.photo) this.update(dt);
     this.render(dt);

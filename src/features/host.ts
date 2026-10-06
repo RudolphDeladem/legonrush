@@ -4,7 +4,7 @@ import type { Route } from '../game/routes';
 import type { MissionRun } from './missions';
 import type { TabId } from '../tabs/registry';
 import type { BikeStyle } from '../game/models';
-import type { BikeView } from '../game/Game';
+import type { BikeView, SceneGuest } from '../game/Game';
 import type { EventDef } from '../data/events';
 import type { EventRide } from './events/ride-hook';
 import type { GhostRun, HudState } from '../game/Game';
@@ -93,6 +93,14 @@ export interface FeatureHost {
   quickMatch: () => void;
   /** this rider's id for live channels (account id, or this device's id) */
   myId: () => string;
+  /** Campus Life: a hangout borrows the 3D campus (see Game.hangout) */
+  world: {
+    enter: (g: SceneGuest) => void;
+    exit: () => void;
+    /** the current view as a PNG data URL */
+    capture: () => string;
+    time: (t: 'day' | 'sunset' | 'night') => void;
+  };
   /** the route leaderboards screen */
   board: (routeId: string, back: () => void) => void;
 }

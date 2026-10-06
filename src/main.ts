@@ -3836,6 +3836,7 @@ fx.initFeatures({
   app, settings, onBack, share,
   profile: () => profile!,
   showcase: () => { game.showcase(); applyLook(); },
+  world: { enter: (g) => game.hangout(g), exit: () => { game.showcase(); applyLook(); }, capture: () => game.capture(), time: (t) => game.setTimeOfDay(t) },
   play: (route, extras) => play(false, route, extras),
   home: (t) => home(t),
   explore: (from, to) => explorePicker(from, to),

@@ -16,6 +16,7 @@ import { now, statusOf, isOn, countdown } from '../features/events/schedule';
 import { FILTERS, SORTS, TYPES, placeLabel, type FilterId, type SortId } from '../features/events/catalog';
 import { eventCard, seriesCard, emptyHtml } from '../features/events/ui';
 import type { CampusEvent } from '../features/events/types';
+import { campusLifeHtml, campusLifeClick } from '../features/life';
 
 initEvents();
 
@@ -94,6 +95,7 @@ function listHtml() {
 
   return `
     ${serverOk === false ? `<p class="ev-offline">${icons.wifiOff} Showing official events. Rider events and join counts load when you're online.</p>` : ''}
+    ${campusLifeHtml()}
     ${rail('Your events', mine, icons.check)}
     ${live.length ? rail('Live now', live, '<i class="ev-dot"></i>') : `<div class="ev-nolive">${icons.clock}<span><b>Nothing live right now.</b> ${next ? `Next: ${esc(next.name)} in ${countdown(next.start - t)}.` : ''}</span></div>`}
     ${rail('Later today', today, icons.clock)}
@@ -138,6 +140,7 @@ function bind(root: HTMLElement) {
   const redraw = () => { if (alive) { list.innerHTML = listHtml(); } };
   root.addEventListener('click', (ev) => {
     const t = ev.target as HTMLElement;
+    if (campusLifeClick(t, back)) return;
     const card = t.closest<HTMLElement>('[data-ev]');
     if (card) return eventDetail(card.dataset.ev!, back);
     const ser = t.closest<HTMLElement>('[data-series]');
