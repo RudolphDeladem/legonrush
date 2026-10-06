@@ -3,7 +3,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import type { BikeSpec } from '../data/campus';
 import { CAMPUS_LOOP, type Route, type RideStep } from './routes';
 import { sfx } from '../audio';
-import { buildCoin, buildObstacle, buildRider, OBSTACLES, type BikeStyle, type ObstacleKind, type ObstacleSpec, type RiderLook, type RiderRig } from './models';
+import { buildCoin, buildObstacle, buildRider, OBSTACLES, taxi, trotro, type BikeStyle, type ObstacleKind, type ObstacleSpec, type RiderLook, type RiderRig } from './models';
 import type { Track } from './track';
 import { buildLandmarks } from './landmarks';
 import { buildCampus, buildRouteLayer, buildSky, disposeLayer, lampGlow, LANES, ROAD_HALF } from './world';
@@ -69,6 +69,9 @@ export interface GhostRun {
   x: number[];
 }
 const GHOST_STEP = 0.1;
+export type Vehicle = 'bike' | 'walk' | 'taxi' | 'shuttle';
+/** extra camera distance and height for each way of travelling */
+const VEHICLE_CAM: Record<Vehicle, [number, number]> = { bike: [0, 0], walk: [-1.6, -0.6], taxi: [2, 0.6], shuttle: [4, 1.6] };
 /** bike paints for the riders beside you */
 const RIVAL_BIKES = ['#1f2937', '#c62828', '#1565c0', '#2e7d32', '#6a1b9a', '#ef6c00'];
 
@@ -345,6 +348,20 @@ export class Game {
   private lowEnd: boolean;
   /** no traffic or obstacles: for learning the way */
   calm = false;
+  /** coins on the road (Explore has none: the trip itself is the point) */
+  pickups = true;
+  /** how you travel: on the bike, on foot, in a taxi or on the campus shuttle */
+  vehicle: Vehicle = 'bike';
+  private vehicleObj: THREE.Object3D | null = null;
+  setVehicle(v: Vehicle) {
+    this.vehicle = v;
+    if (this.vehicleObj) { this.rider.root.remove(this.vehicleObj); this.vehicleObj = null; }
+    this.rider.body.visible = v === 'bike';
+    if (v === 'bike') return;
+    const o = v === 'taxi' ? taxi() : v === 'shuttle' ? trotro() : buildObstacle('pedestrian');
+    this.vehicleObj = o;
+    this.rider.root.add(o);
+  }
   /** the rider's chosen cruising speed (m/s) for Explore and Vibe rides; null: the normal pace */
   cruiseSpeed: number | null = null;
   /**
@@ -1474,7 +1491,7 @@ export class Game {
   private spawnRow(d: number) {
     // calm rides: coins only, nothing to dodge
     if (this.calm) {
-      this.addCoinLine((Math.random() * 3) | 0, d, 5);
+      if (this.pickups) this.addCoinLine((Math.random() * 3) | 0, d, 5);
       return;
     }
     const progress = d / this.route.length;
@@ -1736,9 +1753,10 @@ export class Game {
       cam.lookAt(p.x, this.dressing ? -0.15 : 0.9, p.z);
     } else {
       const boosting = this.boostTime > 0;
-      const back = boosting ? 7.2 : 6.2;
+      const [vBack, vUp] = VEHICLE_CAM[this.vehicle];
+      const back = (boosting ? 7.2 : 6.2) + vBack;
       const behind = this.pose(this.d - back, this.x * 0.6);
-      this.camTarget.set(behind.x, 3.1 + this.y * 0.4 + this.guideLook * 1.4, behind.z);
+      this.camTarget.set(behind.x, 3.1 + vUp + this.y * 0.4 + this.guideLook * 1.4, behind.z);
       cam.position.lerp(this.camTarget, Math.min(1, dt * 8));
       if (this.shake > 0 && !this.reducedMotion) {
         cam.position.x += (Math.random() - 0.5) * this.shake;

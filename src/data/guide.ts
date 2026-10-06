@@ -9,6 +9,12 @@ export interface GuideEntry {
   intro: string;
   /** what students do here */
   doHere: string[];
+  /** where it comes from: name, origin, significance */
+  history?: string;
+  /** one interesting fact */
+  didYouKnow?: string;
+  /** halls of residence: identity and traditions */
+  hall?: { nickname?: string; motto?: string; named?: string; identity?: string };
 }
 
 export const GUIDE: GuideEntry[] = [
@@ -50,6 +56,34 @@ export const GUIDE: GuideEntry[] = [
   { place: 'Commonwealth Hall Chapel', title: 'Commonwealth Hall Chapel', intro: 'The chapel beside Commonwealth Hall on Legon Hill.', doHere: ['Attend church services', 'Join choir and fellowship meetings'] },
   { place: 'Mensah Sarbah Hall Mosque', title: 'Sarbah Mosque', intro: 'The mosque at Mensah Sarbah Hall.', doHere: ['Pray', 'Meet with the Muslim student community'] },
 ];
+
+/** history, facts and hall identity for the places that have them (kept to well-known facts) */
+const MORE: Record<string, Pick<GuideEntry, 'history' | 'didYouKnow' | 'hall'>> = {
+  'Legon Main Entrance': { history: 'The university began in 1948 as the University College of the Gold Coast and became the University of Ghana in 1961.', didYouKnow: 'Students simply call the whole campus "Legon", after the hill it stands on.' },
+  'Great Hall': { history: 'Built on Legon Hill beside Commonwealth Hall, it is where the university gathers for its biggest moments: matriculation for new students and congregation for graduates.', didYouKnow: 'From the top of Legon Hill you can see across the whole campus.' },
+  'The Balme Library': { history: 'Named after David Mowbray Balme, the first Principal of the University College of the Gold Coast, who led it from 1948.', didYouKnow: 'The fountain and lawns in front of the library are one of the most photographed spots at Legon.' },
+  'Balme Library Fountain': { didYouKnow: 'On graduation days the fountain is crowded with families taking photos.' },
+  'Night Market': { didYouKnow: 'It stays busy long after the lecture halls have emptied, which is how it got its name.' },
+  'University of Ghana banking square': { didYouKnow: 'Most of the big banks in Ghana have a branch or an ATM here, side by side.' },
+  'Commonwealth Hall': { history: 'Named after the Commonwealth of Nations, it stands on Legon Hill and is the only all-male hall on campus.', didYouKnow: 'Its residents are the Vandals, known across campus for their loud, proud hall spirit.', hall: { nickname: 'Vandals', motto: 'Truth Stands', identity: 'All-male hall on Legon Hill with one of the strongest hall identities on campus.' } },
+  'Legon Hall': { history: 'The first hall of residence completed on the Legon campus, when the university college moved here from Achimota in the 1950s.', hall: { identity: 'The oldest hall on campus, with a main hall and annexes A to C.' } },
+  'Akuafo Hall Main': { history: 'Akuafo is the Akan word for farmers. The hall is named in honour of Ghana\'s cocoa farmers, whose produce helped pay for the university.', hall: { named: 'Ghana\'s farmers (Akuafo means "farmers" in Akan)', identity: 'One of the five traditional halls, with a main hall and annexes A to D.' } },
+  'Volta Hall': { history: 'Named after the Volta, Ghana\'s great river, it is the university\'s all-female traditional hall.', hall: { named: 'The Volta River', identity: 'All-female hall and one of the five traditional halls.' } },
+  'Mensah Sarbah Hall': { history: 'Named after John Mensah Sarbah, a Gold Coast lawyer and nationalist who defended African land rights in the colonial era.', hall: { nickname: 'Vikings', named: 'John Mensah Sarbah, lawyer and nationalist', identity: 'One of the five traditional halls, with annexes A to D, its own dining hall and Sarbah field.' } },
+  'Dr. Hilla Limann Hall': { history: 'Named after Dr. Hilla Limann, President of Ghana\'s Third Republic.', hall: { named: 'Dr. Hilla Limann, President of the Third Republic', identity: 'One of the four Diaspora halls near the Night Market.' } },
+  'Alexander Kwapong Hall': { history: 'Named after Alexander Kwapong, the first Ghanaian Vice-Chancellor of the University of Ghana.', hall: { named: 'Alexander Kwapong, first Ghanaian Vice-Chancellor', identity: 'One of the four Diaspora halls near the Night Market.' } },
+  'Elizabeth Frances Sey Hall': { history: 'Named after Elizabeth Frances Sey, the first woman to graduate from the university.', hall: { named: 'Elizabeth Frances Sey, the first woman graduate', identity: 'One of the four Diaspora halls near the Night Market.' } },
+  'Jubilee Hall': { hall: { identity: 'One of the newer halls, close to the Night Market and Banking Square.' } },
+};
+for (const g of GUIDE) Object.assign(g, MORE[g.place]);
+
+/** what every hall has, whatever its name: the parts of hall life a fresher asks about */
+export const HALL_LIFE = {
+  admin: 'Each hall is led by a Hall Master or Mistress, with senior tutors and a hall administrator who look after residents and discipline.',
+  jcr: 'The JCR (Junior Common Room) is the students\' own hall government. It is elected by residents and runs hall week, sports, entertainment and welfare.',
+  traditions: 'Hall week, inter-hall sport, hall songs and chants, and friendly rivalries with the other halls.',
+  facilities: 'Rooms for residents, a porters\' lodge at the entrance, common rooms, a reading room or library, and shops nearby.',
+};
 
 const byPlace = new Map(GUIDE.map((g) => [g.place, g]));
 export const guideFor = (place: string) => byPlace.get(place);

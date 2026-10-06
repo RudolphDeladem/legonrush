@@ -904,7 +904,7 @@ const TAXI_BODY = ['#d9dadc', '#f2f2f0', '#8c1c24', '#1d2f5c', '#5b5f66'];
 const taxiYellow = std('#f5b700', { roughness: 0.4, metalness: 0.3 });
 
 /** A taxi as seen in Accra: any body colour, with all four corners painted yellow. */
-function taxi() {
+export function taxi() {
   const len = 4.2, width = 1.8, bodyH = 0.7;
   const g = vehicle(len, width, bodyH, 0.55, pick(TAXI_BODY), 2.1, 0.2);
   for (const z of [-1, 1]) {
@@ -944,7 +944,7 @@ const TROTRO_BODY = ['#eceae4', '#d3d6da', '#f1efe8', '#c9cdd2'];
 const TROTRO_STRIPE = ['#c0392b', '#1e5aa8', '#27ae60', '#f1c40f', '#6c3483'];
 
 /** A trotro: a high-roof minibus with a slogan across the back window and luggage on the roof. */
-function trotro() {
+export function trotro() {
   const g = new THREE.Group();
   const len = 5.4, width = 2.0, h = 1.95;
   const paint = std(pick(TROTRO_BODY), { roughness: 0.4, metalness: 0.3 });

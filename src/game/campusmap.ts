@@ -104,7 +104,7 @@ export const ALIASES: Record<string, string> = {
   Registry: 'University of Ghana Registry',
 };
 
-const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+export const fold = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 /** edit distance, capped: stops early once it is past max */
 function within(a: string, b: string, max: number) {
   if (Math.abs(a.length - b.length) > max) return false;
@@ -193,11 +193,13 @@ export function buildingAt(x: number, z: number, pad = 0): Building | undefined 
 }
 
 // ---------- road graph ----------
-export type TravelMode = 'cycle' | 'walk';
+export type TravelMode = 'cycle' | 'walk' | 'drive';
 /** cost per metre by road class: riders keep to roads, walkers take footpaths and shortcuts */
 const COST: Record<TravelMode, Record<RoadClass, number>> = {
   cycle: { 0: 1.05, 1: 1, 2: 1, 3: 1.1, 4: 1.35 },
   walk: { 0: 1.15, 1: 1.05, 2: 1, 3: 1, 4: 0.9 },
+  // taxis and the shuttle keep to proper roads
+  drive: { 0: 1, 1: 1, 2: 1.05, 3: 1.3, 4: 60 },
 };
 interface Edge { to: number; len: number; road: number }
 const adj: Edge[][] = Array.from({ length: NODE_XZ.length / 2 }, () => []);
@@ -247,7 +249,7 @@ export function nearestNode(x: number, z: number, mode: TravelMode = 'cycle') {
     const cx = Math.floor(x / NCELL), cz = Math.floor(z / NCELL);
     for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
       for (const i of ngrid.get(`${cx + dx},${cz + dz}`) ?? []) {
-        const d = Math.hypot(nx(i) - x, nz(i) - z) + (mode === 'cycle' && bestClass(i) === 4 ? 25 : 0);
+        const d = Math.hypot(nx(i) - x, nz(i) - z) + (mode !== 'walk' && bestClass(i) === 4 ? (mode === 'drive' ? 80 : 25) : 0);
         if (d < score) { score = d; found = i; }
       }
     }

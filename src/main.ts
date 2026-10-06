@@ -7,13 +7,16 @@ import '@fontsource/barlow-condensed/800-italic.css';
 import './style.css';
 import './light.css';
 import { registerSW } from 'virtual:pwa-register';
-import { Game, type Action, type HudState } from './game/Game';
+import { Game, type Action, type HudState, type Vehicle } from './game/Game';
+import { guideFor, HALL_LIFE } from './data/guide';
+import { INTENT_EXAMPLES, matchIntents, placeQuery } from './data/intents';
+import './explore.css';
 import { BIKES, GARAGE_BIKES, HALLS, HALL_PLACE, bikeById, hallById, type BikeSpec } from './data/campus';
 import { CAMPUS_LOOP, EVENTS, RACES, TOUR_STOPS, eventStatus, exploreRoute, freshersTour, guideStops, raceRoute, type EventDef, type RaceDef, type Route } from './game/routes';
 import { botRivals, decodeChallenge, encodeChallenge, type Challenge } from './game/rivals';
 import type { GhostRun, Rival } from './game/Game';
-import { ATTRIBUTION, LINE_ENDS, PLACES, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
-import { campusOverview, miniMap, routeMap, type Pin } from './ui/mapview';
+import { ATTRIBUTION, LINE_ENDS, PLACES, fold, placeByName, toLatLng, resolvePlace, searchPlaces, type Place, type PlaceKind, type PlaceMatch, type TravelMode, type Turn } from './game/campusmap';
+import { campusOverview, miniMap, type Pin } from './ui/mapview';
 import { PROFILE_REWARD, profileComplete, profileTodo, MISSIONS, SHOP, SKIN_TONES, WEEK_GOAL_KM, WEEK_REWARD, claimMission, todayMissions, onProfileSave, type Accessory, type Look, type Outfit, type RiderType, type StudentStatus, applyRide, claimDaily, clearGhosts, currentWeek, dailyReward, clearProfile, levelFor, loadGhost, loadProfile, loadSettings, newProfile, normalizeProfile, saveGhost, saveProfile, saveSettings, xpForLevel, type Profile, type RideResult, type RideRewards } from './state';
 import { music, setAmbience, setMusicVolume, setSound, sfx, startAmbience, stopAmbience, unlockAudio } from './audio';
 import { marketProximity } from './game/life';
@@ -829,6 +832,8 @@ interface PlayOpts {
   challengeRide?: ChallengeRide;
   /** Explore's guided ride: very slow, stopping at places along the way to introduce them */
   guided?: boolean;
+  /** Explore: how you're taken there (walk, bike, taxi, shuttle) and its tour speeds */
+  way?: (typeof EXPLORE_WAYS)[number];
 }
 
 interface LiveRide {
@@ -904,23 +909,25 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
           <div class="hr-dist"><span id="dist">0.00</span> / ${km(route.length)} km</div>
           <div class="hr-race"${opts.live?.kind === 'vibe' ? ' hidden' : ''}><p class="place-pill" id="place" hidden></p><p class="ghost-gap" id="ghostGap" hidden></p></div>
         </div>
-        <div class="hud-pill coin-hud" id="coinPill">${icons.coin} <span id="coins">0</span></div>
+        <div class="hud-pill coin-hud" id="coinPill"${isExplore(route) ? ' hidden' : ''}>${icons.coin} <span id="coins">0</span></div>
+        ${isExplore(route) ? `<button class="xp-end" id="endTour">End tour</button>` : ''}
         <button class="pause-btn" id="pause" aria-label="Pause">${icons.pause}</button>
       </div>
       <div class="turn-banner" id="turn" hidden><span class="turn-arrow" id="turnArrow"></span><div><b id="turnDist"></b><span id="turnText"></span></div></div>
       <div class="prompt" id="prompt"></div>
       <div class="tip" id="tip" hidden></div>
       <div class="guide-card" id="guideCard" role="dialog" aria-live="polite" hidden></div>
-      ${isExplore(route) || opts.live?.kind === 'vibe' ? `<label class="pace-box" id="paceBox"><span>Speed</span><input type="range" id="pace" min="4" max="35" step="1" aria-label="Riding speed"><b id="paceVal"></b></label>` : ''}
+      ${isExplore(route) || opts.live?.kind === 'vibe' ? `<label class="pace-box${isExplore(route) ? ' tour' : ''}" id="paceBox"><span>${isExplore(route) ? 'Tour speed' : 'Speed'}</span><b id="paceVal"></b><input type="range" id="pace" step="1" aria-label="${isExplore(route) ? 'Tour speed' : 'Riding speed'}"><small>Slow</small><small>Fast</small></label>` : ''}
+      ${isExplore(route) ? '<div class="xp-say" id="xpSay" hidden></div>' : ''}
       <div class="hud-bottom">
-        ${brakes ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : '<span class="hud-slot"></span>'}
+        ${brakes && !isExplore(route) ? `<button class="brake-btn" id="brakeBtn" aria-label="Brake">${icons.brake}<span>${isTouch ? 'BRAKE' : 'S / ↓'}</span></button>` : '<span class="hud-slot"></span>'}
         <div class="speedo" id="speedo">
           <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="sp-track" cx="60" cy="60" r="52"/><circle class="sp-boost" id="boostArc" cx="60" cy="60" r="52" stroke-dasharray="${RING}" stroke-dashoffset="${RING}"/></svg>
           <b id="kmh">0</b><small>KM/H</small>
           <span class="sp-label" id="boostLabel">${isTouch ? 'BOOST' : 'B · BOOST'}</span>
           ${route.kind === 'explore' ? '' : `<span class="sp-helmets" title="Crash helmets: each one saves you from a crash">${icons.helmet}<span id="helmets">${profile.gear.helmets}</span></span>`}
         </div>
-        ${isTouch ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : '<span class="hud-slot"></span>'}
+        ${isTouch && !isExplore(route) ? '<button class="boost-btn" id="boostBtn" disabled>BOOST</button>' : '<span class="hud-slot"></span>'}
       </div>
       <canvas class="minimap" id="minimap" width="240" height="240" aria-hidden="true"></canvas>
       ${opts.live?.kind === 'vibe' ? `<div class="ride-chat" id="rideChat"><div class="rc-log" id="rcLog"></div>${quickActions(true)}<form class="chat-form" id="rcForm" hidden><input id="rcSay" maxlength="160" autocomplete="off" placeholder="Message…"><button class="btn btn-primary btn-sm" aria-label="Send">${icons.send}</button></form></div>` : ''}
@@ -1112,6 +1119,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     opts.eventPlay?.hud(h);
     challengeTick?.(h);
     dist.textContent = km(h.distance);
+    if (!h.countdown) callout(h.distance);
     drawMap(h.pos, h.yaw);
     turn.hidden = !h.next || !!h.countdown;
     if (h.next) {
@@ -1189,6 +1197,12 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       return vibeRoom();
     }
     if (lr) setTimeout(() => lr.ch.leave(), 90e3);
+    if (isExplore(route) && !lr) {
+      // Explore has no rewards or results: the tour ends where it arrived
+      cloud.record({ hall: profile!.hall, department: profile!.department, km: r.distance / 1000 });
+      saveProfile(profile!);
+      return explorePicker(r.finished ? route.to.name : route.from.name, r.finished ? '' : route.to.name);
+    }
     const rewards = applyRide(profile!, result, finishReward(route), event ? 2 : 1);
     cloud.record({ hall: profile!.hall, department: profile!.department, km: r.distance / 1000, race: route.kind === 'race' && r.finished ? { route: route.id, time: r.time } : undefined });
     money.afterRace(route, r, run);
@@ -1342,6 +1356,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   const ambTimer = setInterval(() => { if (!game.paused) setAmbience(ambience()); }, 1000);
   const leaveSolo = () => (opts.eventPlay ? opts.eventPlay.leave() : opts.mission ? fx.missionsScreen() : route.id === 'explore' ? explorePicker(route.from.name, route.to.name) : route.id === 'freshers-tour' ? explorePicker() : home(opts.event ? 'events' : opts.rivals || opts.challenge ? 'race' : route.kind === 'race' ? 'ride' : 'home'));
   $('pause').addEventListener('click', togglePause);
+  app.querySelector('#endTour')?.addEventListener('click', () => { cleanup(); explorePicker(route.from.name, route.to.name); });
   const onHidden = () => { if (document.hidden && game.isRiding && !game.paused) togglePause(); };
   document.addEventListener('visibilitychange', onHidden);
 
@@ -1368,6 +1383,8 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     game.onGuide = () => {};
     game.tour = null;
     game.cruiseSpeed = null;
+    game.pickups = true;
+    game.setVehicle('bike');
     if ('speechSynthesis' in window) speechSynthesis.cancel();
     game.paused = false;
     clearInterval(stream);
@@ -1378,21 +1395,29 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
 
   game.calm = lr?.kind === 'vibe' || (isExplore(route) && exploreOpts.calm);
   // Explore's guided ride: walking pace, stopping at each place to introduce it
-  const guide = opts.guided && isExplore(route) && !lr ? guideStops(route) : [];
-  game.tour = guide.length ? { stops: guide.map((g) => ({ d: g.d, x: g.place.x, z: g.place.z })), speed: exploreOpts.mode === 'walk' ? 2.4 : 4 } : null;
+  // Explore is always a guided tour: the system follows the route, the rider only picks the pace
+  const way = isExplore(route) ? opts.way ?? EXPLORE_WAYS.find((w) => w.mode === route.mode) ?? EXPLORE_WAYS[1] : null;
+  const guide = isExplore(route) && !lr ? guideStops(route) : [];
+  game.tour = isExplore(route) && !lr ? { stops: guide.map((g) => ({ d: g.d, x: g.place.x, z: g.place.z })), speed: (way?.pace[1] ?? 14) / 1.6 } : null;
   if (game.tour) game.calm = true;
+  game.pickups = !isExplore(route);
+  game.setVehicle(way?.vehicle ?? 'bike');
   // Explore and Vibe rides: the rider picks their own cruising speed (remembered per mode)
   const paceIn = app.querySelector<HTMLInputElement>('#pace');
   game.cruiseSpeed = null;
   if (paceIn) {
-    const key = `legonrush.pace.${lr ? 'vibe' : game.tour ? 'tour' : 'explore'}`;
-    let kmh = game.tour ? Math.round(game.tour.speed * 3.6) : 18;
+    const key = `legonrush.pace.${lr ? 'vibe' : way?.id ?? 'explore'}`;
+    const [lo, mid, hi] = way?.pace ?? [4, 18, 35];
+    paceIn.min = String(lo);
+    paceIn.max = String(hi);
+    let kmh = mid;
     try { kmh = Number(localStorage.getItem(key)) || kmh; } catch { /* private mode */ }
+    // km/h as the speedometer shows it
     const setPace = (v: number) => {
-      kmh = Math.max(4, Math.min(35, Math.round(v)));
+      kmh = Math.max(lo, Math.min(hi, Math.round(v)));
       paceIn.value = String(kmh);
       $('paceVal').textContent = `${kmh} km/h`;
-      game.cruiseSpeed = kmh / 3.6;
+      game.cruiseSpeed = kmh / 1.6;
     };
     setPace(kmh);
     paceIn.addEventListener('input', () => {
@@ -1411,24 +1436,86 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     u.rate = 0.95;
     speechSynthesis.speak(u);
   };
+  // what the tour says about a place: About, History, What you can do here, Did you know, and hall life for halls
+  const infoHtml = (pl: Place, full: boolean) => {
+    const g = guideFor(pl.name);
+    const about = g?.intro ?? PLACE_INFO.find(([re]) => re.test(pl.name))?.[1] ?? `${KIND_ICON[pl.kind][1]} on the University of Ghana campus.`;
+    const sec = (h: string, body: string) => `<p class="kicker">${h}</p>${body}`;
+    let html = sec('About', `<p>${esc(about)}</p>`);
+    if (g?.doHere.length) html += sec('What you can do here', `<ul>${g.doHere.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`);
+    if (!full) return html;
+    if (g?.history) html += sec('History', `<p>${esc(g.history)}</p>`);
+    if (pl.kind === 'hall') {
+      const h = g?.hall;
+      const rows: [string, string | undefined][] = [['Name', h?.named], ['Residents', h?.nickname], ['Motto', h?.motto && `“${h.motto}”`], ['Identity', h?.identity],
+        ['Hall Master and administration', HALL_LIFE.admin], ['JCR', HALL_LIFE.jcr], ['Traditions', HALL_LIFE.traditions], ['Facilities', HALL_LIFE.facilities]];
+      html += sec('Hall life', `<dl class="gc-dl">${rows.filter((r) => r[1]).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v!)}</dd>`).join('')}</dl>`);
+    }
+    if (g?.didYouKnow) html += sec('Did you know?', `<p>${esc(g.didYouKnow)}</p>`);
+    const near = PLACES.filter((q) => q !== pl && NEARBY_KINDS.has(q.kind) && Math.hypot(q.x - pl.x, q.z - pl.z) < 250).sort((a, b) => Math.hypot(a.x - pl.x, a.z - pl.z) - Math.hypot(b.x - pl.x, b.z - pl.z)).slice(0, 4);
+    if (near.length) html += sec('Nearby', `<p class="small">${near.map((n) => `${KIND_ICON[n.kind][0]} ${esc(niceName(n))}`).join(' · ')}</p>`);
+    return html;
+  };
+  const sayText = (pl: Place) => { const g = guideFor(pl.name); return g ? `${g.title}. ${g.intro} ${g.history ?? ''} What you can do here: ${g.doHere.join('. ')}.` : niceName(pl); };
   game.onGuide = (i) => {
     guideCard.hidden = i === null;
     if (i === null) { if (canSpeak) speechSynthesis.cancel(); return; }
     const g = guide[i];
     const [icon, label] = KIND_ICON[g.place.kind];
-    const where = i === 0 ? 'You start at' : i === guide.length - 1 && g.place === route.to ? 'You have arrived at' : 'Now passing';
-    guideCard.innerHTML = `
-      <p class="kicker">Stop ${i + 1} of ${guide.length} · ${esc(where)}</p>
-      <div class="row gc-head"><span class="kind-icon" title="${esc(label)}">${icon}</span><h2>${esc(g.entry.title)}</h2></div>
-      <p>${esc(g.entry.intro)}</p>
-      <p class="kicker">What students do here</p>
-      <ul>${g.entry.doHere.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
-      <div class="row gc-actions">
-        ${canSpeak ? `<button class="btn btn-ghost btn-sm" id="gcSay">${icons.megaphone} Read aloud</button>` : ''}
-        <button class="btn btn-primary" id="gcGo">${i === guide.length - 1 && g.place === route.to ? 'Finish' : 'Continue riding'}</button>
-      </div>`;
-    guideCard.querySelector('#gcSay')?.addEventListener('click', () => say(`${g.entry.title}. ${g.entry.intro} What students do here: ${g.entry.doHere.join('. ')}.`));
-    guideCard.querySelector('#gcGo')!.addEventListener('click', () => game.continueTour());
+    const arrived = i === guide.length - 1 && g.place === route.to;
+    let full = false;
+    const draw = () => {
+      guideCard.classList.toggle('arrived', arrived);
+      guideCard.innerHTML = arrived
+        ? `<p class="gc-arrived">${icons.check} Arrived</p>
+          <div class="row gc-head"><span class="kind-icon" title="${esc(label)}">${icon}</span><div><h2>${esc(g.entry.title)}</h2><small class="muted">University of Ghana · ${esc(label)}</small></div></div>
+          ${full ? infoHtml(g.place, true) : `<p>${esc(g.entry.intro)}</p>`}
+          <div class="row gc-actions">
+            ${canSpeak ? `<button class="btn btn-ghost btn-sm" id="gcSay">${icons.megaphone} Read aloud</button>` : ''}
+            ${full ? '' : '<button class="btn btn-ghost" id="gcMore">Learn more</button>'}
+            <button class="btn btn-primary" id="gcGo">Done</button>
+          </div>`
+        : `<p class="kicker">Stop ${i + 1} of ${guide.length} · ${i === 0 ? 'You start at' : 'Now passing'}</p>
+          <div class="row gc-head"><span class="kind-icon" title="${esc(label)}">${icon}</span><h2>${esc(g.entry.title)}</h2></div>
+          ${infoHtml(g.place, full)}
+          <div class="row gc-actions">
+            ${canSpeak ? `<button class="btn btn-ghost btn-sm" id="gcSay">${icons.megaphone} Read aloud</button>` : ''}
+            ${full ? '' : '<button class="btn btn-ghost btn-sm" id="gcMore">Learn more</button>'}
+            <button class="btn btn-primary" id="gcGo">Continue</button>
+          </div>`;
+      guideCard.scrollTop = 0;
+      guideCard.querySelector('#gcSay')?.addEventListener('click', () => say(sayText(g.place)));
+      guideCard.querySelector('#gcMore')?.addEventListener('click', () => { full = true; draw(); });
+      guideCard.querySelector('#gcGo')!.addEventListener('click', () => game.continueTour());
+    };
+    draw();
+    if (arrived) sfx.go();
+  };
+  // as the tour rolls on, the guide points things out: "You're approaching…", "…is on your right"
+  const xpSay = app.querySelector<HTMLElement>('#xpSay');
+  const callouts: { d: number; text: string }[] = [];
+  if (xpSay && game.tour) {
+    for (const g of guide.slice(1)) callouts.push({ d: g.d - 70, text: g.place === route.to ? `We're approaching ${g.entry.title}, your destination.` : `You're approaching ${g.entry.title}.` });
+    const KINDS = new Set<PlaceKind>(['hall', 'landmark', 'academic', 'food', 'bank', 'sport', 'health', 'worship']);
+    const seen = new Set(guide.map((g) => g.place));
+    for (const pl of PLACES) {
+      if (seen.has(pl) || !KINDS.has(pl.kind) || /annex|washroom|office|block [a-e]$|store|lab\b/i.test(pl.name)) continue;
+      const pr = route.track.project(pl.x, pl.z);
+      const d = pr.d - route.lead;
+      if (pr.dist > 45 || d < 40 || d > route.length - 40) continue;
+      if (callouts.some((c) => Math.abs(c.d - d) < 55)) continue;
+      callouts.push({ d: d - 15, text: `${niceName(pl)} is on your ${pr.lateral > 0 ? 'right' : 'left'}.` });
+    }
+    callouts.sort((a, b) => a.d - b.d);
+  }
+  let callIdx = 0, callTimer = 0;
+  const callout = (dist: number) => {
+    if (!xpSay || callIdx >= callouts.length || dist < callouts[callIdx].d) return;
+    while (callIdx < callouts.length - 1 && dist >= callouts[callIdx + 1].d) callIdx++;
+    xpSay.textContent = callouts[callIdx++].text;
+    xpSay.hidden = false;
+    clearTimeout(callTimer);
+    callTimer = window.setTimeout(() => { xpSay.hidden = true; }, 4500);
   };
   // auto graphics: drop to smooth mode once if this phone can't keep up
   game.watchSpeed = settings.graphics === 'auto' && !settings.slowDevice;
@@ -3581,11 +3668,6 @@ function placeCard(place: Place) {
     </div>`;
 }
 
-function shareRoute(from: Place, to: Place, note: HTMLElement) {
-  const url = `${PLAY_URL}?${new URLSearchParams({ from: from.name, to: to.name, mode: exploreOpts.mode })}`;
-  return share(`How to get from ${from.name} to ${to.name} on campus, on LEGONRUSH`, url, note);
-}
-
 /** Shares a link with the phone's share sheet, or copies it and offers WhatsApp. */
 async function share(text: string, url: string, note: HTMLElement) {
   try {
@@ -3602,85 +3684,82 @@ async function share(text: string, url: string, note: HTMLElement) {
   }
 }
 
+// how you can be taken there on an Explore tour
+type ExploreWay = 'walk' | 'ride' | 'taxi' | 'shuttle';
+const EXPLORE_WAYS: { id: ExploreWay; title: string; text: string; icon: string; mode: TravelMode; vehicle: Vehicle; pace: [number, number, number] }[] = [
+  { id: 'walk', title: 'Walk There', text: 'Explore at your own pace', icon: icons.walk, mode: 'walk', vehicle: 'walk', pace: [3, 6, 12] },
+  { id: 'ride', title: 'Ride', text: 'Ride a bike to your destination', icon: icons.bike, mode: 'cycle', vehicle: 'bike', pace: [5, 14, 35] },
+  { id: 'taxi', title: 'Taxi', text: 'Take a taxi around campus', icon: icons.car, mode: 'drive', vehicle: 'taxi', pace: [10, 25, 45] },
+  { id: 'shuttle', title: 'Shuttle', text: 'Take the campus shuttle', icon: icons.bus, mode: 'drive', vehicle: 'shuttle', pace: [10, 20, 40] },
+];
+const WAY_KEY = 'legonrush.explore.way.v1';
+const exploreWay = (): ExploreWay => { try { const w = localStorage.getItem(WAY_KEY) as ExploreWay; return EXPLORE_WAYS.some((x) => x.id === w) ? w : exploreOpts.mode === 'walk' ? 'walk' : 'ride'; } catch { return 'ride'; } };
+/** a place's everyday name ("Main Gate" for Legon Main Entrance) */
+const niceName = (pl: Place) => guideFor(pl.name)?.title ?? pl.name;
+// shown when a starting point or destination box is opened before typing
+const START_PICKS = ['Legon Main Entrance', 'Great Hall', 'The Balme Library', 'Balme Library Fountain', 'Night Market', 'University of Ghana banking square', 'Legon Hall', 'Akuafo Hall Main', 'Commonwealth Hall', 'Volta Hall', 'Mensah Sarbah Hall', 'School of Engineering Sciences', 'University of Ghana Business School', 'University of Ghana Botanical Gardens', 'Jones Quartey Building, JQB', 'Central Cafeteria, CC'];
+
+/**
+ * Explore: plan a trip (university, where you are, where you're going, or just say what you need),
+ * pick how to get there, then Take Me There starts the guided 3D tour. Ride controls live in the tour only.
+ */
 function explorePicker(fromName?: string, toName = '') {
   if (!profile) return welcome();
   const p = profile;
-  let from: Place | undefined = resolvePlace(fromName ?? HALL_PLACE[p.hall] ?? 'Legon Main Entrance');
+  let from: Place | undefined = resolvePlace(fromName ?? HALL_PLACE[p.hall] ?? 'Legon Main Entrance') ?? resolvePlace('Legon Main Entrance');
   let to: Place | undefined = toName ? resolvePlace(toName) : undefined;
-  const seg = (id: string, options: [string, string][], value: string) =>
-    `<div class="seg" id="${id}">${options.map(([v, label]) => `<button data-v="${v}" class="${v === value ? 'on' : ''}">${label}</button>`).join('')}</div>`;
+  let way = exploreWay();
+  const uniOpts = CAMPUSES.map((c) => `<option value="${c.id}"${c.open ? '' : ' disabled'}${c.id === 'ug' ? ' selected' : ''}>${esc(c.open ? `${c.name} — ${c.short}` : `${c.short} — Coming soon`)}</option>`).join('');
   render(`
-    <div class="screen scrim fade-in">
-      <div class="wrap stack explore">
-        <button class="btn btn-link back" id="back">← Back</button>
-        <p class="kicker">${icons.map} Explore</p>
-        <h1 class="title">Find your way</h1>
-        ${fx.exploreSearchHtml(p)}
-        <button class="qr-campus solo" data-campus><span>${icons.pin}</span><span class="grow"><small>Campus</small>${esc(campusById(settings.campus).name)}${settings.campus === 'ug' ? ', Legon' : ''}</span><em>▾</em></button>
-        <button class="card selectable tour-card" id="tour"><div class="row"><h3 style="font-weight:800">${icons.star} FRESHERS' TOUR</h3><span class="grow"></span><span class="badge gold">${TOUR_STOPS.length} places · 3.5 km</span></div><p class="muted small" style="margin-top:4px">One ride past the places you need in week one: ${TOUR_STOPS.map((n) => esc(n.replace(/^The |, .*$/g, ''))).join(', ')}.</p></button>
-        ${fx.exploreModesHtml(p)}
-        <p class="kicker" style="margin-top:6px">Or plan your own way</p>
-        <p class="muted">Pick where you are and where you need to be. Type a name or what students call it, like Vandals, Pent or JQB.</p>
-        <div class="field picker"><label for="from">From</label><input id="from" autocomplete="off" spellcheck="false" placeholder="Your hall, a faculty, a landmark…"><ul class="suggest" id="fromList" hidden></ul></div>
-        <button class="btn btn-link swap" id="swap" aria-label="Swap from and to">⇅ Swap</button>
-        <div class="field picker"><label for="to">To</label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you need to be?"><ul class="suggest" id="toList" hidden></ul></div>
-        <div class="chips">${POPULAR.filter((n) => placeByName(n)).map((n) => `<button class="chip" data-to="${esc(n)}">${esc(n)}</button>`).join('')}</div>
-        <div class="row options">${seg('mode', [['cycle', `${icons.bike} Cycle`], ['walk', `${icons.walk} Walk`]], exploreOpts.mode)}${seg('guide', [['1', 'Guided tour'], ['0', 'Just ride']], exploreOpts.guide ? '1' : '0')}${seg('calm', [['1', 'Calm ride'], ['0', 'With traffic']], exploreOpts.calm ? '1' : '0')}</div>
-        <div id="preview" class="stack"></div>
-        <p class="muted small">${esc(ATTRIBUTION)}</p>
+    <div class="screen xp fade-in">
+      <div class="xp-hero" style="--hero:url('${photo('mode-explore')}')">
+        <button class="xp-back" id="back"><span>${icons.arrow}</span>Back</button>
+        <p class="xp-kicker">${icons.map} Explore</p>
+        <h1 class="xp-title">Find <em>your way</em></h1>
+        <p class="xp-sub">Explore is the interactive campus tour and intelligent campus guide of LEGONRUSH.</p>
+      </div>
+      <div class="xp-body">
+        <div class="xp-field"><span class="xp-ico">${icons.grad}</span><label class="xp-box"><small>University</small><select id="xpUni" aria-label="University">${uniOpts}</select><i>${icons.chevron}</i></label></div>
+        <div class="xp-field"><span class="xp-ico">${icons.pin}</span><div class="xp-box picker"><label for="from"><small>Starting point</small></label><input id="from" autocomplete="off" spellcheck="false" placeholder="Where are you starting?"><i>${icons.chevron}</i><ul class="suggest" id="fromList" hidden></ul></div></div>
+        <div class="xp-field"><span class="xp-ico">${icons.flag}</span><div class="xp-box picker"><label for="to"><small>Destination (end point)</small></label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you want to go?"><i>${icons.chevron}</i><ul class="suggest" id="toList" hidden></ul></div></div>
+        <div class="xp-or"><span>OR</span></div>
+        <div class="xp-ask">
+          <div class="xp-ask-h"><span class="xp-ico">${icons.chat}</span><div class="grow"><small>Not sure where to go?</small>
+            <form class="xp-ask-in" id="xpAskForm"><input id="xpAsk" autocomplete="off" placeholder="Tell us what you're looking for…" aria-label="Tell us what you're looking for">${'webkitSpeechRecognition' in window || 'SpeechRecognition' in window ? `<button type="button" id="xpMic" aria-label="Speak">${icons.mic}</button>` : ''}</form></div></div>
+          <div class="xp-chips">${INTENT_EXAMPLES.map((q) => `<button data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+          <div id="xpResults"></div>
+        </div>
+        <p class="xp-h">Choose how to get there</p>
+        <div class="xp-ways">${EXPLORE_WAYS.map((w) => `<button class="xp-way${w.id === way ? ' on' : ''}" data-way="${w.id}"><i class="xp-tick">${icons.check}</i>${w.icon}<b>${w.title}</b><span>${w.text}</span></button>`).join('')}</div>
+        <p class="xp-trip" id="xpTrip"></p>
+        <button class="xp-go" id="go">${icons.directions}<span>Take Me There</span>${icons.arrow}</button>
+        <div class="xp-about"><span class="xp-info">${icons.info}</span><div><small>About Explore</small><p>Explore takes you to your destination and tells you about important places along the way. It's an interactive campus tour and intelligent guide, designed to help you discover, understand, and navigate the University of Ghana — Legon.</p></div></div>
+        <p class="muted small xp-attr">${esc(ATTRIBUTION)}</p>
       </div>
     </div>`);
   const fromIn = app.querySelector<HTMLInputElement>('#from')!;
   const toIn = app.querySelector<HTMLInputElement>('#to')!;
-  const preview = app.querySelector<HTMLElement>('#preview')!;
-  const show = (place: Place | undefined) => (place ? place.name : '');
-  fromIn.value = show(from);
-  toIn.value = show(to);
+  const trip = app.querySelector<HTMLElement>('#xpTrip')!;
+  const goBtn = app.querySelector<HTMLButtonElement>('#go')!;
+  const results = app.querySelector<HTMLElement>('#xpResults')!;
+  fromIn.value = from ? niceName(from) : '';
+  toIn.value = to ? niceName(to) : '';
 
   let route: Route | null = null;
+  const W = () => EXPLORE_WAYS.find((w) => w.id === way)!;
   const update = () => {
     route = null;
-    if (!from || !to) {
-      preview.innerHTML = '';
-      return;
-    }
-    if (from === to) {
-      preview.innerHTML = `<p class="muted small">You're already there. Pick a different destination.</p>`;
-      return;
-    }
-    route = exploreRoute(from, to, exploreOpts.mode);
-    if (!route) {
-      preview.innerHTML = `<p class="muted small">No path connects those two places on the map yet.</p>`;
-      return;
-    }
-    preview.innerHTML = `
-      ${placeCard(to)}
-      ${fx.favButtonHtml(p, to)}
-      <canvas class="route-map" width="720" height="440" aria-label="Map of the way from ${esc(from.name)} to ${esc(to.name)}"></canvas>
-      <div class="stats three">
-        <div class="stat"><b>${dm(route.length)}</b><span>Distance</span></div>
-        <div class="stat"><b>${mins(route.length / 1.3)}</b><span>Walking</span></div>
-        <div class="stat"><b>${mins(route.length / 4.5)}</b><span>Cycling</span></div>
-      </div>
-      <button class="btn btn-primary" id="go">${exploreOpts.guide ? 'Start guided ride' : 'Ride there'}</button>
-      <div class="two">
-        <button class="btn btn-ghost" id="share">Share route</button>
-        <a class="btn btn-ghost" id="gmaps" target="_blank" rel="noopener">Google Maps</a>
-      </div>
-      <p class="muted small" id="shareNote" hidden></p>
-      <p class="kicker" style="margin-top:6px">Directions</p>
-      ${stepsList(route)}`;
-    routeMap(preview.querySelector('canvas')!, route);
-    fx.bindFavButton(preview, p);
-    preview.querySelector('#go')!.addEventListener('click', () => route && play(false, route, { guided: exploreOpts.guide }));
-    const [fl, fg] = toLatLng(from.x, from.z), [tl, tg] = toLatLng(to.x, to.z);
-    preview.querySelector<HTMLAnchorElement>('#gmaps')!.href =
-      `https://www.google.com/maps/dir/?api=1&origin=${fl.toFixed(6)},${fg.toFixed(6)}&destination=${tl.toFixed(6)},${tg.toFixed(6)}&travelmode=${exploreOpts.mode === 'walk' ? 'walking' : 'bicycling'}`;
-    const a = from, b = to;
-    preview.querySelector('#share')!.addEventListener('click', () => shareRoute(a, b, preview.querySelector('#shareNote')!));
+    goBtn.disabled = true;
+    if (!from || !to) { trip.textContent = !to ? 'Pick a destination, or tell us what you need.' : 'Pick where you are starting.'; return; }
+    if (from === to) { trip.textContent = "You're already there. Pick a different destination."; return; }
+    route = exploreRoute(from, to, W().mode);
+    if (!route) { trip.textContent = 'No path connects those two places on the map yet.'; return; }
+    const stops = guideStops(route).length;
+    trip.innerHTML = `<b>${esc(niceName(from))}</b> ${icons.arrow} <b>${esc(niceName(to))}</b> · ${dm(route.length)} · about ${mins(route.length / (W().pace[1] / 1.6))}${stops > 2 ? ` · ${stops - 2} ${stops === 3 ? 'place' : 'places'} on the way` : ''}`;
+    goBtn.disabled = false;
   };
 
-  // type-ahead with the kind of each place, nicknames included
+  // starting point and destination: a list of known places opens with the box, typing narrows it (nicknames work too)
   const picker = (input: HTMLInputElement, list: HTMLElement, set: (p: Place) => void) => {
     let matches: PlaceMatch[] = [];
     let active = 0;
@@ -3688,28 +3767,26 @@ function explorePicker(fromName?: string, toName = '') {
       list.hidden = !matches.length;
       list.innerHTML = matches.map((m, i) => {
         const [icon, label] = KIND_ICON[m.place.kind];
-        return `<li data-i="${i}" class="${i === active ? 'on' : ''}"><span class="kind" title="${label}">${icon}</span><span class="grow">${esc(m.place.name)}${m.alias ? ` <small class="muted">“${esc(m.alias)}”</small>` : ''}</span><small class="muted">${label}</small></li>`;
+        return `<li data-i="${i}" class="${i === active ? 'on' : ''}"><span class="kind" title="${label}">${icon}</span><span class="grow">${esc(niceName(m.place))}${m.alias ? ` <small class="muted">“${esc(m.alias)}”</small>` : ''}</span><small class="muted">${label}</small></li>`;
       }).join('');
     };
+    const defaults = (): PlaceMatch[] => [...new Set([HALL_PLACE[p.hall], ...START_PICKS])].map((n) => n && placeByName(n)).filter((x): x is Place => !!x).map((place) => ({ place }) as PlaceMatch);
     const choose = (m: PlaceMatch | undefined) => {
       if (!m) return;
       set(m.place);
-      input.value = m.place.name;
+      input.value = niceName(m.place);
       matches = [];
       draw();
+      input.blur();
       update();
     };
-    input.addEventListener('input', () => {
-      matches = searchPlaces(input.value, 7);
-      active = 0;
-      draw();
-    });
-    input.addEventListener('focus', () => input.select());
+    input.addEventListener('input', () => { matches = input.value.trim() ? searchPlaces(input.value, 8) : defaults(); active = 0; draw(); });
+    input.addEventListener('focus', () => { input.select(); matches = defaults(); active = -1; draw(); });
     input.addEventListener('keydown', (e) => {
       if (!matches.length) return;
       if (e.key === 'ArrowDown') { active = (active + 1) % matches.length; draw(); e.preventDefault(); }
       else if (e.key === 'ArrowUp') { active = (active + matches.length - 1) % matches.length; draw(); e.preventDefault(); }
-      else if (e.key === 'Enter') { choose(matches[active]); e.preventDefault(); }
+      else if (e.key === 'Enter') { choose(matches[Math.max(0, active)]); e.preventDefault(); }
       else if (e.key === 'Escape') { matches = []; draw(); }
     });
     // pointerdown fires before the input loses focus
@@ -3718,40 +3795,78 @@ function explorePicker(fromName?: string, toName = '') {
       if (li) { e.preventDefault(); choose(matches[Number(li.dataset.i)]); }
     });
     input.addEventListener('blur', () => setTimeout(() => { matches = []; draw(); }, 150));
+    input.parentElement!.querySelector('i')!.addEventListener('click', () => input.focus());
   };
   picker(fromIn, app.querySelector('#fromList')!, (pl) => { from = pl; });
   picker(toIn, app.querySelector('#toList')!, (pl) => { to = pl; });
-  // "Where do you want to go?" picks the destination; favourites are one tap
-  picker(app.querySelector('#fxWhere')!, app.querySelector('#fxWhereList')!, (pl) => { to = pl; toIn.value = pl.name; });
-  on('[data-fav]', 'click', (_, el) => { to = placeByName(el.dataset.fav!); toIn.value = show(to); update(); preview.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-  on('#fxMissions', 'click', () => fx.missionsScreen(() => explorePicker(fromName, toName)));
-  on('#fxTreasure', 'click', () => fx.treasureScreen(() => explorePicker(fromName, toName)));
 
-  on('[data-to]', 'click', (_, el) => { to = placeByName(el.dataset.to!); toIn.value = show(to); update(); });
-  on('#swap', 'click', () => { [from, to] = [to, from]; fromIn.value = show(from); toIn.value = show(to); update(); });
-  on('#mode [data-v]', 'click', (_, el) => {
-    exploreOpts.mode = el.dataset.v as TravelMode;
-    saveExploreOpts();
-    app.querySelectorAll('#mode [data-v]').forEach((b) => b.classList.toggle('on', b === el));
+  // "Not sure where to go?": understand the request, then offer the places that fit, nearest first
+  const ask = (text: string) => {
+    const q = text.trim();
+    if (!q) { results.innerHTML = ''; return; }
+    const hits: { place: Place; tags: string }[] = [];
+    const add = (place: Place | undefined, tags: string) => { if (place && !hits.some((h) => h.place === place)) hits.push({ place, tags }); };
+    if (/\bmy hall\b/i.test(q)) add(placeByName(HALL_PLACE[p.hall] ?? ''), 'Your hall');
+    const intents = matchIntents(q);
+    for (const i of intents) for (const h of i.hits) add(placeByName(h.place), h.tags);
+    const near = from;
+    // a place named outright ("I want to see the Great Hall") comes first
+    const pq = fold(placeQuery(q));
+    const named = pq ? searchPlaces(pq, 3) : [];
+    const strong = named.filter((m) => fold(niceName(m.place)).includes(pq) || pq.includes(fold(niceName(m.place))) || (m.alias && fold(m.alias) === pq));
+    for (const m of (intents.length ? strong.slice(0, 1) : named).reverse()) {
+      if (hits.some((h) => h.place === m.place)) continue;
+      const g = guideFor(m.place.name);
+      hits.unshift({ place: m.place, tags: `${KIND_ICON[m.place.kind][1]}${g ? ` · ${g.intro.split('. ')[0].replace(/\.$/, '')}` : ''}` });
+    }
+    const shown = hits.slice(0, 6);
+    const title = intents[0]?.title;
+    results.innerHTML = shown.length
+      ? `<p class="xp-res-h">${title ? `${esc(title)}: ` : ''}${shown.length === 1 ? 'here is the place' : 'pick where you want to go'}</p>
+         <div class="xp-res">${shown.map((h, i) => `<button class="xp-hit" data-hit="${i}"><span class="xp-ico sm">${KIND_ICON[h.place.kind][0]}</span><span class="grow"><b>${esc(niceName(h.place))}</b><small>${esc(h.tags)}</small></span>${near ? `<em>${dm(Math.hypot(h.place.x - near.x, h.place.z - near.z))}</em>` : ''}</button>`).join('')}</div>`
+      : `<p class="xp-res-h">We couldn't find that yet. Try words like food, print, study, cash, football or a building's name.</p>`;
+    results.querySelectorAll<HTMLElement>('[data-hit]').forEach((b) => b.addEventListener('click', () => {
+      to = shown[Number(b.dataset.hit)].place;
+      toIn.value = niceName(to);
+      results.innerHTML = '';
+      update();
+      app.querySelector('.xp-ways')!.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+  };
+  const askIn = app.querySelector<HTMLInputElement>('#xpAsk')!;
+  app.querySelector('#xpAskForm')!.addEventListener('submit', (e) => { e.preventDefault(); askIn.blur(); ask(askIn.value); });
+  on('[data-ask]', 'click', (_, el) => { askIn.value = el.dataset.ask!; ask(askIn.value); });
+  // speak the request where the browser can listen
+  on('#xpMic', 'click', (_, el) => {
+    const SR = (window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition: new () => SpeechRec }).webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = 'en-GB';
+    el.classList.add('on');
+    rec.onresult = (ev) => { askIn.value = ev.results[0][0].transcript; ask(askIn.value); };
+    rec.onend = () => el.classList.remove('on');
+    try { rec.start(); } catch { el.classList.remove('on'); }
+  });
+
+  on('#xpUni', 'change', (_, el) => { (el as HTMLSelectElement).value = 'ug'; });
+  on('[data-way]', 'click', (_, el) => {
+    way = el.dataset.way as ExploreWay;
+    try { localStorage.setItem(WAY_KEY, way); } catch { /* private mode */ }
+    app.querySelectorAll('[data-way]').forEach((b) => b.classList.toggle('on', b === el));
     update();
   });
-  on('#guide [data-v]', 'click', (_, el) => {
-    exploreOpts.guide = el.dataset.v === '1';
-    saveExploreOpts();
-    app.querySelectorAll('#guide [data-v]').forEach((b) => b.classList.toggle('on', b === el));
+  goBtn.addEventListener('click', () => {
+    if (!from) { fromIn.focus(); return; }
+    if (!to) { toIn.focus(); return; }
     update();
-  });
-  on('#calm [data-v]', 'click', (_, el) => {
-    exploreOpts.calm = el.dataset.v === '1';
-    saveExploreOpts();
-    app.querySelectorAll('#calm [data-v]').forEach((b) => b.classList.toggle('on', b === el));
+    if (route) play(false, route, { guided: true, way: W() });
   });
   on('#back', 'click', () => home());
   onBack(() => home());
-  on('#tour', 'click', () => play(false, freshersTour(), { guided: exploreOpts.guide }));
-  on('[data-campus]', 'click', () => campusSheet(() => explorePicker(fromName, toName)));
   update();
 }
+
+/** the browser's speech recogniser, as much of it as Explore uses */
+interface SpeechRec { lang: string; onresult: (e: { results: { 0: { 0: { transcript: string } } } }) => void; onend: () => void; start(): void }
 
 // ---------- where is it? ----------
 
