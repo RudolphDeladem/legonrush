@@ -3,11 +3,7 @@
 import { registerTab } from './registry';
 import { H, esc } from '../features/host';
 import { icons } from '../ui/icons';
-import * as cloud from '../cloud';
-import { WEEK_GOAL_KM, WEEK_REWARD, currentWeek } from '../state';
-import { hallById } from '../data/campus';
 import { placeByName } from '../game/campusmap';
-import { prizeCardHtml } from '../features/money-ui';
 import { reminders, cancelReminder } from '../features/notify';
 import { homePlace } from '../features/missions';
 import { initEvents, claimPayouts, openLinkedEvent, eventDetail, seriesScreen, createWizard, passportCardHtml } from '../features/events';
@@ -26,6 +22,10 @@ let sort: SortId = 'soon';
 let query = '';
 let serverOk: boolean | null = null;
 try { ({ filter = 'all', sort = 'soon' } = JSON.parse(localStorage.getItem(VIEW_KEY) || '{}')); } catch { /* defaults */ }
+if (!FILTERS.some(([id]) => id === filter)) filter = 'all';
+
+/** Events are socials: places to meet people and hang out. Races, hunts and other challenges live in Race and Challenges. */
+const isSocial = (e: CampusEvent) => (e.activity === 'space' || e.activity === 'sunset') && !e.name.startsWith('Hall Wars');
 const remember = () => { try { localStorage.setItem(VIEW_KEY, JSON.stringify({ filter, sort })); } catch { /* blocked */ } };
 
 const DAILY = /^off:(coinrush|rainrush|sunset|night):/;
@@ -69,7 +69,7 @@ const rail = (title: string, list: CampusEvent[], icon: string, note = '') => li
 function listHtml() {
   const t = now();
   const p = H().profile();
-  const all = allEvents().filter((e) => matches(e, query));
+  const all = allEvents().filter((e) => isSocial(e) && matches(e, query));
   const s = sorter(sort);
 
   // a search or a filter: one list
@@ -88,10 +88,8 @@ function listHtml() {
   const live = open.filter((e) => isOn(statusOf(e, t))).sort(s);
   const today = open.filter((e) => !isOn(statusOf(e, t)) && e.start <= dayEnd(t)).sort(s);
   const week = open.filter((e) => e.start > dayEnd(t) && e.start < t + 7 * 86400e3 && !DAILY.test(e.key)).sort(s);
-  const series = allSeries().filter((x) => x.end > t).slice(0, 6);
+  const series = allSeries().map((x) => ({ ...x, days: x.days.filter(isSocial) })).filter((x) => x.end > t && x.days.length).slice(0, 6);
   const next = [...today, ...week][0];
-  const w = currentWeek(p);
-  const hall = hallById(p.hall);
 
   return `
     ${serverOk === false ? `<p class="ev-offline">${icons.wifiOff} Showing official events. Rider events and join counts load when you're online.</p>` : ''}
@@ -101,20 +99,6 @@ function listHtml() {
     ${rail('Later today', today, icons.clock)}
     ${rail('This week', week, icons.events)}
     ${series.length ? `<section class="ev-sec"><div class="ev-sec-h"><h2>${icons.sparkle}Event series</h2><span class="muted small">${series.length}</span></div><div class="ev-rail">${series.map(seriesCard).join('')}</div></section>` : ''}
-    <section class="ev-sec"><div class="ev-sec-h"><h2>${icons.trophy}All week long</h2></div>
-      <div class="ev-week">
-        ${prizeCardHtml()}
-        <div class="card stack ev-hallweek" style="gap:8px">
-          <div class="row"><h3>${icons.pillars} HALL WEEK</h3><span class="grow"></span><span class="badge gold">+${WEEK_REWARD} ${icons.coin}</span></div>
-          <p class="muted small">Ride ${WEEK_GOAL_KM} km for ${esc(hall.name)} between Monday and Sunday. Every ride counts.</p>
-          <div class="xpbar"><div style="width:${Math.min(100, (w.km / WEEK_GOAL_KM) * 100)}%"></div></div>
-          <div class="row small"><span>${Math.min(w.km, WEEK_GOAL_KM).toFixed(1)} / ${WEEK_GOAL_KM} km</span><span class="grow"></span><span class="muted">${w.claimed ? 'Claimed. New goal on Monday' : 'Resets on Monday'}</span></div>
-          ${w.km >= WEEK_GOAL_KM && !w.claimed ? `<button class="btn btn-primary" id="weekClaim">Claim ${WEEK_REWARD} coins</button>` : ''}
-          <button class="btn btn-ghost" id="hallBoard">See how ${esc(hall.short)} ranks this week</button>
-          ${cloud.account ? '' : '<p class="muted small">Sign in so your kilometres count for your hall.</p>'}
-        </div>
-      </div>
-    </section>
     <section class="ev-sec">${passportCardHtml(p, 'events')}</section>`;
 }
 
@@ -125,6 +109,7 @@ function render() {
       <button class="btn btn-primary btn-sm" id="evCreate">${icons.plus} Create event</button>
     </div>
     <h1 class="title ev-title">What's happening on campus?</h1>
+    <p class="muted ev-sub">Meet people, hang out, dance, eat. No racing here, just campus life.</p>
     <label class="ev-search">${icons.search}<input id="evQ" type="search" placeholder="Search events, locations or hosts" value="${esc(query)}" autocomplete="off" enterkeyhint="search"></label>
     <div class="ev-filters" role="tablist">${FILTERS.map(([id, label]) => `<button class="ev-filter${filter === id ? ' on' : ''}" data-filter="${id}" role="tab" aria-selected="${filter === id}">${id === 'live' ? '<i class="ev-dot"></i>' : ''}${label}</button>`).join('')}</div>
     <div class="ev-sortrow"><button class="ev-link" id="evPrefs">${icons.bell} Reminders</button><span class="grow"></span>

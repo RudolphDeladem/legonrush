@@ -149,6 +149,8 @@ export interface HangoutWorld extends SceneGuest {
   speak(key: string, text: string): void;
   /** a bot near you answers what you said */
   nearestBot(): Person | null;
+  /** someone free comes over to you, faces you and waves */
+  meetSomeone(): Person | null;
   selfie(capture: () => string): string;
   /** for streaming your position */
   state(): { x: number; z: number; yaw: number; act: Act };
@@ -877,6 +879,20 @@ export function buildHangout(v: Venue, me: { name: string; hall: string; skin: s
       let best: Person | null = null, bd = 9;
       for (const p of people) { if (!p.bot || p.act === 'leave') continue; const d = Math.hypot(p.x - meP.x, p.z - meP.z); if (d < bd) { bd = d; best = p; } }
       return best;
+    },
+    meetSomeone() {
+      const free = people.filter((q) => q.bot && !q.bike && (q.act === 'chat' || q.act === 'idle' || q.act === 'dance' || q.act === 'sit') && Math.hypot(q.x - meP.x, q.z - meP.z) < 16);
+      if (!free.length) return null;
+      free.sort((a, b) => Math.hypot(a.x - meP.x, a.z - meP.z) - Math.hypot(b.x - meP.x, b.z - meP.z));
+      const p = free[(rand() * Math.min(4, free.length)) | 0];
+      release(p);
+      p.fig.phone.visible = p.fig.plate.visible = false;
+      const a = meP.yaw + Math.PI + (rand() - 0.5) * 1.2;
+      const x = meP.x - Math.sin(a) * 1.3, z = meP.z - Math.cos(a) * 1.3;
+      goTo(p, x, z, 'chat', Math.atan2(meP.x - x, meP.z - z) + Math.PI);
+      p.timer = 30;
+      p.gesture = 'wave'; p.gestureT = 1.6;
+      return p;
     },
     selfie(capture) {
       selfieT = 0.25;

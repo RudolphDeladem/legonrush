@@ -196,7 +196,6 @@ function space(id: string, day: Date, type: EventType, name: string, place: stri
   });
 }
 
-const GAMES_NIGHT = 'Gather at the SRC Union Building for the Campus Quiz and Target Tap. Scores go on the event leaderboard; the best of the night win bragging rights and coins.';
 
 // ---------- the weekly programme ----------
 function dailyEvents(day: Date): CampusEvent[] {
@@ -218,7 +217,7 @@ function dailyEvents(day: Date): CampusEvent[] {
     rewards: { join: { xp: 30 }, done: { xp: 150 } }, rules: ['sunset'], cover: 'lm-gate',
   }));
   if (dow === 3) list.push(photoHunt(`photo:${k}`, day, 8, 20));
-  if (dow === 4) list.push(space(`games:${k}`, day, 'games', 'Games Night', 'SRC Union Building', [20, 0], [22, 0], 'Campus Quiz and Target Tap, live.', GAMES_NIGHT, { cover: 'mode-match' }));
+  if (dow === 4) list.push(space(`openmic:${k}`, day, 'social', 'Open Mic Night', 'SRC Union Building', [20, 0], [22, 0], 'Poetry, songs and jokes. Listen or take the mic.', 'Thursday nights: ride in, park and hang out. Students perform, everyone else cheers, chats and makes friends.', { cover: 'type-social' }));
   if (dow === 5) list.push(space(`jams:${k}`, day, 'social', 'Botanical Jams', 'University of Ghana Botanical Gardens', [20, 0], [23, 0], 'Music under the trees. Ride in, park, hang out.', 'Friday night at the Botanical Gardens. Ride there, park your bike and enter the jam: say hi, dance, send emotes, play a quick game. All interactions between riders are opt-in.', { cover: 'together' }));
   if (dow === 6) list.push(treasureHunt(`hunt:${k}`, day, 'The Lost Diamond'));
   return list;
@@ -258,11 +257,11 @@ export const SERIES: SeriesDef[] = [
     days: [
       (d, s, n, of) => explorer(`${s}:1`, d, 8, 22, { name: 'Welcome Ride', blurb: 'The places every fresher needs, in one ride.', stops: TOUR_STOPS.slice(0, 5), rewards: { join: { xp: 50 }, done: { coins: 300, xp: 250 } }, cover: 'ob-welcome', ...ser(s, 'Freshers Week', n, of) }),
       (d, s, n, of) => treasureHunt(`${s}:2`, d, 'Freshers Treasure Hunt', { ...ser(s, 'Freshers Week', n, of) }),
-      (d, s, n, of) => space(`${s}:3`, d, 'games', 'Freshers Games Night', 'SRC Union Building', [19, 0], [22, 0], 'Quiz about your new campus, and Target Tap.', GAMES_NIGHT, { cover: 'mode-match', ...ser(s, 'Freshers Week', n, of) }),
-      (d, s, n, of) => space(`${s}:4`, d, 'hall', 'Hall Competition', 'Athletic Oval', [17, 0], [21, 0], 'Halls go head to head. Every score is a hall point.', 'Represent your hall: play the mini-games at the Athletic Oval and every score adds hall points.', { rewards: { join: { xp: 50 }, done: { coins: 200, xp: 150 }, hall: 50 }, rules: ['teams'], cover: 'ev-hall', ...ser(s, 'Freshers Week', n, of) }),
+      (d, s, n, of) => space(`${s}:3`, d, 'gathering', 'Freshers Meet & Greet', 'SRC Union Building', [19, 0], [22, 0], 'Meet your course mates and hall mates.', 'New on campus? Come and meet people: music, snacks and friendly faces from every hall.', { cover: 'mode-match', ...ser(s, 'Freshers Week', n, of) }),
+      (d, s, n, of) => space(`${s}:4`, d, 'hall', 'Hall Night', 'Athletic Oval', [17, 0], [21, 0], 'Hall songs, music and dancing for every hall.', 'Every hall comes out to the Athletic Oval: hall songs, music, dancing and meeting people from other halls.', { rewards: { join: { xp: 50 }, done: { coins: 200, xp: 150 } }, cover: 'ev-hall', ...ser(s, 'Freshers Week', n, of) }),
       (d, s, n, of) => space(`${s}:5`, d, 'party', 'Freshers Party', 'SRC Union Building', [20, 0], [24 + 1, 0], 'Meet your year group. Music and dancing.', 'The welcome party: ride in, park, and meet other freshers. Dance, wave, play. Every interaction between riders is opt-in.', { cover: 'ev-night', ...ser(s, 'Freshers Week', n, of) }),
       (d, s, n, of) => sunsetRide(`${s}:6`, d, { name: 'Freshers Sunset Ride', ...ser(s, 'Freshers Week', n, of) }),
-      (d, s, n, of) => space(`${s}:7`, d, 'festival', 'Freshers Grand Finale', 'Athletic Oval', [16, 0], [22, 0], 'The week ends big at the Athletic Oval.', 'Everything at once: games, music and the Freshers Week rewards. Take part to earn the Freshers jersey.', { rewards: { join: { xp: 100 }, done: { coins: 500, xp: 300, items: ['ev-jersey-freshers', 'badge-freshers'] } }, cover: 'halls', ...ser(s, 'Freshers Week', n, of) }),
+      (d, s, n, of) => space(`${s}:7`, d, 'festival', 'Freshers Grand Finale', 'Athletic Oval', [16, 0], [22, 0], 'The week ends big at the Athletic Oval.', 'The whole campus at the Athletic Oval: music, dancing, food and new friends. Come by to earn the Freshers jersey.', { rewards: { join: { xp: 100 }, done: { coins: 500, xp: 300, items: ['ev-jersey-freshers', 'badge-freshers'] } }, cover: 'halls', ...ser(s, 'Freshers Week', n, of) }),
     ],
   },
   {
@@ -300,7 +299,7 @@ export const SERIES: SeriesDef[] = [
     days: [
       (d, s, n, of) => explorer(`${s}:1`, d, 18, 23, { type: 'seasonal', name: 'Christmas Lights Ride', blurb: 'The campus lit up at night.', rules: ['night', 'noracing'], cover: 'ev-night', ...ser(s, 'Christmas on Campus', n, of) }),
       (d, s, n, of) => treasureHunt(`${s}:2`, d, 'Christmas Gift Hunt', { type: 'seasonal', rewards: { join: { xp: 50 }, done: { coins: 1000, diamonds: 1, xp: 300, items: ['ev-bell-jingle'] } }, ...ser(s, 'Christmas on Campus', n, of) }),
-      (d, s, n, of) => space(`${s}:3`, d, 'games', 'Christmas Games', 'SRC Union Building', [18, 0], [22, 0], 'The Christmas quiz and Target Tap.', GAMES_NIGHT, { ...ser(s, 'Christmas on Campus', n, of) }),
+      (d, s, n, of) => space(`${s}:3`, d, 'seasonal', 'Christmas Carols Night', 'SRC Union Building', [18, 0], [22, 0], 'Carols, lights and good company.', 'Sing along, meet friends and enjoy the Christmas lights on campus.', { ...ser(s, 'Christmas on Campus', n, of) }),
       (d, s, n, of) => space(`${s}:4`, d, 'party', 'Christmas Eve Party', 'Great Hall', [19, 0], [24 + 1, 0], 'Music and lights on Legon Hill.', 'Christmas Eve on Legon Hill. Ride in, park, celebrate.', { rewards: { join: { xp: 60 }, done: { coins: 300, xp: 150, items: ['badge-christmas'] } }, cover: 'ev-night', ...ser(s, 'Christmas on Campus', n, of) }),
       (d, s, n, of) => coinRush(`${s}:5`, d, 10, { type: 'seasonal', name: 'Christmas Coin Rush', rewards: { join: { xp: 30 }, done: { coins: 300, xp: 150, items: ['badge-christmas'] } }, ...ser(s, 'Christmas on Campus', n, of) }),
     ],

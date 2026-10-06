@@ -15,14 +15,12 @@ import type { CampusEvent } from './types';
 import { complete, takePart, rewardText } from './store';
 import { statusOf, isOn } from './schedule';
 import { placeLabel } from './catalog';
-import { GAMES, playGame, type GameId } from './games';
 import * as srv from './cloud';
-import { grant } from '../inventory';
 import { HALL_PLACE, hallById } from '../../data/campus';
 import { placeByName } from '../../game/campusmap';
 import { buildHangout, type Act, type Person } from '../life/world';
 import { crowdNow, skyNow, venueById, type Theme, type Venue } from '../life/venues';
-import { replyTo } from '../life/bots';
+import { introFor, replyTo } from '../life/bots';
 
 const DEVICE_KEY = 'legonrush.device.v1';
 function myKey() {
@@ -92,7 +90,6 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
   let ch: live.Channel | null = null;
   let peers: live.Peer<PeerState>[] = [];
   const msgs: Msg[] = [{ k: '', name: '', text: `Welcome to ${e.name}. Tap someone to say hi. Be kind: block, mute and report are one tap away.`, at: Date.now(), sys: true }];
-  const roomScores = new Map<string, { name: string; score: number; me?: boolean }>();
   let musicOn = true;
   let gone = false;
   let lastSend = 0;
@@ -123,8 +120,9 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
       </div>
       <div class="ev-floats life-floats" id="evFloats"></div>
       <p class="life-toast" id="lifeToast"${first ? '' : ' hidden'}>${first ? `${icons.stamp} Passport stamped${rewardText(first) ? ` · ${esc(rewardText(first))}` : ''}` : ''}</p>
-      <p class="life-hint" id="lifeHint">Tap the ground to walk. Tap a person to meet them. Drag to look around.</p>
+      <p class="life-hint" id="lifeHint">Tap the ground to walk. Tap anyone to say hi, or tap Meet. Drag to look around.</p>
       <div class="life-acts">
+        <button data-act="meet">${icons.users}<span>Meet</span></button>
         <button data-act="dance">${icons.dance}<span>Dance</span></button>
         <button data-act="wave">${icons.hand}<span>Wave</span></button>
         <button data-act="sit">${icons.seat}<span>Sit</span></button>
@@ -132,10 +130,9 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
         <button data-act="photo">${icons.camera}<span>Photo</span></button>
         <button data-panel="chat">${icons.chat}<span>Chat</span><i class="life-badge" id="lifeUnread" hidden></i></button>
         <button data-panel="people">${icons.users}<span>People</span></button>
-        <button data-panel="games">${icons.target}<span>Games</span></button>
       </div>
       <div class="life-panel light-ui" id="lifePanel" hidden>
-        <div class="row life-panel-h"><div class="seg" id="lifeTabs"><button data-tab="chat" class="on">Chat</button><button data-tab="people">People</button><button data-tab="games">Games</button></div><span class="grow"></span><button class="btn btn-link" id="lifeClose" aria-label="Close">${icons.close}</button></div>
+        <div class="row life-panel-h"><div class="seg" id="lifeTabs"><button data-tab="chat" class="on">Chat</button><button data-tab="people">People here</button></div><span class="grow"></span><button class="btn btn-link" id="lifeClose" aria-label="Close">${icons.close}</button></div>
         <div data-pane="chat" class="ev-chat">
           <div class="row"><span class="muted small">Event chat</span><span class="grow"></span><span class="muted small" id="evConn">Connecting…</span></div>
           <div class="ev-log" id="evLog"></div>
@@ -145,11 +142,6 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
           <div class="ev-emotes">${EMOTES.map((x) => `<button class="ev-emote" data-emote="${x.id}">${x.icon}<span>${x.label}</span></button>`).join('')}</div>
           <div class="row"><b>${icons.users} Who's here</b><span class="grow"></span><span class="muted small" id="evHereN"></span></div>
           <div class="life-list" id="evPeople"></div>
-        </div>
-        <div data-pane="games" class="stack" style="gap:10px" hidden>
-          <div class="ev-games">${GAMES.map((g) => `<div class="ev-game-card"><span class="ev-gico">${g.icon}</span><div class="grow"><b>${g.name}</b><p class="muted small">${g.blurb}</p></div><button class="btn btn-primary btn-sm" data-play="${g.id}">Play</button></div>`).join('')}</div>
-          <div class="seg wide" id="evBoardTabs">${GAMES.map((g, i) => `<button data-board="${g.id}" class="${i ? '' : 'on'}">${g.name}</button>`).join('')}</div>
-          <ol class="ev-board" id="evBoard"></ol>
         </div>
       </div>
     </div>`;
@@ -184,20 +176,6 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
       + people.map((x) => row(x.key, x.name, `${x.hall ? `${x.hall} · ` : ''}${ACT_LABEL[x.act] ?? 'Hanging out'}`, false)).join('')
       + (ch ? '' : `<p class="muted small">${icons.wifiOff} Can't reach live riders right now. Everyone here is still around, and scores post when you're back online.</p>`);
   }
-  async function drawBoard(game: GameId) {
-    const el = $('#evBoard');
-    if (!el) return;
-    const server = await srv.leaderboard(e.key, game);
-    if (gone) return;
-    const rows = new Map<string, { name: string; score: number; me?: boolean }>();
-    for (const r of server ?? []) rows.set(r.me ? me : r.name, r);
-    for (const [k, r] of roomScores) if (k.endsWith(':' + game)) { const id = k.slice(0, -game.length - 1); const prev = rows.get(id); if (!prev || prev.score < r.score) rows.set(id, r); }
-    const list = [...rows.values()].sort((a, b) => b.score - a.score).slice(0, 10);
-    el.innerHTML = list.length
-      ? list.map((r, i) => `<li class="${r.me ? 'me' : ''}"><span class="ev-rank">${i + 1}</span><span class="grow">${esc(r.me ? 'You' : r.name)}</span><b>${r.score}</b></li>`).join('')
-      : `<li class="muted small ev-empty">No scores yet. Play to set the first one.</li>`;
-  }
-  let boardGame: GameId = 'quiz';
   const drawHere = () => { const el = $('#lifeHere'); if (el) el.textContent = `${world.count()} here`; };
   drawHere();
   const hereTimer = window.setInterval(() => {
@@ -296,6 +274,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
       const a = t.closest<HTMLElement>('[data-ask]')?.dataset.ask as Ask | undefined;
       if (!a) return;
       ov.remove();
+      partner = b;
       toast(`${icons.hand} Asking ${esc(b.name.split(' ')[0])}…`, 1800);
       void world.askBot(b, a).then((yes) => {
         if (gone) return;
@@ -344,6 +323,33 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
       }
     });
   }
+
+  // ---------- meeting people ----------
+  /** who you're talking with: the last person who came over or answered you */
+  let partner: Person | null = null;
+  let lastMeet = Date.now();
+  function meet(asked: boolean) {
+    const b = world.meetSomeone();
+    if (!b) { if (asked) toast('Everyone is busy right now. Try walking over to a group.'); return; }
+    lastMeet = Date.now();
+    partner = b;
+    if (asked) toast(`${icons.users} ${esc(b.name.split(' ')[0])} is coming over`, 2200);
+    setTimeout(() => {
+      if (gone) return;
+      const line = introFor(b, venue.theme, Math.random);
+      world.speak(b.key, line);
+      msgs.push({ k: b.key, name: b.name, text: line, at: Date.now() });
+      drawLog();
+      bump();
+      if (!asked) toast(`${icons.chat} ${esc(b.name.split(' ')[0])} came over to say hi. Reply in Chat.`, 3500);
+    }, 2600);
+  }
+  // after a little while someone comes over by themselves, then every minute or so
+  let meetTimer = window.setTimeout(function again() {
+    if (gone) return;
+    if (Date.now() - lastMeet > 40e3 && panel.hidden) meet(false);
+    meetTimer = window.setTimeout(again, 45e3 + Math.random() * 30e3);
+  }, 14e3);
 
   // ---------- photos ----------
   function takePhoto() {
@@ -426,18 +432,9 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
       if (m.ok) did(m.from, pend.kind);
       else note(`${nameOf(m.from)} said no thanks.`);
     });
-    c.on('score', (m: { k: string; name: string; game: GameId; score: number }) => {
-      const g = GAMES.find((x) => x.id === m.game);
-      if (!g || !(m.score >= 0 && m.score <= g.max) || hidden(m.k)) return;
-      const key = `${m.k}:${m.game}`;
-      if ((roomScores.get(key)?.score ?? -1) < m.score) roomScores.set(key, { name: String(m.name).slice(0, 24), score: Math.round(m.score) });
-      note(`${String(m.name).slice(0, 24)} scored ${Math.round(m.score)} in ${g.name}.`);
-      if (boardGame === m.game) void drawBoard(boardGame);
-    });
   });
 
   drawLog();
-  void drawBoard(boardGame);
 
   // ---------- walking, looking, tapping people ----------
   const touch = $('#lifeTouch')!;
@@ -482,8 +479,9 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
 
   // ---------- buttons ----------
   h.app.querySelectorAll<HTMLElement>('[data-act]').forEach((b) => b.addEventListener('click', () => {
-    const a = b.dataset.act as 'dance' | 'wave' | 'sit' | 'eat' | 'photo';
+    const a = b.dataset.act as 'dance' | 'wave' | 'sit' | 'eat' | 'photo' | 'meet';
     if (a === 'photo') return takePhoto();
+    if (a === 'meet') { meet(true); return; }
     if (a === 'dance' && world.me.act === 'dance') { world.doAct('stop'); return; }
     world.doAct(a);
     if (a === 'wave') ch?.send('emote', { k: me, name: p.name, e: 'wave' });
@@ -520,9 +518,11 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     world.speak('me', text);
     drawLog();
     ch?.send('chat', { k: me, name: p.name.slice(0, 24), text });
-    // someone standing near you answers now and then
-    const b = world.nearestBot();
-    const r = b && replyTo(text, Math.random);
+    // whoever you're talking with answers (or someone standing near you)
+    const near = world.nearestBot();
+    const b = partner && world.people().includes(partner) && Math.hypot(partner.x - world.me.x, partner.z - world.me.z) < 6 ? partner : near;
+    if (b) partner = b;
+    const r = b && replyTo(text, Math.random, b);
     if (b && r) setTimeout(() => { if (gone) return; world.speak(b.key, r); msgs.push({ k: b.key, name: b.name, text: r, at: Date.now() }); drawLog(); }, 1200 + Math.random() * 1500);
   });
   $('#evMusic')!.addEventListener('click', () => {
@@ -531,26 +531,6 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     $('#evMusic')!.classList.toggle('on', musicOn);
     $('#evEq')!.classList.toggle('on', musicOn);
   });
-  h.app.querySelectorAll<HTMLElement>('[data-board]').forEach((b) => b.addEventListener('click', () => {
-    boardGame = b.dataset.board as GameId;
-    h.app.querySelectorAll('[data-board]').forEach((x) => x.classList.toggle('on', x === b));
-    void drawBoard(boardGame);
-  }));
-  h.app.querySelectorAll<HTMLElement>('[data-play]').forEach((b) => b.addEventListener('click', () => {
-    const game = b.dataset.play as GameId;
-    playGame(game, (score, detail) => {
-      if (score === null || gone) return;
-      roomScores.set(`${me}:${game}`, { name: p.name, score, me: true });
-      ch?.send('score', { k: me, name: p.name.slice(0, 24), game, score });
-      void srv.submitScore(e.key, game, score);
-      const got = complete(p, e);
-      if (game === 'quiz' && detail.startsWith('6 of 6') && !p.items['badge-games-night']) grant(p, { items: ['badge-games-night'] });
-      note(`You scored ${score} in ${GAMES.find((g) => g.id === game)!.name} (${detail}).${got ? ` Event complete: ${rewardText(got)}.` : ''}`);
-      boardGame = game;
-      h.app.querySelectorAll('[data-board]').forEach((x) => x.classList.toggle('on', (x as HTMLElement).dataset.board === game));
-      void drawBoard(game);
-    });
-  }));
   $('#evLeave')!.addEventListener('click', () => leave());
 
   function leave() {
@@ -559,6 +539,7 @@ export function spaceScreen(e: CampusEvent, back: () => void) {
     clearTimeout(stayTimer);
     clearInterval(hereTimer);
     clearInterval(posTimer);
+    clearTimeout(meetTimer);
     for (const x of pending.values()) clearTimeout(x.timer);
     h.app.removeEventListener('click', onPerson);
     removeEventListener('keydown', keyDown);

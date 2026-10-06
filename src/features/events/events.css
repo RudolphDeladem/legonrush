@@ -400,3 +400,4 @@
   .life-panel { left: auto; right: 16px; top: calc(70px + var(--safe-t)); bottom: 100px; width: 380px; max-height: none; }
 }
 .reduce-motion .life-say { animation: none; }
+.ev-sub { margin: -6px 0 6px; }

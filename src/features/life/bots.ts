@@ -53,10 +53,36 @@ const LINES: Record<Theme | 'any', string[]> = {
 export const lineFor = (theme: Theme, rand: () => number) => { const a = rand() < 0.45 ? LINES.any : LINES[theme]; return a[(rand() * a.length) | 0]; };
 
 const HELLO = ['Hey! 👋', 'Chale, how far?', 'Hi! Welcome', 'Hello! First time here?', 'Hey hey 🙌', 'Charley!'];
-const REPLY = ['True talk', 'Haha 😂', 'Same here', 'Chale, for real', 'You know it', 'Lol yes', '😂😂', 'Let’s go!', 'Facts'];
+const REPLY = ['True talk', 'Haha 😂', 'Same here', 'Chale, for real', 'You know it', 'Lol yes', '😂😂', 'Let’s go!', 'Facts', 'Eiii', 'No wahala'];
+const COURSES = ['Political Science', 'Computer Science', 'Economics', 'Nursing', 'Law', 'Business Admin', 'Psychology', 'Engineering', 'Linguistics', 'Geography', 'Pharmacy', 'Theatre Arts'];
+const pickOf = <T,>(a: T[], rand: () => number) => a[(rand() * a.length) | 0];
+
+/** what a student opens with when they come over to you */
+export function introFor(b: { name: string; hall: string }, theme: Theme, rand: () => number) {
+  const first = b.name.split(' ')[0];
+  const opener = pickOf([
+    `Hi! I'm ${first} from ${b.hall}. First time here?`,
+    `Hey, I'm ${first}. Which hall are you in?`,
+    `Chale, how far? I'm ${first} (${b.hall})`,
+    `Hello! ${first} here. What are you studying?`,
+    theme === 'market' ? `Hi, I'm ${first}. Have you tried the waakye here?` : theme === 'jam' ? `Yo! I'm ${first}. You dey dance?` : `Hey! I'm ${first}. You come here often?`,
+  ], rand);
+  return opener;
+}
+
 /** what a student says back to you in chat, or null to stay quiet */
-export function replyTo(text: string, rand: () => number) {
-  if (/\b(hi|hey|hello|how far|charley|chale|yo|sup|good (morning|evening|afternoon))\b/i.test(text)) return HELLO[(rand() * HELLO.length) | 0];
-  if (rand() < 0.35) return REPLY[(rand() * REPLY.length) | 0];
+export function replyTo(text: string, rand: () => number, b?: { name: string; hall: string }) {
+  const t = text.toLowerCase();
+  if (b && /\b(name|who are you)\b/.test(t)) return `I'm ${b.name.split(' ')[0]} 😊`;
+  if (b && /\bhall\b|where do you (stay|live)/.test(t)) return `${b.hall}! Best hall 💪`;
+  if (/\b(study|studying|course|programme|program|level)\b/.test(t)) return `${pickOf(COURSES, rand)}. Level ${pickOf(['100', '200', '300', '400'], rand)}`;
+  if (/how are you|how far|how you dey|wassup|what'?s up/.test(t)) return pickOf(['I dey oo, you?', 'I’m good! You?', 'Fine, just vibing', 'Chilling 😎'], rand);
+  if (/\b(dance|dancing)\b/.test(t)) return pickOf(['Let’s go! 💃', 'Only if you lead 😂', 'This song? Yes!'], rand);
+  if (/\b(eat|food|hungry|waakye|jollof|kelewele|indomie)\b/.test(t)) return pickOf(['The waakye here is top', 'Let’s go buy something', 'I’m hungry too 😅'], rand);
+  if (/\b(first time|new|fresher)\b/.test(t)) return pickOf(['Welcome to Legon! 🎉', 'You’ll love it here', 'Freshers! Ask me anything'], rand);
+  if (/\b(hi|hey|hello|charley|chale|yo|sup|good (morning|evening|afternoon))\b/.test(t)) return pickOf(HELLO, rand);
+  if (/\b(thanks|thank you|bye|later)\b/.test(t)) return pickOf(['Anytime!', 'See you around 👋', 'Enjoy!'], rand);
+  if (/\?$/.test(t)) return pickOf(['Hmm, good question 😂', 'I think so', 'Not sure oo', 'Yes!'], rand);
+  if (rand() < 0.6) return pickOf(REPLY, rand);
   return null;
 }

@@ -18,14 +18,14 @@ export interface TypeMeta {
 }
 
 export const TYPES: Record<EventType, TypeMeta> = {
-  treasure: { label: 'Treasure Hunt', icon: icons.diamond, group: 'treasure', activity: 'hunt', cover: 'lm-aerial', wizard: true, hint: 'Hide a treasure; riders follow clues and a hot/cold meter.' },
+  treasure: { label: 'Treasure Hunt', icon: icons.diamond, group: 'treasure', activity: 'hunt', cover: 'lm-aerial', wizard: false, hint: 'Hide a treasure; riders follow clues and a hot/cold meter.' },
   social: { label: 'Social / Jam', icon: icons.music, group: 'social', activity: 'space', cover: 'together', wizard: true, hint: 'Ride there, park, hang out: chat, emotes, music.' },
-  games: { label: 'Mini-Game', icon: icons.target, group: 'games', activity: 'space', cover: 'mode-match', wizard: true, hint: 'Campus Quiz and Target Tap with an event leaderboard.' },
+  games: { label: 'Mini-Game', icon: icons.target, group: 'games', activity: 'space', cover: 'mode-match', wizard: false, hint: 'Campus Quiz and Target Tap with an event leaderboard.' },
   festival: { label: 'Campus Festival', icon: icons.sparkle, group: 'social', activity: 'space', cover: 'halls', wizard: true, hint: 'A big gathering with games and things to do.' },
   hall: { label: 'Hall Event', icon: icons.pillars, group: 'hall', activity: 'space', cover: 'ev-hall', wizard: true, hint: 'For your hall: games and hall points.' },
-  explorer: { label: 'Exploration', icon: icons.compass, group: 'ride', activity: 'explorer', cover: 'mode-explore', wizard: true, hint: 'Reach a list of campus places.' },
+  explorer: { label: 'Exploration', icon: icons.compass, group: 'ride', activity: 'explorer', cover: 'mode-explore', wizard: false, hint: 'Reach a list of campus places.' },
   party: { label: 'Party', icon: icons.sparkle, group: 'social', activity: 'space', cover: 'ev-night', wizard: true, hint: 'Music, dancing and emotes.' },
-  sports: { label: 'Sports Activity', icon: icons.ball, group: 'games', activity: 'space', cover: 'race', wizard: true, hint: 'Skill games at a sports spot.' },
+  sports: { label: 'Sports Activity', icon: icons.ball, group: 'games', activity: 'space', cover: 'race', wizard: false, hint: 'Skill games at a sports spot.' },
   seasonal: { label: 'Seasonal Event', icon: icons.star, group: 'social', activity: 'space', cover: 'about', wizard: true, hint: 'Christmas, Valentine, Independence and more.' },
   gathering: { label: 'Community Gathering', icon: icons.users, group: 'social', activity: 'space', cover: 'type-social', wizard: true, hint: 'Meet riders: a club, a course, a crew.' },
   special: { label: 'Special Event', icon: icons.megaphone, group: 'social', activity: 'space', cover: 'hero', wizard: true, hint: 'Anything else worth gathering for.' },
@@ -39,8 +39,7 @@ export const TYPES: Record<EventType, TypeMeta> = {
 };
 
 export const FILTERS: [FilterId, string][] = [
-  ['all', 'All'], ['live', 'Live'], ['today', 'Today'], ['upcoming', 'Upcoming'], ['treasure', 'Treasure'],
-  ['social', 'Social'], ['games', 'Games'], ['hall', 'Hall'], ['free', 'Free'],
+  ['all', 'All'], ['live', 'Live now'], ['today', 'Today'], ['upcoming', 'Upcoming'], ['social', 'Parties & jams'], ['hall', 'Hall'], ['free', 'Free'],
 ];
 
 export type SortId = 'soon' | 'popular' | 'reward' | 'closest' | 'free' | 'recent';
