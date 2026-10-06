@@ -50,6 +50,12 @@ export interface Challenge {
   invited?: { from: string; status: 'pending' | 'accepted' | 'declined' } | null;
   /** official challenges: a short line about the series */
   series?: string;
+  /** the challenge type (kinds.ts); rider-made ones work it out from their access */
+  kind?: string;
+  /** official challenges: a photo other than the type's (public/photos) */
+  photo?: string;
+  /** treasure hunts: the clues */
+  clues?: string[];
 }
 
 /** What admins can change (config table, key 'challenges'); these are the defaults. */
@@ -67,12 +73,12 @@ export interface ChallengeConfig {
   disabledFormats: Format[];
 }
 export const DEFAULT_CONFIG: ChallengeConfig = {
-  creationFee: 500,
+  creationFee: 2000,
   entryMin: 50,
   entryMax: 1000,
   maxPool: 10000,
   maxRiders: 10,
-  perDay: 5,
+  perDay: 2,
   officialBonus: 100,
   disabledRoutes: [],
   disabledFormats: ['tournament'],
@@ -132,6 +138,8 @@ export interface ChallengeRoute {
   area: string[];
   difficulty: number;
   build: () => Route;
+  /** official only (treasure hunts): not offered when riders create a challenge or filter */
+  hidden?: boolean;
 }
 
 const extra = new Map<string, Route>();
@@ -152,13 +160,21 @@ export const CH_ROUTES: ChallengeRoute[] = [
   { id: 'legon-hill', name: 'Legon Hill', line: 'Main Gate → up the hill → Great Hall', start: 'Legon Main Entrance', area: ['Main Gate', 'Great Hall', 'Hill'], difficulty: 3, build: through('legon-hill', 'Legon Hill', ['Legon Main Entrance', 'Great Hall'], 3) },
   { id: 'sunset-route', name: 'Sunset Route', line: 'Commonwealth → Athletic Oval → Sports Complex', start: 'Commonwealth Hall', area: ['Sunset', 'Commonwealth', 'Sports', 'Night Market'], difficulty: 3, build: race('sunset-route') },
   { id: 'night-circuit', name: 'Night Circuit', line: 'Sports Complex → Night Market → Legon Hospital', start: 'Sports Complex', area: ['Night', 'Sports', 'Hospital', 'Night Market'], difficulty: 4, build: race('night-circuit') },
+  { id: 'library-explorer', name: 'Library Explorer', line: 'Balme → JQB → NNB → Great Hall → CC', start: 'The Balme Library', area: ['Balme', 'Library', 'JQB', 'NNB', 'Great Hall', 'CC'], difficulty: 2, build: through('library-explorer', 'Library Explorer', ['The Balme Library', 'Jones Quartey Building, JQB', 'New N Block, NNB', 'Great Hall', 'Central Cafeteria, CC'], 2) },
+  { id: 'grand-tour', name: 'Grand Tour', line: 'Main Gate → Engineering → Night Market → Athletic Oval → Commonwealth', start: 'Legon Main Entrance', area: ['Main Gate', 'Engineering', 'Night Market', 'Athletic Oval', 'Commonwealth', 'Distance'], difficulty: 3, build: through('grand-tour', 'Grand Tour', ['Legon Main Entrance', 'School of Engineering Sciences', 'Night Market', 'Athletic Oval', 'Commonwealth Hall'], 3) },
+  { id: 'skills-course', name: 'Skills Course', line: 'Pent → ISH → Night Market → Bush Canteen', start: 'Pentagon Block A', area: ['Pent', 'ISH', 'Night Market', 'Skills'], difficulty: 5, build: through('skills-course', 'Skills Course', ['Pentagon Block A', 'International Students Hostel 1, ISH 1', 'Night Market', 'Bush Canteen (near Department of Music)'], 5) },
+  { id: 'hunt-koko', name: 'Hidden place', line: 'Start at the Great Hall', start: 'Great Hall', area: [], difficulty: 2, hidden: true, build: through('hunt-koko', 'Treasure Hunt', ['Great Hall', 'Koko Joint'], 2) },
+  { id: 'hunt-pub', name: 'Hidden place', line: 'Start at the Night Market', start: 'Night Market', area: [], difficulty: 2, hidden: true, build: through('hunt-pub', 'Treasure Hunt', ['Night Market', 'Library Pub'], 2) },
+  { id: 'hunt-fountain', name: 'Hidden place', line: 'Start at Commonwealth Hall', start: 'Commonwealth Hall', area: [], difficulty: 2, hidden: true, build: through('hunt-fountain', 'Treasure Hunt', ['Commonwealth Hall', 'Balme Library Fountain'], 2) },
+  { id: 'hunt-oval', name: 'Hidden place', line: 'Start at Volta Hall', start: 'Volta Hall', area: [], difficulty: 2, hidden: true, build: through('hunt-oval', 'Treasure Hunt', ['Volta Hall', 'Athletic Oval'], 2) },
 ];
 export const chRoute = (id: string) => CH_ROUTES.find((r) => r.id === id);
 /** route lengths in metres, so cards don't build a route just to show its length (checked by the dev test) */
 export const ROUTE_LENGTH: Record<string, number> = {
   'limann-great-hall': 2576, 'engineering-run': 2422, 'balme-sprint': 1491, 'hall-loop': 1773, 'legon-hill': 1950, 'sunset-route': 2643, 'night-circuit': 2945,
+  'library-explorer': 4897, 'grand-tour': 3795, 'skills-course': 2494, 'hunt-koko': 2181, 'hunt-pub': 1208, 'hunt-fountain': 946, 'hunt-oval': 718,
 };
-export const kmOf = (route: string) => `${((ROUTE_LENGTH[route] ?? 0) / 1000).toFixed(1)} km`;
+export const kmOf = (route: string) => `${((ROUTE_LENGTH[route] ?? chRoute(route)?.build().length ?? 0) / 1000).toFixed(1)} km`;
 
 /** a straight-line ride at an even pace: the official pace bike (not a person) */
 export function paceRun(route: string): { name: string; time: number; run: GhostRun } {
@@ -244,17 +260,33 @@ export function cleanCode(raw: string): string | null {
 // ---------- the official schedule ----------
 // LEGONRUSH's own challenges, made by code for any day: never empty, the same on every phone.
 
-interface Slot { key: string; name: string; series: string; format: Format; route: (day: number) => string; hour: number; min: number; lengthMin: number; attempts: number; days?: number[]; description: string }
-const ROTATE = CH_ROUTES.map((r) => r.id);
+interface Slot { key: string; name: string; series: string; format: Format; route: (day: number) => string; hour: number; min: number; lengthMin: number; attempts: number; days?: number[]; description: string; kind: string; photo?: string }
+// the first seven routes, in their original order (official ids include the route)
+const ROTATE = CH_ROUTES.slice(0, 7).map((r) => r.id);
 const DAILY_TT_ROUTES = ['engineering-run', 'balme-sprint', 'limann-great-hall', 'hall-loop', 'legon-hill', 'sunset-route', 'night-circuit'];
+const HUNTS: { route: string; clues: string[] }[] = [
+  { route: 'hunt-koko', clues: ['Students queue here before the sun is fully up.', 'It is served hot in a small bowl, with koose or bread.', 'Not far from the halls, everyone knows the name.'] },
+  { route: 'hunt-pub', clues: ['Close to the books, but nobody comes here to read.', 'Music, drinks and loud debates after dark.', 'Its name joins two things: a library and a ...'] },
+  { route: 'hunt-fountain', clues: ['Water, but you cannot drink it.', 'In front of the most famous building for studying.', 'Graduation photos are taken right here.'] },
+  { route: 'hunt-oval', clues: ['Inter-hall athletics finals happen here.', 'A big loop, but not for bikes.', 'Sprinters train on it at dawn.'] },
+];
 const SLOTS: Slot[] = [
-  { key: 'morning', name: 'Morning Rush', series: 'Daily live race', format: 'live_race', route: () => 'limann-great-hall', hour: 7, min: 30, lengthMin: 20, attempts: 1, days: [1, 2, 3, 4, 5], description: 'Race to the Great Hall before your first lecture. Everyone in the lobby at 7:30 starts together.' },
-  { key: 'lunch', name: 'Lunch Sprint', series: 'Daily live race', format: 'live_race', route: () => 'balme-sprint', hour: 12, min: 30, lengthMin: 20, attempts: 1, description: 'A short, fast sprint from the Night Market to the Balme Library. Be in the lobby before 12:30.' },
-  { key: 'after-class', name: 'After-Class Race', series: 'Daily live race', format: 'live_race', route: (d) => ['engineering-run', 'legon-hill', 'hall-loop'][d % 3], hour: 16, min: 30, lengthMin: 20, attempts: 1, description: 'Classes are done. Line up and race whoever turns up.' },
-  { key: 'pace', name: 'Beat the Pace Bike', series: 'Daily ghost challenge', format: 'ghost', route: (d) => ROTATE[d % ROTATE.length], hour: 6, min: 0, lengthMin: 17 * 60, attempts: 0, description: "The LEGONRUSH pace bike rides a strong, even time. Beat it, then beat everyone else who did." },
-  { key: 'hall-war', name: 'Hall Speed War', series: 'Weekly · Saturday', format: 'best_of', route: () => 'hall-loop', hour: 18, min: 0, lengthMin: 120, attempts: 3, days: [6], description: 'Three tries round the Hall Loop. Your best time counts, and it counts for your hall.' },
-  { key: 'midweek', name: 'Midweek Showdown', series: 'Weekly · Wednesday', format: 'live_race', route: () => 'night-circuit', hour: 20, min: 0, lengthMin: 20, attempts: 1, days: [3], description: 'The big midweek race on the Night Circuit, under the streetlights.' },
-  { key: 'sunday-hill', name: 'Sunday Hill Climb', series: 'Weekly · Sunday', format: 'best_of', route: () => 'legon-hill', hour: 16, min: 0, lengthMin: 180, attempts: 3, days: [0], description: 'From the Main Gate up to the Great Hall. Three attempts, best one counts.' },
+  // Campus Sprint: a live race every hour, so there is always one about to start
+  ...[8, 9, 10, 11, 13, 14, 15, 17, 18, 19, 21, 22].map((h): Slot => ({ key: `sprint-${h}`, name: 'Campus Sprint', series: 'Hourly live race', format: 'live_race', route: (d) => ROTATE[(d + h) % 7], hour: h, min: 0, lengthMin: 20, attempts: 1, description: 'A live race on the hour. Join the lobby, line up with whoever is there and go.', kind: 'daily' })),
+  { key: 'hunt', name: 'Treasure Hunt', series: 'Daily treasure hunt', format: 'time_trial', route: (d) => HUNTS[d % HUNTS.length].route, hour: 6, min: 0, lengthMin: 18 * 60, attempts: 0, description: "Find today's hidden location. Read the clues, then ride there as fast as you can.", kind: 'treasure' },
+  { key: 'library', name: 'Library Explorer', series: 'Daily location challenge', format: 'time_trial', route: () => 'library-explorer', hour: 6, min: 0, lengthMin: 18 * 60, attempts: 0, description: 'Visit 5 locations: the Balme Library, JQB, NNB, the Great Hall and CC, in one ride.', kind: 'location' },
+  { key: 'grand-tour', name: 'Grand Tour', series: 'Daily distance challenge', format: 'time_trial', route: () => 'grand-tour', hour: 6, min: 0, lengthMin: 18 * 60, attempts: 0, description: 'The long one: from the Main Gate past Engineering, the Night Market and the Athletic Oval up to Commonwealth.', kind: 'distance' },
+  { key: 'skills', name: 'Skills Challenge', series: 'Daily skills challenge', format: 'best_of', route: () => 'skills-course', hour: 6, min: 0, lengthMin: 18 * 60, attempts: 3, description: 'Obstacles and precision: tight corners and busy roads around Pent and ISH. Three tries, best one counts.', kind: 'skill' },
+  { key: 'interhall', name: 'Inter-Hall Challenge', series: 'Daily inter-hall', format: 'best_of', route: (d) => ['hall-loop', 'limann-great-hall', 'sunset-route'][d % 3], hour: 6, min: 0, lengthMin: 18 * 60, attempts: 3, description: 'Represent your hall. Every time you post counts for your hall on the inter-hall board.', kind: 'interhall' },
+  { key: 'sunset-tt', name: 'Sunset Time Trial', series: 'Limited time · every evening', format: 'time_trial', route: () => 'sunset-route', hour: 17, min: 0, lengthMin: 105, attempts: 0, description: 'Only open while the sun goes down. Ride the Sunset Route from Commonwealth to the Sports Complex.', kind: 'special', photo: 'sc-sunset' },
+  { key: 'night-ride', name: 'Night Ride Challenge', series: 'Limited time · every night', format: 'time_trial', route: () => 'night-circuit', hour: 20, min: 0, lengthMin: 225, attempts: 0, description: 'The Night Circuit under the streetlights. Open 8 PM to 11:45 PM.', kind: 'special', photo: 'sc-night' },
+  { key: 'morning', name: 'Morning Rush', series: 'Daily live race', format: 'live_race', route: () => 'limann-great-hall', hour: 7, min: 30, lengthMin: 20, attempts: 1, days: [1, 2, 3, 4, 5], description: 'Race to the Great Hall before your first lecture. Everyone in the lobby at 7:30 starts together.', kind: 'daily' },
+  { key: 'lunch', name: 'Lunch Sprint', series: 'Daily live race', format: 'live_race', route: () => 'balme-sprint', hour: 12, min: 30, lengthMin: 20, attempts: 1, description: 'A short, fast sprint from the Night Market to the Balme Library. Be in the lobby before 12:30.', kind: 'daily' },
+  { key: 'after-class', name: 'After-Class Race', series: 'Daily live race', format: 'live_race', route: (d) => ['engineering-run', 'legon-hill', 'hall-loop'][d % 3], hour: 16, min: 30, lengthMin: 20, attempts: 1, description: 'Classes are done. Line up and race whoever turns up.', kind: 'daily' },
+  { key: 'pace', name: 'Beat the Pace Bike', series: 'Daily ghost challenge', format: 'ghost', route: (d) => ROTATE[d % ROTATE.length], hour: 6, min: 0, lengthMin: 17 * 60, attempts: 0, description: "The LEGONRUSH pace bike rides a strong, even time. Beat it, then beat everyone else who did.", kind: 'time' },
+  { key: 'hall-war', name: 'Hall Speed War', series: 'Weekly · Saturday', format: 'best_of', route: () => 'hall-loop', hour: 18, min: 0, lengthMin: 120, attempts: 3, days: [6], description: 'Three tries round the Hall Loop. Your best time counts, and it counts for your hall.', kind: 'hall' },
+  { key: 'midweek', name: 'Midweek Showdown', series: 'Weekly · Wednesday', format: 'live_race', route: () => 'night-circuit', hour: 20, min: 0, lengthMin: 20, attempts: 1, days: [3], description: 'The big midweek race on the Night Circuit, under the streetlights.', kind: 'weekly' },
+  { key: 'sunday-hill', name: 'Sunday Hill Climb', series: 'Weekly · Sunday', format: 'best_of', route: () => 'legon-hill', hour: 16, min: 0, lengthMin: 180, attempts: 3, days: [0], description: 'From the Main Gate up to the Great Hall. Three attempts, best one counts.', kind: 'weekly' },
 ];
 
 const dayIndex = (t: number) => Math.floor((dayStart(t) + 12 * 3600e3) / 86400e3);
@@ -267,13 +299,17 @@ function officialFor(day: number /* ms at local midnight */): Challenge[] {
   // a daily time trial on every route, all day
   for (const route of DAILY_TT_ROUTES) {
     const r = chRoute(route)!;
-    out.push(official(`off-tt-${route}-${ymd(day)}`, `${r.name} Time Trial`, 'Daily time trial', 'time_trial', route, day, day + 86400e3 - 60e3, 0, `Ride ${r.name} as often as you like today. Your fastest time goes on today's board.`));
+    out.push({ ...official(`off-tt-${route}-${ymd(day)}`, `${r.name} Time Trial`, 'Daily time trial', 'time_trial', route, day, day + 86400e3 - 60e3, 0, `Ride ${r.name} as often as you like today. Your fastest time goes on today's board.`), kind: 'time' });
   }
   for (const s of SLOTS) {
     if (s.days && !s.days.includes(wd)) continue;
     const start = day + (s.hour * 60 + s.min) * 60e3;
     const route = s.route(di);
-    out.push(official(`off-${s.key}-${route}-${ymd(day)}`, s.name, s.series, s.format, route, start, start + s.lengthMin * 60e3, s.attempts, s.description));
+    const c = official(`off-${s.key}-${route}-${ymd(day)}`, s.name, s.series, s.format, route, start, start + s.lengthMin * 60e3, s.attempts, s.description);
+    c.kind = s.kind;
+    if (s.photo) c.photo = s.photo;
+    if (s.kind === 'treasure') c.clues = HUNTS.find((x) => x.route === route)?.clues;
+    out.push(c);
   }
   return out;
 }

@@ -10,6 +10,7 @@ import { cleanCode, chRoute, formatOf, accessOf, kmOf, maxPoolOf, phaseOf, poolO
 import { accessChip, byline, chCard, copy, entryText, fmtTile, ic, linkOf, ridersText, shareText, statusBadge, ticker, empty } from './view';
 import { attemptsLeft, ordinal, rideChallenge } from './ride';
 import { lobbyScreen } from './lobby';
+import { kindOf, photoOf } from './kinds';
 import { createScreen } from './create';
 
 const toTab = () => H().home('challenges');
@@ -29,7 +30,7 @@ function infoGrid(c: Challenge) {
   const split = c.entryFee > 0 ? prizeSplit(pool || maxPoolOf(c), c.prize) : [];
   const cell = (icon: string, label: string, value: string) => `<div class="chx-cell"><span class="chx-cell-ico">${ic(icon)}</span><span><small>${label}</small><b>${value}</b></span></div>`;
   return `<div class="chx-grid">
-    ${cell('pin', 'Route', `${esc(r?.name ?? c.route)}`)}
+    ${cell('pin', 'Route', `${esc(c.clues?.length ? `Hidden · ${r?.line ?? ''}` : r?.name ?? c.route)}`)}
     ${cell('flag', 'Distance', `${kmOf(c.route)} · ${DIFF[r?.difficulty ?? 2]}`)}
     ${cell(formatOf(c.format).icon, 'Format', `${esc(formatOf(c.format).name)}${c.attempts > 1 ? ` · best of ${c.attempts}` : c.attempts === 0 && c.format !== 'live_race' ? ' · ride often' : ''}`)}
     ${cell('clock', c.startNow ? 'Start' : phaseOf(c) === 'live' ? 'Started' : 'Starts', c.startNow && c.status !== 'live' ? 'When riders are ready' : esc(whenText(c.startsAt)))}
@@ -75,15 +76,17 @@ export function detailScreen(c0: Challenge, back: () => void = toTab) {
   else primary = `<div class="chx-note">${icons.lock} Registration is closed.</div>`;
 
   show(`
-    <p class="kicker">${ic(formatOf(c.format).icon)} ${esc(formatOf(c.format).name)}${c.official ? ' · Official' : ''}</p>
+    <div class="chx-hero-photo" style="background-image:url('${photoOf(c)}')"></div>
+    <p class="kicker">${ic(kindOf(c).icon)} ${esc(kindOf(c).name)} · ${esc(formatOf(c.format).name)}${c.official ? ' · Official' : ''}</p>
     <h1 class="title">${esc(c.name)}</h1>
     <p class="chx-by">${byline(c)}${c.code ? ` · <span class="chx-code">${esc(c.code)}</span>` : ''}</p>
     ${clockBox(c)}
     ${c.description ? `<p class="chx-desc">${esc(c.description)}</p>` : ''}
+    ${c.clues?.length ? `<div class="card chx-clues"><b>${icons.search} Clues</b><ol>${c.clues.map((x) => `<li>${esc(x)}</li>`).join('')}</ol><p class="muted small">Work it out first. The ride shows the way once you start, and the clock is running.</p></div>` : ''}
     ${primary}
     ${m?.best ? `<div class="card chx-mine-best"><span class="chx-tile">${icons.trophy}</span><span class="grow"><small class="muted">Your best</small><b>${raceTime(m.best)}</b></span>${m.place ? `<span class="badge gold">${ordinal(m.place)} place</span>` : ''}${c.attempts > 0 ? `<span class="muted small">${m.attempts}/${c.attempts} tries</span>` : ''}</div>` : ''}
     <div class="card chx-info">${infoGrid(c)}</div>
-    <div class="card chx-map"><canvas id="cxMap" width="720" height="360" aria-label="Route map"></canvas><p class="muted small">${esc(chRoute(c.route)?.line ?? '')}</p></div>
+    ${c.clues?.length ? '' : `<div class="card chx-map"><canvas id="cxMap" width="720" height="360" aria-label="Route map"></canvas><p class="muted small">${esc(chRoute(c.route)?.line ?? '')}</p></div>`}
     <div class="chx-actions">
       <button class="btn btn-ghost" id="cxBoard2">${icons.trophy} Leaderboard</button>
       <button class="btn btn-ghost" id="cxShare">${icons.send} Share</button>

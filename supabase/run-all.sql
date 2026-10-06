@@ -936,8 +936,8 @@ grant execute on function public.report_event_rider(text, text, text, text, json
 -- ---------- settings ----------
 
 insert into public.config (key, value) values ('challenges', jsonb_build_object(
-  'creationFee', 500, 'entryMin', 50, 'entryMax', 1000, 'maxPool', 10000, 'maxRiders', 10,
-  'perDay', 5, 'officialBonus', 100, 'disabledRoutes', '[]'::jsonb, 'disabledFormats', '["tournament"]'::jsonb
+  'creationFee', 2000, 'entryMin', 50, 'entryMax', 1000, 'maxPool', 10000, 'maxRiders', 10,
+  'perDay', 2, 'officialBonus', 100, 'disabledRoutes', '[]'::jsonb, 'disabledFormats', '["tournament"]'::jsonb
 )) on conflict (key) do nothing;
 
 create or replace function public.challenge_cfg(p_key text, p_default integer)
@@ -964,8 +964,22 @@ insert into public.challenge_routes (id, name, length_m) values
   ('hall-loop', 'Hall Loop', 1773),
   ('legon-hill', 'Legon Hill', 1950),
   ('sunset-route', 'Sunset Route', 2643),
-  ('night-circuit', 'Night Circuit', 2945)
+  ('night-circuit', 'Night Circuit', 2945),
+  ('library-explorer', 'Library Explorer', 4897),
+  ('grand-tour', 'Grand Tour', 3795),
+  ('skills-course', 'Skills Course', 2494),
+  ('hunt-koko', 'Treasure Hunt', 2181),
+  ('hunt-pub', 'Treasure Hunt', 1208),
+  ('hunt-fountain', 'Treasure Hunt', 946),
+  ('hunt-oval', 'Treasure Hunt', 718)
 on conflict (id) do update set name = excluded.name, length_m = excluded.length_m;
+
+-- 2026-10-06: creating a challenge costs 2,000 coins and a rider may create 2 a day (was 500 and 5).
+-- Only changes the old defaults, so an admin's own numbers stay.
+update public.config set value = value || jsonb_build_object('creationFee', 2000)
+  where key = 'challenges' and (value ->> 'creationFee')::integer = 500;
+update public.config set value = value || jsonb_build_object('perDay', 2)
+  where key = 'challenges' and (value ->> 'perDay')::integer = 5;
 
 create table if not exists public.challenges (
   id text primary key default gen_random_uuid()::text,
@@ -1212,8 +1226,8 @@ declare
 begin
   if v_me is null then raise exception 'sign_in: Sign in to create challenges.'; end if;
   if exists (select 1 from challenge_bans where user_id = v_me and until > now()) then raise exception 'banned: You can''t create challenges right now.'; end if;
-  if (select count(*) from challenges where creator_id = v_me and created_at > now() - interval '1 day') >= public.challenge_cfg('perDay', 5) then
-    raise exception 'limit: You can create % challenges a day.', public.challenge_cfg('perDay', 5);
+  if (select count(*) from challenges where creator_id = v_me and created_at > now() - interval '1 day') >= public.challenge_cfg('perDay', 2) then
+    raise exception 'limit: You can create % challenges a day.', public.challenge_cfg('perDay', 2);
   end if;
   perform public.challenge_check(p);
   loop
@@ -1227,7 +1241,7 @@ begin
     p ->> 'access', case when p ->> 'access' = 'hall' then p ->> 'hall' end, (p ->> 'max_riders')::integer, v_fee,
     coalesce(p ->> 'prize', 'top3'), (p ->> 'starts_at')::timestamptz, (p ->> 'reg_closes_at')::timestamptz, (p ->> 'ends_at')::timestamptz,
     coalesce((p ->> 'start_now')::boolean, false), case when p ->> 'format' = 'ghost' then p -> 'ghost' end,
-    public.challenge_cfg('creationFee', 500))
+    public.challenge_cfg('creationFee', 2000))
   returning * into v_row;
   -- the creator is in from the start of a free challenge; paid ones they join (and pay) like everyone
   if v_fee = 0 then insert into challenge_entries (challenge_id, user_id) values (v_row.id, v_me); end if;

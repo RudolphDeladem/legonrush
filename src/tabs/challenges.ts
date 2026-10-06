@@ -1,16 +1,15 @@
-// The Challenges tab: Quick Match (instant), then Race Challenges (planned competition: live now,
-// starting soon, upcoming, calendar, search and filters, my challenges, invitations), then the
-// solo races. The challenge system itself lives in src/features/challenges/.
+// The Challenges tab, in DELA's design: a hero over the clock tower, search and chips, the "Your own
+// challenge" banner, then rows of photo cards (today's, popular, by type), the calendar and my
+// challenges. It stands alone: nothing here links to Missions, Quick Match, Vibe Ride, Explore or
+// Events. The challenge system itself lives in src/features/challenges/; types in kinds.ts.
 import { registerTab } from './registry';
 import { icons } from '../ui/icons';
 import { H, esc, fmt, screen, on } from '../features/host';
-import { CAMPUS_LOOP, RACES, raceRoute } from '../game/routes';
-import { decodeChallenge, encodeChallenge } from '../game/rivals';
-import { levelFor, loadGhost } from '../state';
 import * as api from '../features/challenges/api';
 import { all, joined, isCreator, refresh, setPinOpener, setRemindersOn } from '../features/challenges/data';
 import { ACCESS, CH_ROUTES, FORMATS, chRoute, dateKey, dayDiff, phaseOf, raceTime, type Access, type Challenge, type Format, type Phase } from '../features/challenges/model';
-import { chCard, chRow, empty, ic, ticker, PLAY_URL } from '../features/challenges/view';
+import { chRow, chTile, empty, ic, ticker } from '../features/challenges/view';
+import { CH_KINDS, kindOf, photoUrl } from '../features/challenges/kinds';
 import { codeScreen, detailScreen, joinScreen } from '../features/challenges/screens';
 import { createScreen } from '../features/challenges/create';
 import { adminScreen } from '../features/challenges/admin';
@@ -19,13 +18,13 @@ import '../features/challenges/challenges.css';
 type View = 'browse' | 'calendar' | 'mine';
 type Sort = 'soon' | 'players' | 'prize' | 'popular' | 'new';
 type MineTab = 'upcoming' | 'live' | 'created' | 'joined' | 'completed' | 'invites' | 'pbs';
-interface Filters { status: Phase[]; access: Access[]; entry: ('free' | 'paid')[]; type: Format[]; route: string[] }
+interface Filters { status: Phase[]; access: Access[]; entry: ('free' | 'paid')[]; type: Format[]; route: string[]; kind: string[] }
 
 // what the rider was looking at, kept while the app is open
 const ui = {
   view: 'browse' as View,
   q: '',
-  f: { status: [], access: [], entry: [], type: [], route: [] } as Filters,
+  f: { status: [], access: [], entry: [], type: [], route: [], kind: [] } as Filters,
   sort: 'soon' as Sort,
   range: 'today' as 'today' | 'tomorrow' | 'week' | 'next' | 'date',
   date: dateKey(Date.now()),
@@ -51,10 +50,11 @@ function matches(c: Challenge, now: number) {
   if (f.entry.length && !f.entry.includes(c.entryFee > 0 ? 'paid' : 'free')) return false;
   if (f.type.length && !f.type.includes(c.format)) return false;
   if (f.route.length && !f.route.includes(c.route)) return false;
+  if (f.kind.length && !f.kind.includes(kindOf(c).id)) return false;
   const q = ui.q.trim().toLowerCase().replace(/^@/, '');
   if (q) {
     const r = chRoute(c.route);
-    const hay = [c.name, c.code, c.code.replace('-', ''), c.creator?.name, c.creator?.username, r?.name, r?.line, ...(r?.area ?? []), c.official ? 'legonrush official' : ''].join(' ').toLowerCase();
+    const hay = [c.name, c.code, c.code.replace('-', ''), c.creator?.name, c.creator?.username, r?.name, r?.line, ...(r?.area ?? []), c.official ? 'legonrush official' : '', kindOf(c).name].join(' ').toLowerCase();
     if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
   }
   return true;
@@ -77,51 +77,47 @@ function render() {
   const cfg = api.local().config;
   const now = Date.now();
   const list = visible(now);
-  const liveN = list.filter((c) => phaseOf(c, now) === 'live').length;
-  const soonN = list.filter((c) => phaseOf(c, now) === 'soon' && !allDayTrial(c)).length;
-  const todayN = list.filter((c) => phaseOf(c, now) === 'upcoming' && !allDayTrial(c) && dayDiff(c.startsAt, now) === 0).length + soonN;
   const invites = list.filter((c) => c.invited?.status === 'pending' && phaseOf(c, now) !== 'ended').length;
   const next = list.filter((c) => joined(c) && c.startsAt > now && phaseOf(c, now) !== 'cancelled').sort((a, b) => a.startsAt - b.startsAt)[0];
   const short = p.coins < cfg.creationFee;
-  return `<div class="chx" id="chx">
-    <header class="chx-head">
-      <div class="grow"><h1 class="title">Race challenges</h1><p class="chx-sub">Create a challenge. Find a challenge. Beat the competition.</p></div>
-      <button class="btn btn-ghost btn-sm chx-admin-btn" id="chxAdmin" ${ui.admin ? '' : 'hidden'} aria-label="Challenge admin">${icons.shield}<span>Admin</span></button>
-    </header>
-    <div class="chx-pulse" role="status">
-      <button data-quick="live"><i class="dot live"></i><b>${liveN}</b> live now</button>
-      <button data-quick="soon"><b>${soonN}</b> starting within the hour</button>
-      <button data-goview="calendar"><b>${todayN}</b> upcoming today</button>
-      ${invites ? `<button data-mine="invites">${icons.mail}<b>${invites}</b> invitation${invites === 1 ? '' : 's'} waiting</button>` : ''}
-      ${next ? `<button data-chx-open="${esc(next.id)}">${icons.flag} Your next challenge starts in <b data-cd="${next.startsAt}">…</b></button>` : ''}
-    </div>
-    <div class="chx-top">
-      <button class="chx-qm" id="chxQuick">
-        <span class="chx-qm-ico">${icons.bolt}</span>
-        <span class="grow"><small>Instant</small><b>Quick Match</b><span>Find me a race now. Automatic matchmaking: no setup, no codes, no waiting for a date.</span></span>
-        <span class="chx-qm-go">Race now ${icons.arrow}</span>
-      </button>
-      <div class="card chx-createcard">
-        <div class="row"><span class="chx-tile">${icons.flag}</span><span class="grow"><b>Your own challenge</b><small class="muted">Pick a route, set the rules, invite riders, schedule it.</small></span></div>
-        <button class="btn btn-primary" id="chxCreate" ${short ? 'disabled' : ''}>${icons.plus} Create challenge</button>
-        ${short ? `<p class="chx-short">${icons.close} <span>Not enough Rush Coins. You need ${fmt(cfg.creationFee)} ${icons.coin} to create a challenge. Your balance: ${fmt(p.coins)} ${icons.coin}</span></p>` : `<p class="muted small">Creation fee ${icons.coin} ${fmt(cfg.creationFee)} Rush Coins</p>`}
-        <button class="btn btn-link btn-sm" id="chxCode">${icons.key} Have a code? Join a private challenge</button>
+  const hallOn = ui.f.kind.includes('hall');
+  const chip = (q: string, on: boolean, label: string) => `<button class="chip-btn${on ? ' on' : ''}" data-quick="${q}">${label}</button>`;
+  return `<div class="chx chx2" id="chx" style="--chx-banner:url('${photoUrl('challenges-banner')}');--chx-banner-sm:url('${photoUrl('challenges-banner-sm')}')">
+    <section class="chx-hero">
+      <div class="chx-hero-card">
+        <p class="chx-kick"><span>${icons.flag}</span>Challenges</p>
+        <h1>Compete on campus</h1>
+        <p>Take on daily challenges, create your own, and prove your skills around LEGON.</p>
       </div>
-    </div>
+      <button class="btn btn-ghost btn-sm chx-admin-btn" id="chxAdmin" ${ui.admin ? '' : 'hidden'} aria-label="Challenge admin">${icons.shield}<span>Admin</span></button>
+    </section>
     <div class="chx-searchrow">
       <label class="chx-search">${icons.search}<input id="chxQ" type="search" placeholder="Search challenges, riders, routes or codes" value="${esc(ui.q)}" autocomplete="off" enterkeyhint="search"></label>
       <button class="btn btn-ghost chx-filter-btn${filterCount() ? ' on' : ''}" id="chxFilters">${icons.filter}<span>Filters${filterCount() ? ` · ${filterCount()}` : ''}</span></button>
     </div>
     <div class="chx-quick" role="group" aria-label="Quick filters">
-      <button class="chip-btn${!active() ? ' on' : ''}" data-quick="all">All</button>
-      <button class="chip-btn${ui.f.status.includes('live') ? ' on' : ''}" data-quick="live">${icons.flag} Live</button>
-      <button class="chip-btn${ui.f.status.includes('soon') ? ' on' : ''}" data-quick="soon">${icons.clock} Starting soon</button>
-      <button class="chip-btn${ui.f.status.includes('upcoming') ? ' on' : ''}" data-quick="upcoming">${icons.events} Upcoming</button>
-      <button class="chip-btn${ui.f.entry.includes('free') ? ' on' : ''}" data-quick="free">Free</button>
-      <button class="chip-btn${ui.f.entry.includes('paid') ? ' on' : ''}" data-quick="paid">${icons.coin} Paid</button>
-      <button class="chip-btn${ui.f.access.includes('friends') ? ' on' : ''}" data-quick="friends">${icons.social} Friends</button>
-      <button class="chip-btn${ui.f.access.includes('hall') ? ' on' : ''}" data-quick="hall">${icons.pillars} Hall</button>
+      ${chip('all', !active(), 'All')}
+      ${chip('live', ui.f.status.includes('live'), `${icons.flag} Live`)}
+      ${chip('soon', ui.f.status.includes('soon'), `${icons.clock} Starting soon`)}
+      ${chip('upcoming', ui.f.status.includes('upcoming'), `${icons.events} Upcoming`)}
+      ${chip('free', ui.f.entry.includes('free'), 'Free')}
+      ${chip('paid', ui.f.entry.includes('paid'), `${icons.coin} Paid`)}
+      ${chip('friends', ui.f.access.includes('friends'), `${icons.social} Friends`)}
+      ${chip('hall', hallOn, `${icons.pillars} Hall`)}
     </div>
+    <div class="chx-own">
+      <span class="chx-own-ico">${icons.flag}</span>
+      <span class="grow"><b>Your own challenge</b><small>Pick a route, set the rules, invite riders, schedule it. Make it open, code-only or invite-only, and set the maximum riders.</small></span>
+      <span class="chx-own-act">
+        <button class="btn btn-primary" id="chxCreate" ${short ? 'disabled' : ''}>${icons.plus} Create challenge</button>
+        <small>Creation fee ${icons.coin} ${fmt(cfg.creationFee)} Rush Coins${short ? ` · you have ${fmt(p.coins)}` : ''}</small>
+      </span>
+      <button class="chx-own-code" id="chxCode">${icons.key} Have a code or link? Join a private challenge ${icons.arrow}</button>
+    </div>
+    ${invites || next ? `<div class="chx-pulse" role="status">
+      ${invites ? `<button data-mine="invites">${icons.mail}<b>${invites}</b> invitation${invites === 1 ? '' : 's'} waiting</button>` : ''}
+      ${next ? `<button data-chx-open="${esc(next.id)}">${icons.flag} Your next challenge starts in <b data-cd="${next.startsAt}">…</b></button>` : ''}
+    </div>` : ''}
     <div class="seg wide chx-views">
       <button class="${ui.view === 'browse' ? 'on' : ''}" data-goview="browse">${icons.grid} Browse</button>
       <button class="${ui.view === 'calendar' ? 'on' : ''}" data-goview="calendar">${icons.events} Calendar</button>
@@ -140,49 +136,57 @@ function body() {
 }
 
 const section = (id: string, icon: string, title: string, inner: string, more = '') =>
-  `<section class="chx-sec" id="sec-${id}"><div class="chx-sec-top"><h2 class="chx-sec-h">${ic(icon)} ${title}</h2>${more}</div>${inner}</section>`;
+  `<section class="chx-sec" id="sec-${id}"><div class="chx-sec-top"><h2 class="chx-sec-h">${icon ? ic(icon) : ''} ${title}</h2>${more}</div>${inner}</section>`;
+const rail = (list: Challenge[], now: number) => `<div class="chx-rail">${list.map((c) => chTile(c, now)).join('')}</div>`;
+const grid = (list: Challenge[], now: number) => `<div class="chx-tiles">${list.map((c) => chTile(c, now)).join('')}</div>`;
+const viewAll = (attrs: string) => `<button class="chx-all" ${attrs}>View all ${icons.arrow}</button>`;
 
 function results(now: number) {
   const list = sorted(visible(now).filter((c) => matches(c, now)), now);
   const sortSel = `<label class="chx-sort">Sort <select id="chxSort">${([['soon', 'Starting soon'], ['players', 'Most players'], ['prize', 'Highest prize'], ['popular', 'Most popular'], ['new', 'Recently created']] as [Sort, string][]).map(([v, n]) => `<option value="${v}"${ui.sort === v ? ' selected' : ''}>${n}</option>`).join('')}</select></label>`;
   const code = /^LR-?[A-Z0-9]{4,6}$/i.test(ui.q.trim()) ? `<button class="btn btn-ghost btn-sm" data-findcode>${icons.key} Look up code ${esc(ui.q.trim().toUpperCase())}</button>` : '';
   return `<div class="chx-results-top"><b>${list.length} challenge${list.length === 1 ? '' : 's'}</b>${code}<span class="grow"></span>${sortSel}<button class="btn btn-link btn-sm" data-clear>Clear</button></div>
-    ${list.length ? `<div class="chx-cards">${list.slice(0, 60).map((c) => chCard(c, now)).join('')}</div>` : empty('search', 'No challenges match', 'Try fewer filters or another word. Private challenges only show up with their code.', `<button class="btn btn-ghost btn-sm" data-clear>Clear search and filters</button>`)}`;
+    ${list.length ? grid(list.slice(0, 60), now) : empty('search', 'No challenges match', 'Try fewer filters or another word. Private challenges only show up with their code.', `<button class="btn btn-ghost btn-sm" data-clear>Clear search and filters</button>`)}`;
 }
 
 function browse(now: number) {
   const list = visible(now);
-  const by = (ph: Phase) => list.filter((c) => phaseOf(c, now) === ph);
-  // live now: races and player challenges first, then mine, then the all-day official trials
-  const live = by('live').sort((a, b) => Number(allDayTrial(a)) - Number(allDayTrial(b)) || Number(joined(b)) - Number(joined(a)) || b.riders - a.riders);
-  const soon = by('soon').filter((c) => !allDayTrial(c)).sort((a, b) => a.startsAt - b.startsAt);
-  const upcoming = by('upcoming').filter((c) => !allDayTrial(c)).sort((a, b) => a.startsAt - b.startsAt);
-  const groups: [string, Challenge[]][] = [
-    ['Today', upcoming.filter((c) => dayDiff(c.startsAt, now) === 0)],
-    ['Tomorrow', upcoming.filter((c) => dayDiff(c.startsAt, now) === 1)],
-    ['This week', upcoming.filter((c) => dayDiff(c.startsAt, now) > 1 && dayDiff(c.startsAt, now) < 7)],
-  ];
-  const popular = list.filter((c) => !c.official && (c.access === 'open' || c.access === 'hall') && (phaseOf(c, now) === 'live' || phaseOf(c, now) === 'soon' || phaseOf(c, now) === 'upcoming') && c.riders > 0).sort((a, b) => b.riders - a.riders).slice(0, 4);
-  const featured = list.filter((c) => c.official && /Weekly/.test(c.series ?? '') && c.endsAt > now).sort((a, b) => a.startsAt - b.startsAt).slice(0, 2);
+  const open = list.filter((c) => ['live', 'soon', 'upcoming'].includes(phaseOf(c, now)));
+  const rank = (c: Challenge) => ({ live: 0, soon: 1, upcoming: 2, ended: 3, cancelled: 4 })[phaseOf(c, now)];
+  // today: races and timed windows first (they don't wait), then the all-day ones by type
+  const today = open.filter((c) => dayDiff(c.startsAt, now) <= 0 && c.kind !== 'time' && !(c.format === 'live_race' && phaseOf(c, now) === 'live' && !joined(c)))
+    .sort((a, b) => rank(a) - rank(b) || Number(allDayTrial(a)) - Number(allDayTrial(b)) || a.startsAt - b.startsAt);
+  const todayRail = [...today.filter((c) => !allDayTrial(c) && c.format === 'live_race').slice(0, 2), ...today.filter((c) => allDayTrial(c) || c.format !== 'live_race')].slice(0, 12);
+  // popular: most riders first; official weekly and limited-time ones fill the row
+  const pop = open.filter((c) => c.riders > 0 && discoverableNow(c)).sort((a, b) => b.riders - a.riders);
+  const fill = open.filter((c) => c.official && ['weekly', 'special', 'hall', 'interhall', 'skill', 'location', 'treasure', 'distance'].includes(kindOf(c).id) && dayDiff(c.startsAt, now) < 7 && !pop.includes(c)).sort((a, b) => rank(a) - rank(b) || a.startsAt - b.startsAt);
+  const popular = [...pop, ...fill].filter((c, i, a) => a.findIndex((x) => x.id === c.id || (x.official && c.official && x.name === c.name)) === i).slice(0, 8);
+  const live = open.filter((c) => phaseOf(c, now) === 'live').length;
+  const races = open.filter((c) => c.format === 'live_race' && phaseOf(c, now) !== 'live').sort((a, b) => a.startsAt - b.startsAt).slice(0, 8);
+  const trials = open.filter((c) => c.kind === 'time' && phaseOf(c, now) === 'live');
+  const riders = open.filter((c) => !c.official && discoverableNow(c)).sort((a, b) => rank(a) - rank(b) || a.startsAt - b.startsAt).slice(0, 8);
+  const weekly = open.filter((c) => c.official && (kindOf(c).id === 'weekly' || kindOf(c).id === 'hall') && dayDiff(c.startsAt, now) > 0 && dayDiff(c.startsAt, now) < 7).sort((a, b) => a.startsAt - b.startsAt).slice(0, 6);
   const invites = list.filter((c) => c.invited?.status === 'pending' && phaseOf(c, now) !== 'ended' && phaseOf(c, now) !== 'cancelled');
   const mineUp = list.filter((c) => joined(c) && ['live', 'soon', 'upcoming'].includes(phaseOf(c, now))).sort((a, b) => a.startsAt - b.startsAt);
   const done = list.filter((c) => (joined(c) || isCreator(c)) && phaseOf(c, now) === 'ended').sort((a, b) => b.endsAt - a.endsAt).slice(0, 4);
+  const kinds = CH_KINDS.filter((k) => open.some((c) => kindOf(c).id === k.id));
 
-  const main = [
-    section('live', 'flag', 'Live now', live.length ? `<div class="chx-cards">${live.slice(0, 4).map((c) => chCard(c, now)).join('')}</div>` : empty('flag', 'Nothing live right now', 'Check what starts soon below, or start a Quick Match.'), live.length > 4 ? `<button class="btn btn-link btn-sm" data-quick="live">See all ${live.length} ${icons.arrow}</button>` : ''),
-    soon.length ? section('soon', 'clock', 'Starting soon', `<div class="chx-cards">${soon.map((c) => chCard(c, now)).join('')}</div>`) : '',
-    section('upcoming', 'events', 'Upcoming', groups.filter(([, l]) => l.length).map(([day, l]) => `<div class="chx-day"><h3>${day}</h3><div class="card chx-rows">${l.slice(0, day === 'This week' ? 6 : 5).map((c) => chRow(c, now)).join('')}</div></div>`).join('') || empty('events', 'Nothing scheduled yet', 'Schedule your own challenge for later.'), `<button class="btn btn-link btn-sm" data-goview="calendar" data-range="week">View all upcoming ${icons.arrow}</button>`),
-    section('popular', popular.length ? 'flame' : 'star', popular.length ? 'Popular' : 'Featured', `<div class="chx-cards">${(popular.length ? popular : featured).map((c) => chCard(c, now)).join('')}</div>`),
-    done.length ? section('done', 'flagCheck', 'Completed', `<div class="card chx-rows">${done.map((c) => doneRow(c)).join('')}</div>`) : '',
+  return [
+    mineUp.length ? section('mine', '', 'Your challenges', rail(mineUp.slice(0, 8), now), viewAll('data-goview="mine"')) : '',
+    invites.length ? section('invites', '', 'Invitations', invites.map(inviteCard).join('')) : '',
+    section('today', '', `Today's challenges <span class="chx-live-n"><i></i>${live} live</span>`, rail(todayRail, now), viewAll('data-goview="calendar" data-range="today"')),
+    section('popular', '', 'Popular challenges', rail(popular, now), viewAll('data-sortview="popular"')),
+    races.length ? section('races', '', 'Live races starting soon', rail(races, now), viewAll('data-quick="soon"')) : '',
+    section('types', '', 'Challenge types', `<div class="chx-kinds">${kinds.map((k) => `<button class="chx-kind" data-kind="${k.id}"><span class="chx-kind-img" style="background-image:url('${photoUrl(k.photo)}')"></span><span class="chx-kind-ico">${ic(k.icon)}</span><b>${esc(k.name)}</b><small>${open.filter((c) => kindOf(c).id === k.id).length} open</small></button>`).join('')}</div>`),
+    riders.length ? section('riders', '', 'Made by riders', rail(riders, now), viewAll('data-kindall="player"')) : '',
+    trials.length ? section('trials', '', 'Time trials on every route', rail(trials, now), viewAll('data-kindall="time"')) : '',
+    weekly.length ? section('weekly', '', 'Coming this week', rail(weekly, now), viewAll('data-goview="calendar" data-range="week"')) : '',
+    done.length ? section('done', '', 'Completed', `<div class="card chx-rows">${done.map((c) => doneRow(c)).join('')}</div>`) : '',
+    api.online() ? '' : `<p class="muted small chx-quiet">${icons.user} Sign in to create, join and see rider challenges. Official LEGONRUSH challenges work for everyone.</p>`,
   ].join('');
-  const side = [
-    section('mine', 'user', 'My challenges', mineUp.length ? `<div class="card chx-rows">${mineUp.slice(0, 5).map((c) => mineRow(c, now)).join('')}</div>` : empty('flag', 'No challenges yet', 'Join one above, or create your own. They show up here with a countdown.'), `<button class="btn btn-link btn-sm" data-goview="mine">All ${icons.arrow}</button>`),
-    invites.length || api.online() ? section('invites', 'mail', 'Invitations', invites.length ? invites.map(inviteCard).join('') : `<p class="muted small chx-quiet">No invitations right now. When a rider invites you, it shows up here.</p>`) : '',
-    soloSection(),
-  ].join('');
-  return `<div class="chx-cols"><div class="chx-main">${main}</div><aside class="chx-side">${side}</aside></div>
-    ${api.online() ? '' : `<p class="muted small chx-quiet">${icons.user} Sign in to create, join and see rider challenges. Official LEGONRUSH challenges work for everyone.</p>`}`;
 }
+/** rider challenges that anyone may find */
+const discoverableNow = (c: Challenge) => c.access === 'open' || c.access === 'hall';
 
 function mineRow(c: Challenge, now: number) {
   const ph = phaseOf(c, now);
@@ -230,7 +234,7 @@ function calendar(now: number) {
       const rest = l.filter((c) => !allDayTrial(c));
       const head = new Date(`${k}T12:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase();
       return `<div class="chx-day"><h3>${head}</h3><div class="card chx-rows">
-        ${trials.length ? `<button class="chx-row" data-allday="${k}"><span class="chx-time">All day</span><span class="chx-tile f-time_trial">${icons.clock}</span><span class="grow chx-name"><b>Daily time trials</b><small>${trials.length} routes · ride as often as you like</small></span><span class="chx-go">${ui.allDay === k ? 'Hide' : 'Show'}</span></button>${ui.allDay === k ? trials.map((c) => chRow(c, now).replace('class="chx-row', 'class="chx-row sub')).join('') : ''}` : ''}
+        ${trials.length ? `<button class="chx-row" data-allday="${k}"><span class="chx-time">All day</span><span class="chx-tile f-time_trial">${icons.clock}</span><span class="grow chx-name"><b>All-day challenges</b><small>${trials.length} challenges · time trials, hunts, skills and more</small></span><span class="chx-go">${ui.allDay === k ? 'Hide' : 'Show'}</span></button>${ui.allDay === k ? trials.map((c) => chRow(c, now).replace('class="chx-row', 'class="chx-row sub')).join('') : ''}` : ''}
         ${rest.map((c) => chRow(c, now)).join('')}</div></div>`;
     }).join('') : empty('events', 'Nothing on these days', 'Pick another day, or schedule a challenge yourself.')}`;
 }
@@ -254,56 +258,16 @@ function mineView(now: number) {
   if (ui.mine === 'pbs') {
     const p = H().profile();
     const bests = Object.values(api.local().mine).filter((m) => m.best).sort((a, b) => b.joinedAt - a.joinedAt);
-    inner = `<h3 class="chx-mini-h">Routes</h3><div class="card chx-rows">${CH_ROUTES.map((r) => `<div class="chx-row static"><span class="chx-tile">${icons.pin}</span><span class="grow chx-name"><b>${esc(r.name)}</b><small>${esc(r.line)}</small></span><b class="chx-pbt">${p.bestTimes[r.id] ? raceTime(p.bestTimes[r.id]) : '—'}</b></div>`).join('')}</div>
+    inner = `<h3 class="chx-mini-h">Routes</h3><div class="card chx-rows">${CH_ROUTES.filter((r) => !r.hidden).map((r) => `<div class="chx-row static"><span class="chx-tile">${icons.pin}</span><span class="grow chx-name"><b>${esc(r.name)}</b><small>${esc(r.line)}</small></span><b class="chx-pbt">${p.bestTimes[r.id] ? raceTime(p.bestTimes[r.id]) : '—'}</b></div>`).join('')}</div>
       <h3 class="chx-mini-h">Challenges</h3>${bests.length ? `<div class="card chx-rows">${bests.map((m) => `<button class="chx-row" data-chx-open="${esc(m.id)}"><span class="chx-tile">${icons.trophy}</span><span class="grow chx-name"><b>${esc(m.snap.name)}</b><small>${esc(chRoute(m.snap.route)?.name ?? '')} · ${m.attempts} ride${m.attempts === 1 ? '' : 's'}${m.place ? ` · ${ordinal(m.place)}` : ''}</small></span><b class="chx-pbt">${raceTime(m.best!)}</b></button>`).join('')}</div>` : empty('trophy', 'No challenge times yet', 'Finish a challenge and your best time shows here.')}`;
   } else if (ui.mine === 'invites') {
     inner = cur[2].length ? cur[2].map(inviteCard).join('') : empty('mail', 'No invitations', 'When a rider invites you, it shows up here.');
   } else {
-    inner = cur[2].length ? `<div class="chx-cards">${cur[2].slice(0, 40).map((c) => chCard(c, now)).join('')}</div>` : empty(ui.mine === 'created' ? 'plus' : 'flag', ui.mine === 'created' ? "You haven't created a challenge" : 'Nothing here yet', ui.mine === 'created' ? 'Create one: pick a route, set the rules and share the code.' : 'Challenges you join show up here.');
+    inner = cur[2].length ? grid(cur[2].slice(0, 40), now) : empty(ui.mine === 'created' ? 'plus' : 'flag', ui.mine === 'created' ? "You haven't created a challenge" : 'Nothing here yet', ui.mine === 'created' ? 'Create one: pick a route, set the rules and share the code.' : 'Challenges you join show up here.');
   }
   return `<div class="chx-quick chx-minetabs">${tabs.map(([id, n, l]) => `<button class="chip-btn${ui.mine === id ? ' on' : ''}" data-mine="${id}">${n}${l.length ? ` <small>${l.length}</small>` : ''}</button>`).join('')}</div>
     ${inner}
     <label class="chx-toggle"><input type="checkbox" id="chxRemind" ${api.local().remind ? 'checked' : ''}><span>${icons.bell} Challenge reminders: the day before, 30 minutes before and at the start</span></label>`;
-}
-
-// ---------- solo races (the old Race tab, kept) ----------
-
-function soloSection() {
-  const p = H().profile();
-  const level = levelFor(p.xp);
-  const rows = [{ id: CAMPUS_LOOP.id, name: CAMPUS_LOOP.name, km: CAMPUS_LOOP.length, lock: 0 }, ...RACES.map((r) => ({ id: r.id, name: r.name, km: 0, lock: r.level }))];
-  return section('solo', 'bike', 'Solo races', `<div class="card chx-rows">
-      ${rows.map((r) => {
-        const locked = level < r.lock;
-        const best = p.bestTimes[r.id];
-        const ghost = best && loadGhost(r.id);
-        return `<div class="chx-row static${locked ? ' locked' : ''}"><span class="chx-tile">${locked ? icons.lock : icons.bike}</span><span class="grow chx-name"><b>${esc(r.name)}</b><small>${locked ? `Unlocks at level ${r.lock}` : best ? `Your best ${raceTime(best)} · a ghost of it rides with you` : 'Set a time: your ghost rides with you next time'}</small></span>
-          ${locked ? '' : `<button class="btn btn-primary btn-sm" data-solo="${r.id}">Ride</button>${ghost ? `<button class="btn btn-ghost btn-sm" data-send="${r.id}" title="Send a friend your run">${icons.send}</button>` : ''}`}</div>`;
-      }).join('')}
-    </div>
-    <p class="muted small" id="chxSendNote" hidden></p>
-    <div class="chx-solo-links"><button class="btn btn-link btn-sm" id="chxBoards">${icons.trophy} Route leaderboards</button><button class="btn btn-link btn-sm" id="chxGhostLink">${icons.ghost} Open a friend's ghost link</button></div>`);
-}
-const soloRoute = (id: string) => (id === CAMPUS_LOOP.id ? CAMPUS_LOOP : raceRoute(RACES.find((r) => r.id === id)!));
-
-function ghostLinkScreen() {
-  screen(`
-    <p class="kicker">${icons.ghost} Ghost link</p>
-    <h1 class="title">Race a friend's run</h1>
-    <p class="muted">Paste the link a friend sent after their ride. Their exact run races alongside you.</p>
-    <div class="field"><label for="glIn">Link</label><input id="glIn" autocapitalize="off" autocomplete="off" placeholder="${esc(PLAY_URL.replace(/^https?:\/\//, ''))}?c=..."></div>
-    <button class="btn btn-primary" id="glGo">Open</button>
-    <p class="chx-bad small" id="glErr" hidden></p>
-  `, () => H().home('challenges'), 'chx-screen');
-  on('#glGo', 'click', () => {
-    const raw = H().app.querySelector<HTMLInputElement>('#glIn')!.value.trim();
-    let code = raw;
-    try { code = new URL(raw.includes('://') ? raw : `https://${raw}`).searchParams.get('c') ?? raw; } catch { /* a bare code */ }
-    const ch = decodeChallenge(code);
-    const route = ch && (ch.routeId === CAMPUS_LOOP.id || RACES.some((r) => r.id === ch.routeId)) ? soloRoute(ch.routeId) : null;
-    if (!ch || !route) { const e = H().app.querySelector<HTMLElement>('#glErr')!; e.hidden = false; e.textContent = "That link didn't work. Ask your friend to send it again."; return; }
-    H().play(route, { challenge: ch });
-  });
 }
 
 // ---------- wiring ----------
@@ -320,8 +284,9 @@ function filtersSheet(redraw: () => void) {
       ${group('status', 'Status', [['live', 'Live now'], ['soon', 'Starting soon'], ['upcoming', 'Upcoming'], ['ended', 'Completed']])}
       ${group('access', 'Access', ACCESS.map((a) => [a.id, a.name] as [string, string]))}
       ${group('entry', 'Entry', [['free', 'Free'], ['paid', 'Paid']])}
-      ${group('type', 'Type', FORMATS.filter((x) => !x.soon).map((x) => [x.id, x.name] as [string, string]))}
-      ${group('route', 'Route', CH_ROUTES.map((r) => [r.id, r.name] as [string, string]))}
+      ${group('kind', 'Type', CH_KINDS.map((k) => [k.id, k.name] as [string, string]))}
+      ${group('type', 'Format', FORMATS.filter((x) => !x.soon).map((x) => [x.id, x.name] as [string, string]))}
+      ${group('route', 'Route', CH_ROUTES.filter((r) => !r.hidden).map((r) => [r.id, r.name] as [string, string]))}
       <div class="chx-fgroup"><b>Sort</b><div class="chx-chips">${([['soon', 'Starting soon'], ['players', 'Most players'], ['prize', 'Highest prize'], ['popular', 'Most popular'], ['new', 'Recently created']] as [Sort, string][]).map(([v, n]) => `<button class="chip-btn${sort === v ? ' on' : ''}" data-sort="${v}">${n}</button>`).join('')}</div></div>
       <div class="two"><button class="btn btn-ghost" data-reset>Reset</button><button class="btn btn-primary" data-apply>Show results</button></div></div>`;
   };
@@ -388,18 +353,21 @@ function bind(root: HTMLElement) {
     if (d.chxOpen) { const c = all().find((x) => x.id === d.chxOpen); if (c) detailScreen(c, back); return; }
     if (d.quick) {
       const q = d.quick;
-      if (q === 'all') { ui.f = { status: [], access: [], entry: [], type: [], route: [] }; ui.q = ''; }
+      if (q === 'all') { ui.f = { status: [], access: [], entry: [], type: [], route: [], kind: [] }; ui.q = ''; }
       else if (['live', 'soon', 'upcoming'].includes(q)) ui.f.status = ui.f.status.includes(q as Phase) ? ui.f.status.filter((x) => x !== q) : [...ui.f.status, q as Phase];
       else if (q === 'free' || q === 'paid') ui.f.entry = ui.f.entry.includes(q) ? [] : [q];
+      else if (q === 'hall') ui.f.kind = ui.f.kind.includes('hall') ? ui.f.kind.filter((x) => x !== 'hall' && x !== 'interhall') : [...ui.f.kind, 'hall', 'interhall'];
       else ui.f.access = ui.f.access.includes(q as Access) ? ui.f.access.filter((x) => x !== q) : [...ui.f.access, q as Access];
       if (ui.view === 'mine') ui.view = 'browse';
       return redrawAll();
     }
+    if (d.kind || d.kindall) { ui.f.kind = [(d.kind ?? d.kindall)!]; ui.view = 'browse'; root.scrollTop = 0; return redrawAll(); }
+    if (d.sortview) { ui.sort = d.sortview as Sort; ui.f.status = ['live', 'soon', 'upcoming']; ui.view = 'browse'; return redrawAll(); }
     if (d.goview) { ui.view = d.goview as View; if (d.range) ui.range = d.range as typeof ui.range; return redrawAll(); }
     if (d.range) { ui.range = d.range as typeof ui.range; return redrawBody(); }
     if (d.allday) { ui.allDay = ui.allDay === d.allday ? '' : d.allday; return redrawBody(); }
     if (d.mine) { ui.view = 'mine'; ui.mine = d.mine as MineTab; return redrawAll(); }
-    if (d.clear !== undefined) { ui.q = ''; ui.f = { status: [], access: [], entry: [], type: [], route: [] }; return redrawAll(); }
+    if (d.clear !== undefined) { ui.q = ''; ui.f = { status: [], access: [], entry: [], type: [], route: [], kind: [] }; return redrawAll(); }
     if (d.findcode !== undefined) return codeScreen(back, ui.q.trim());
     if (d.accept) { const c = all().find((x) => x.id === d.accept); if (c) joinScreen(c, back); return; }
     if (d.decline) {
@@ -411,22 +379,11 @@ function bind(root: HTMLElement) {
       api.saveLocal();
       return redrawAll();
     }
-    if (d.solo) return h.play(soloRoute(d.solo), {});
-    if (d.send) {
-      const route = soloRoute(d.send);
-      const g = loadGhost(d.send)!;
-      const p = h.profile();
-      const url = `${PLAY_URL}?c=${encodeChallenge({ routeId: route.id, name: p.name || 'A friend', time: g.time, run: g })}`;
-      return h.share(`Can you beat my ${raceTime(g.time)} on ${route.name}? Race my run on LEGONRUSH`, url, root.querySelector('#chxSendNote')!);
-    }
     switch (el.id) {
-      case 'chxQuick': return h.quickMatch();
       case 'chxCreate': return createScreen(back);
       case 'chxCode': return codeScreen(back);
       case 'chxFilters': return filtersSheet(redrawAll);
       case 'chxAdmin': return void adminScreen(back);
-      case 'chxBoards': return h.board(CAMPUS_LOOP.id, back);
-      case 'chxGhostLink': return ghostLinkScreen();
     }
   };
   root.addEventListener('click', onClick);

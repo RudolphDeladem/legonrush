@@ -112,7 +112,7 @@ export function createScreen(back: () => void = () => H().home('challenges'), ed
   let body = '';
   if (step === 0) {
     body = `<h2 class="chx-step-h">Pick a route</h2>
-      <div class="chx-routes">${CH_ROUTES.map((r) => {
+      <div class="chx-routes">${CH_ROUTES.filter((r) => !r.hidden).map((r) => {
         const off = cfg.disabledRoutes.includes(r.id);
         const best = p.bestTimes[r.id];
         return `<button class="chx-route${d.route === r.id ? ' on' : ''}" data-route="${r.id}" ${off ? 'disabled' : ''}>

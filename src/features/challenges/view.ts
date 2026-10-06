@@ -6,6 +6,7 @@ import { hallById } from '../../data/campus';
 import { accessOf, chRoute, countdown, dayDiff, formatOf, kmOf, maxPoolOf, phaseOf, poolOf, regOpen, timeText, whenText, type Challenge } from './model';
 import { joined } from './data';
 import * as api from './api';
+import { kindOf, photoOf } from './kinds';
 
 export const ic = (name: string) => (icons as Record<string, string>)[name] ?? icons.flag;
 export const PLAY_URL = `${location.origin}${import.meta.env.BASE_URL}play/`;
@@ -70,6 +71,38 @@ export function chCard(c: Challenge, now = Date.now()) {
       ${c.official ? '' : accessChip(c)}
     </span>
     <span class="chx-card-foot">${mine ? `<span class="chx-in">${icons.check} You're in</span>` : ph === 'live' && c.format === 'live_race' && !regOpen(c, now) ? '<span class="muted small">Race in progress</span>' : ''}<span class="grow"></span><span class="chx-go">${action} ${icons.arrow}</span></span>
+  </button>`;
+}
+
+/** the photo card in the Challenges tab rows (DELA's design): badges on the photo, then name, line, stats and a yellow button */
+export function chTile(c: Challenge, now = Date.now()) {
+  const ph = phaseOf(c, now);
+  const k = kindOf(c);
+  const r = chRoute(c.route);
+  const mine = joined(c);
+  const badges = [
+    ph === 'live' ? `<i class="b live"><em></em>Live</i>` : ph === 'soon' ? `<i class="b soon">Starting soon</i>` : ph === 'upcoming' ? `<i class="b">Upcoming</i>` : `<i class="b">${ph === 'cancelled' ? 'Cancelled' : 'Ended'}</i>`,
+    c.entryFee > 0 ? `<i class="b">${icons.coin} Paid</i>` : `<i class="b">Free</i>`,
+    k.id === 'hall' || k.id === 'interhall' || c.access === 'hall' ? `<i class="b">${icons.pillars} ${c.hall ? esc(hallById(c.hall).short) : 'Hall'}</i>` : '',
+    c.access === 'code' || c.access === 'link' || c.access === 'friends' ? `<i class="b">${icons.key} ${c.access === 'friends' ? 'Invite' : 'Code'}</i>` : '',
+  ].join('');
+  const sub = k.sub ?? r?.line ?? '';
+  const left = c.endsAt - now;
+  const when = ph === 'live'
+    ? (c.format === 'live_race' ? `${icons.clock} Racing` : left > 36 * 3600e3 ? `${icons.clock} ${Math.round(left / 86400e3)} days left` : `${icons.clock} Ends ${timeText(c.endsAt)}`)
+    : ph === 'soon' ? `${icons.clock} <span data-cd="${c.startsAt}">${countdown(c.startsAt - now)}</span>`
+    : ph === 'upcoming' ? `${icons.events} ${esc(shortWhen(c.startsAt, now))}` : '';
+  const dist = k.id === 'treasure' && c.clues ? `${icons.search} ${c.clues.length} clues` : k.id === 'location' ? `${icons.pin} 5 stops` : `${icons.bike} ${kmOf(c.route)}`;
+  const people = c.riders > 0 ? `${icons.social} ${c.maxRiders >= 999 ? fmt(c.riders) : `${c.riders}/${c.maxRiders}`}` : c.maxRiders < 999 ? `${icons.social} Max ${c.maxRiders}` : `${icons.social} Open to all`;
+  const action = ph === 'ended' || ph === 'cancelled' ? 'See results' : mine ? (ph === 'live' ? (c.format === 'live_race' ? 'Open lobby' : 'Ride now') : "You're in") : regOpen(c, now) ? k.cta : 'View Challenge';
+  return `<button class="chx-pc ph-${ph}${mine ? ' is-mine' : ''}" data-chx-open="${esc(c.id)}">
+    <span class="chx-pc-img" style="background-image:url('${photoOf(c)}')"><span class="chx-pc-badges">${badges}</span>${mine ? `<span class="chx-pc-in">${icons.check}</span>` : ''}</span>
+    <span class="chx-pc-body">
+      <b>${esc(c.name)}</b>
+      <small>${esc(sub)}</small>
+      <span class="chx-pc-stats"><span>${dist}</span><span>${people}</span>${when ? `<span>${when}</span>` : ''}</span>
+      <span class="chx-pc-go">${action} ${icons.arrow}</span>
+    </span>
   </button>`;
 }
 
