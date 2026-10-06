@@ -1,3 +1,5 @@
+import { newSocial, normalizeSocial, type SocialSettings } from './features/community/model';
+
 export interface Profile {
   name: string;
   username: string;
@@ -56,6 +58,9 @@ export interface Profile {
   missionBest: Record<string, number>;
   /** this week's treasure hunt */
   treasure: { week: string; found: number; claimed: boolean };
+  // ---- COMMUNITY (src/features/community) ----
+  /** Community: social status, privacy, dating choices and social badge counts (the server keeps the copy others see) */
+  social: SocialSettings;
 }
 
 export type Upgrade = 'speed' | 'grip' | 'boost';
@@ -173,6 +178,7 @@ export function newProfile(): Profile {
     weekly: { id: '', n: {}, claimed: [] }, dailyStreak: { last: '', count: 0 }, stats: {}, badges: [], visited: [], favourites: [],
     missionBest: {}, treasure: { week: '', found: 0, claimed: false },
     diamonds: 0, items: {},
+    social: newSocial(),
   };
 }
 
@@ -202,6 +208,7 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.dailyStreak = { ...d.dailyStreak, ...p.dailyStreak };
   p.treasure = { ...d.treasure, ...p.treasure };
   p.stats ??= {};
+  p.social = normalizeSocial(p.social);
   return p;
 }
 

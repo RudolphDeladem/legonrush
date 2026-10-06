@@ -22,6 +22,33 @@ export interface FeatureHost {
   explore: (from?: string, to?: string) => void;
   garage: () => void;
   share: (text: string, url: string, note: HTMLElement) => void;
+  // ---- COMMUNITY hooks (src/features/community) ----
+  /** riders in this campus's lobby right now (live presence), and whether the lobby is connected */
+  online: () => OnlinePeer[];
+  onlineState: () => 'connecting' | 'on' | 'off';
+  /** runs fn whenever who is online changes; returns a stop function */
+  watchOnline: (fn: () => void) => () => void;
+  /** Vibe Ride, opened from Community */
+  vibe: {
+    /** the Vibe Ride preferences screen (find a rider / private ride) */
+    setup: () => void;
+    /** open a ride room by code, as its host or a guest */
+    room: (code: string, host: boolean) => void;
+    /** invite someone in the lobby (they must accept) */
+    inviteOnline: (key: string) => void;
+    /** show an invite that arrived through Community (Accept / Not now) */
+    notice: (code: string, from: { id: string; name: string; hall: string }) => void;
+  };
+  /** the sign-in screen, returning to where the rider was */
+  signIn: () => void;
+  /** a message at the top of the screen with up to two buttons */
+  toast: (html: string, actions?: [string, () => void, boolean?][], ms?: number) => void;
+}
+
+/** someone in the campus lobby, as main.ts tracks them */
+export interface OnlinePeer {
+  key: string;
+  state: { id: string; name: string; hall: string; department: string; level: number; status: string; place?: string; map?: boolean; event?: string; at: number };
 }
 
 let host: FeatureHost | null = null;

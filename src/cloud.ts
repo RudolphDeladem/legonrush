@@ -210,6 +210,14 @@ function mergeFeatures(local: Profile, remote: Profile) {
     missionBest,
     diamonds: Math.max(local.diamonds ?? 0, remote.diamonds ?? 0),
     items: maxEach(local.items ?? {}, remote.items ?? {}),
+    // Community choices: the newer copy wins; badge counters keep the most of each
+    social: (() => {
+      const l = local.social, r = remote.social;
+      if (!l || !r) return l ?? r;
+      const newer = (l.updatedAt ?? 0) >= (r.updatedAt ?? 0) ? l : r;
+      const c = (k: 'posts' | 'reactions' | 'messages' | 'events') => Math.max(l.counts?.[k] ?? 0, r.counts?.[k] ?? 0);
+      return { ...newer, counts: { posts: c('posts'), reactions: c('reactions'), messages: c('messages'), events: c('events'), rodeWith: union(l.counts?.rodeWith, r.counts?.rodeWith), met: union(l.counts?.met, r.counts?.met) } };
+    })(),
   };
 }
 
