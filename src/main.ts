@@ -3711,36 +3711,30 @@ function explorePicker(fromName?: string, toName = '') {
   let way = exploreWay();
   const uniOpts = CAMPUSES.map((c) => `<option value="${c.id}"${c.open ? '' : ' disabled'}${c.id === 'ug' ? ' selected' : ''}>${esc(c.open ? `${c.name} — ${c.short}` : `${c.short} — Coming soon`)}</option>`).join('');
   render(`
-    <div class="screen xp fade-in">
-      <header class="xp-top">
-        <div class="xp-top-in">
-          <button class="xp-back" id="back" aria-label="Back">${icons.arrow}</button>
-          <div class="grow"><p class="xp-kicker">${icons.map} Explore</p><h1 class="xp-title">Find <em>your way</em></h1></div>
-        </div>
-        <p class="xp-sub">Your campus guide: pick a place, we take you there and tell you about it.</p>
-      </header>
-      <div class="xp-grid">
-        <section class="xp-card xp-plan">
+    <div class="screen xp fade-in" style="--bg-tall:url('${photo('explore-bg-tall')}');--bg-wide:url('${photo('explore-bg-wide')}')">
+      <div class="xp-layout">
+        <header class="xp-hero">
+          <button class="xp-back" id="back"><span>${icons.arrow}</span>Back</button>
+          <p class="xp-kicker">${icons.map} Explore</p>
+          <h1 class="xp-title">Find <em>your way</em></h1>
+          <p class="xp-sub">Explore is the interactive campus tour and intelligent campus guide of LEGONRUSH.</p>
+        </header>
+        <section class="xp-panel">
           <div class="xp-row"><span class="xp-ico">${icons.grad}</span><label class="xp-box"><small>University</small><select id="xpUni" aria-label="University">${uniOpts}</select><i>${icons.chevron}</i></label></div>
-          <div class="xp-route">
-            <div class="xp-row"><span class="xp-ico">${icons.pin}</span><div class="xp-box picker"><label for="from"><small>Starting point</small></label><input id="from" autocomplete="off" spellcheck="false" placeholder="Where are you starting?"><i>${icons.chevron}</i><ul class="suggest" id="fromList" hidden></ul></div></div>
-            <div class="xp-row"><span class="xp-ico dest">${icons.flag}</span><div class="xp-box picker"><label for="to"><small>Destination</small></label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you want to go?"><i>${icons.chevron}</i><ul class="suggest" id="toList" hidden></ul></div></div>
+          <div class="xp-row"><span class="xp-ico">${icons.pin}</span><div class="xp-box picker"><label for="from"><small>Starting point</small></label><input id="from" autocomplete="off" spellcheck="false" placeholder="Where are you starting?"><i>${icons.chevron}</i><ul class="suggest" id="fromList" hidden></ul></div></div>
+          <div class="xp-row"><span class="xp-ico">${icons.flag}</span><div class="xp-box picker"><label for="to"><small>Destination (end point)</small></label><input id="to" autocomplete="off" spellcheck="false" placeholder="Where do you want to go?"><i>${icons.chevron}</i><ul class="suggest" id="toList" hidden></ul></div></div>
+          <div class="xp-or"><span>OR</span></div>
+          <div class="xp-ask">
+            <div class="xp-row top"><span class="xp-ico">${icons.chat}</span><div class="grow"><small class="xp-cap">Not sure where to go?</small>
+              <form class="xp-ask-in" id="xpAskForm"><input id="xpAsk" autocomplete="off" placeholder="Tell us what you're looking for…" aria-label="Tell us what you're looking for">${'webkitSpeechRecognition' in window || 'SpeechRecognition' in window ? `<button type="button" id="xpMic" aria-label="Speak">${icons.mic}</button>` : ''}</form></div></div>
+            <div class="xp-chips">${INTENT_EXAMPLES.map((q) => `<button data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+            <div id="xpResults"></div>
           </div>
-        </section>
-        <div class="xp-or"><span>or</span></div>
-        <section class="xp-card xp-ask">
-          <p class="xp-label">${icons.chat} Not sure where to go?</p>
-          <form class="xp-ask-in" id="xpAskForm">${icons.search}<input id="xpAsk" autocomplete="off" placeholder="Tell us what you're looking for…" aria-label="Tell us what you're looking for">${'webkitSpeechRecognition' in window || 'SpeechRecognition' in window ? `<button type="button" id="xpMic" aria-label="Speak">${icons.mic}</button>` : ''}</form>
-          <div class="xp-chips">${INTENT_EXAMPLES.map((q) => `<button data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>
-          <div id="xpResults"></div>
-        </section>
-        <section class="xp-card xp-how">
-          <p class="xp-label">Choose how to get there</p>
-          <div class="xp-ways">${EXPLORE_WAYS.map((w) => `<button class="xp-way${w.id === way ? ' on' : ''}" data-way="${w.id}">${w.icon}<b>${w.title}</b><span>${w.text}</span></button>`).join('')}</div>
+          <p class="xp-cap xp-how">Choose how to get there</p>
+          <div class="xp-ways">${EXPLORE_WAYS.map((w) => `<button class="xp-way${w.id === way ? ' on' : ''}" data-way="${w.id}"><i class="xp-tick">${icons.check}</i>${w.icon}<b>${w.title}</b><span>${w.text}</span></button>`).join('')}</div>
           <p class="xp-trip" id="xpTrip"></p>
           <button class="xp-go" id="go">${icons.directions}<span>Take Me There</span>${icons.arrow}</button>
         </section>
-        <p class="xp-about">${icons.info}<span>Explore takes you to your destination and tells you about important places along the way: what they are, their history and what students do there.</span></p>
       </div>
     </div>`);
   const fromIn = app.querySelector<HTMLInputElement>('#from')!;
