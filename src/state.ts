@@ -65,6 +65,9 @@ export interface Profile {
   // ---- Events system (src/features/events) ----
   /** events joined and finished, Event Passport stamps and collection rewards */
   events: EventsProgress;
+  // ---- Map (src/features/map) ----
+  /** campus map collection: places already rewarded as discovered, and collection rewards claimed */
+  mapDex: { seen: string[]; claimed: string[] };
 }
 
 // ---------- Garage & Store (src/features/garage) ----------
@@ -252,6 +255,7 @@ export function newProfile(): Profile {
     diamonds: 0, items: {},
     garage: newGarage(),
     events: newEventsProgress(),
+    mapDex: { seen: [], claimed: [] },
   };
 }
 
@@ -283,6 +287,7 @@ export function normalizeProfile(saved: Partial<Profile>): Profile {
   p.stats ??= {};
   p.garage = migrateGarage(p);
   p.events = { ...newEventsProgress(), ...p.events };
+  p.mapDex = { seen: p.mapDex?.seen ?? [], claimed: p.mapDex?.claimed ?? [] };
   return p;
 }
 

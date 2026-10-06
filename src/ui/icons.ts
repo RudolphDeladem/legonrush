@@ -106,4 +106,9 @@ export const icons = {
   highfive: svg('<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4a1.5 1.5 0 0 1 3 0v6M14 10V5a1.5 1.5 0 0 1 3 0v7M17 11V9a1.5 1.5 0 0 1 3 0v5a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4a1.5 1.5 0 0 1 2.5-1.6L8 15"/><path d="M3 4l2 2M3 9h2M6 2l1 2"/>'),
   flagGh: svg('<path d="M5 21V4"/><path d="M5 4h14v12H5"/><path d="M5 8h14M5 12h14M12 9l.6 1.2 1.3.1-1 .8.3 1.3-1.2-.7-1.2.7.3-1.3-1-.8 1.3-.1z"/>'),
   tree: svg('<path d="M12 3l6 8h-3l4 6H5l4-6H6z"/><path d="M12 17v4"/>'),
+  // campus map
+  locate: svg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
+  question: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5h.01"/>'),
+  directions: svg('<path d="M12 2.5l9.5 9.5-9.5 9.5L2.5 12z"/><path d="M9 14v-2.5a1.5 1.5 0 0 1 1.5-1.5H15M13 8l2 2-2 2"/>'),
+  chevron: svg('<path d="M6 9l6 6 6-6"/>'),
 };

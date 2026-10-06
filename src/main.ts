@@ -33,6 +33,7 @@ import { openStore } from './tabs/store';
 import { showSystem, takeDue } from './features/notify';
 import './tabs';
 import type { EventRide } from './features/events/ride-hook';
+import { rememberRidePos } from './features/map/where';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -1322,6 +1323,8 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   document.addEventListener('visibilitychange', onHidden);
 
   function cleanup() {
+    // Map tab: the You marker starts where this ride ended
+    rememberRidePos(game.riderXZ, settings.campus);
     app.classList.remove('photo-on');
     music(false);
     stopAmbience();
@@ -1916,7 +1919,6 @@ function home(next: Tab = 'home') {
   tabCleanup?.();
   tabCleanup = null;
   // tabs not rebuilt yet open their older screens
-  if (want === 'map' && !tabView('map')) return explorePicker();
   if (want === 'garage' && !tabView('garage')) return oldGarageScreen();
   if (want === 'store' && !tabView('store')) return money.buyCoinsScreen();
   tab = want as TabId | 'ride';

@@ -218,6 +218,8 @@ function mergeFeatures(local: Profile, remote: Profile) {
       stamps: maxEach(local.events?.stamps, remote.events?.stamps),
       claimed: union(local.events?.claimed, remote.events?.claimed),
     },
+    // Map: discoveries rewarded and collection rewards claimed (union, so nothing is paid twice)
+    mapDex: { seen: union(local.mapDex?.seen, remote.mapDex?.seen), claimed: union(local.mapDex?.claimed, remote.mapDex?.claimed) },
   };
 }
 
