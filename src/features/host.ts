@@ -1,5 +1,5 @@
 // What the feature screens need from the app shell (main.ts). main.ts calls initFeatures() once.
-import type { Profile, Settings } from '../state';
+import type { Difficulty, Profile, Settings } from '../state';
 import type { Route } from '../game/routes';
 import type { MissionRun } from './missions';
 import type { TabId } from '../tabs/registry';
@@ -17,6 +17,10 @@ import './features.css';
 export interface ChallengeRide {
   /** paid challenges are a level field, like the prize race: same bike, no upgrades or shop items, clear weather */
   levelField?: boolean;
+  /** traffic for this ride instead of the Settings difficulty (Missions levels) */
+  difficulty?: Difficulty;
+  /** fixed weather for this ride: rain all the way, or clear */
+  rain?: boolean;
   /** a small extra HUD panel; returns a function called every HUD frame */
   hud?: (hud: HTMLElement) => (h: HudState) => void;
   /** after the ride is scored: records the result and returns HTML for the results screen */

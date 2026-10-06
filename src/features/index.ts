@@ -15,6 +15,7 @@ export { initFeatures, type FeatureHost, type RideExtras } from './host';
 export { challengesScreen } from './challenges';
 export { achievementsScreen, checkBadges, BADGES } from './achievements';
 export { missionsScreen, missionHud, buildMission, CAMPUS_MISSIONS, type MissionRun } from './missions';
+export { levelsScreen, playLevel, LEVELS, unlockedLevel } from './levels';
 export { treasureScreen, treasureFound, treasureSeed, treasureWeek } from './treasure';
 export { profileCardScreen, drawProfileCard } from './profilecard';
 export { rideSetup, useRideItems, bikePaint, gearCards, shopSections, bindShop } from './shop';

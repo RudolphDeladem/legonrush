@@ -57,6 +57,8 @@ export interface Profile {
   favourites: string[];
   /** campus missions: best time per mission id, seconds */
   missionBest: Record<string, number>;
+  /** Missions levels (Home): best time and stars per cleared level number */
+  missionLevels?: Record<number, { best: number; stars: number }>;
   /** this week's treasure hunt */
   treasure: { week: string; found: number; claimed: boolean };
 

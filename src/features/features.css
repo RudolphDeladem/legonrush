@@ -127,3 +127,22 @@
 .fx-cardimg { width: 100%; max-width: 420px; height: auto; aspect-ratio: 1080 / 1350; margin: 0 auto; display: block; border-radius: 18px; box-shadow: 0 14px 40px rgba(11, 21, 48, 0.25); }
 .fx-screen .two .btn .i { width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px; }
 .fx-screen .two a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* Missions levels (features/levels.ts) */
+.lv-detail { display: flex; flex-direction: column; gap: 10px; }
+.lv-detail .row { gap: 12px; align-items: center; }
+.lv-detail h3 { font-size: 20px; font-weight: 800; }
+.lv-tier { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.lv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.lv-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; border-radius: 14px; border: 1px solid var(--line, #e3e8ef); background: #fff; color: inherit; text-align: left; cursor: pointer; font: inherit; min-width: 0; }
+.lv-tile.sel { border-color: var(--gold, #ffd21f); box-shadow: 0 0 0 2px var(--gold, #ffd21f) inset; }
+.lv-tile.locked { opacity: 0.55; cursor: default; }
+.lv-tile .lv-name { font-weight: 800; font-size: 14px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.lv-num { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #fff3c4; color: #1b2433; font-weight: 900; font-size: 15px; flex: none; }
+.lv-num.big { width: 48px; height: 48px; font-size: 22px; }
+.lv-tile.done .lv-num { background: var(--gold, #ffd21f); }
+.lv-num .i { width: 16px; height: 16px; }
+.lv-new { color: #b07d00; font-weight: 800; }
+.lv-stars { display: inline-flex; gap: 2px; color: #d6dbe3; }
+.lv-stars .on { color: #f5b400; }
+.lv-stars .i, .lv-stars svg { width: 16px; height: 16px; }

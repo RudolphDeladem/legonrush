@@ -958,11 +958,11 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   let kitsLeft = setup.repairKits;
   game.setUpgrades(setup.upgrades);
   game.setRideItems({ energy: setup.energy, repairKits: setup.repairKits });
-  game.setDifficulty(settings.difficulty ?? 'normal');
+  game.setDifficulty(opts.challengeRide?.difficulty ?? settings.difficulty ?? 'normal');
   // weather: sun and showers come and go, or follow Legon's real weather, or stay clear
-  const wMode = lr || levelRide || opts.eventPlay ? 'clear' : settings.weather ?? 'changing';
+  const wMode = lr || levelRide || opts.eventPlay || opts.challengeRide?.rain !== undefined ? 'clear' : settings.weather ?? 'changing';
   // events set their own weather (a Rain Rush stays wet)
-  let raining = opts.eventPlay ? opts.eventPlay.rain : wMode === 'live' ? !!weather?.rain : wMode === 'changing' ? Math.random() < 0.25 : false;
+  let raining = opts.eventPlay ? opts.eventPlay.rain : opts.challengeRide?.rain !== undefined ? opts.challengeRide.rain : wMode === 'live' ? !!weather?.rain : wMode === 'changing' ? Math.random() < 0.25 : false;
   game.setWeather(raining ? 'rain' : 'clear');
   const weatherTimer = wMode === 'changing' ? setInterval(() => {
     if (game.paused || !game.isRiding) return;
@@ -1857,7 +1857,7 @@ const photo = (name: string) => `${import.meta.env.BASE_URL}photos/${name}.webp`
 const MODES = [
   { id: 'explore', icon: icons.map, title: 'Explore', text: 'Discover campus, hidden routes and iconic locations.', img: photo('mode-explore') },
   { id: 'match', icon: icons.flag, title: 'Quick Match', text: 'Get matched with riders online and race now.', img: photo('mode-match') },
-  { id: 'challenge', icon: icons.trophy, title: 'Challenge', text: 'Create or join a challenge and beat your friends.', img: photo('mode-challenge') },
+  { id: 'missions', icon: icons.target, title: 'Missions', text: 'Clear level 1 to unlock level 2. Each level gets harder.', img: photo('mode-challenge') },
   { id: 'vibe', icon: icons.heart, title: 'Vibe Ride', text: 'Meet someone, ride together and enjoy the ride.', img: photo('mode-vibe') },
 ];
 
@@ -2169,7 +2169,7 @@ function home(next: Tab = 'home') {
     const m = el.dataset.mode;
     if (m === 'explore') explorePicker();
     if (m === 'match') quickMatch();
-    if (m === 'challenge') home('race');
+    if (m === 'missions') fx.levelsScreen(() => home(tab));
     if (m === 'vibe') home('social');
   });
   on('[data-mission]', 'click', (_, el) => {
