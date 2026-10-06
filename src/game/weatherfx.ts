@@ -191,6 +191,7 @@ export function createWeatherFx(scene: THREE.Scene): WeatherFx {
   let k = 0; // 0 dry .. 1 full rain, eased
   let t = 0;
   let wasActive = false;
+  let cloudBase = skyU?.cloud?.value ?? 0.4;
   const cam = new THREE.Vector3();
 
   return {
@@ -224,6 +225,11 @@ export function createWeatherFx(scene: THREE.Scene): WeatherFx {
       fogColor?.apply(grey, gk);
       skyBottom?.apply(grey, gk);
       skyTop?.apply(greyTop, gk);
+      // rain clouds over: more cover while it rains, back to the time of day's own after
+      if (skyU?.cloud) {
+        if (k < 0.02) cloudBase = skyU.cloud.value;
+        else skyU.cloud.value = cloudBase + (0.85 - cloudBase) * k;
+      }
     },
   };
 }

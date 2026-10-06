@@ -34,11 +34,34 @@ export const asphaltTexture = (wear = true) =>
     ctx.globalAlpha = 1;
   });
 
+/** Legon grass: olive and yellow-green, with short blade strokes and the odd bare, dusty spot. */
 export const grassTexture = () =>
-  canvasTexture(256, (ctx, s) => {
-    ctx.fillStyle = '#5d8a3a';
+  canvasTexture(512, (ctx, s) => {
+    ctx.fillStyle = '#5f8439';
     ctx.fillRect(0, 0, s, s);
-    speckle(ctx, s, 14000, ['#4f7a30', '#6b9a44', '#557f35', '#7aa64f', '#8a8a4a'], 2.2);
+    // soft clumps of lighter and darker growth
+    for (let i = 0; i < 70; i++) {
+      const x = Math.random() * s, y = Math.random() * s, r = 12 + Math.random() * 40;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const c = ['rgba(122,150,66,', 'rgba(70,104,40,', 'rgba(140,138,78,'][i % 3];
+      g.addColorStop(0, c + '0.45)');
+      g.addColorStop(1, c + '0)');
+      ctx.fillStyle = g;
+      for (const ox of [-s, 0, s]) for (const oy of [-s, 0, s]) { ctx.save(); ctx.translate(ox, oy); ctx.fillRect(x - r, y - r, r * 2, r * 2); ctx.restore(); }
+    }
+    speckle(ctx, s, 22000, ['#4e7230', '#6a9442', '#577d34', '#78a04c', '#8b8a4c', '#456a29'], 2);
+    // blades: short strokes leaning every way
+    ctx.lineWidth = 1.3;
+    for (let i = 0; i < 9000; i++) {
+      const x = Math.random() * s, y = Math.random() * s, a = -Math.PI / 2 + (Math.random() - 0.5) * 1.2, l = 3 + Math.random() * 6;
+      ctx.strokeStyle = ['#7fa850', '#3f6324', '#91aa5a', '#56803a'][i % 4];
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   });
 
 export const concreteTexture = () =>

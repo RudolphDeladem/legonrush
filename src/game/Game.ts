@@ -234,10 +234,10 @@ type Phase = 'showcase' | 'cinematic' | 'countdown' | 'riding' | 'crashed' | 'fi
 
 export type TimeOfDay = 'day' | 'sunset' | 'night';
 
-const SKIES: Record<TimeOfDay, { lamps: number; top: string; bottom: string; fog: [number, number]; sun: string; sunI: number; sunPos: [number, number, number]; hemiSky: string; hemiGround: string; hemiI: number; env: number; exposure: number }> = {
-  day: { lamps: 0, top: '#3f7fcf', bottom: '#f2d7b0', fog: [70, 340], sun: '#fff1d6', sunI: 2.6, sunPos: [-30, 45, 20], hemiSky: '#cfe3ff', hemiGround: '#5a6b3a', hemiI: 1.1, env: 0.35, exposure: 1.05 },
-  sunset: { lamps: 0.5, top: '#2b3f7a', bottom: '#ff9a4a', fog: [60, 300], sun: '#ffb070', sunI: 2.4, sunPos: [-40, 14, -60], hemiSky: '#ffc59a', hemiGround: '#4a3a2a', hemiI: 0.8, env: 0.3, exposure: 1.0 },
-  night: { lamps: 1, top: '#03060f', bottom: '#1b2650', fog: [40, 220], sun: '#9fb6ff', sunI: 0.55, sunPos: [20, 40, 10], hemiSky: '#3a4f8a', hemiGround: '#10131c', hemiI: 0.45, env: 0.12, exposure: 1.15 },
+const SKIES: Record<TimeOfDay, { lamps: number; top: string; bottom: string; fog: [number, number]; sun: string; sunI: number; sunPos: [number, number, number]; hemiSky: string; hemiGround: string; hemiI: number; env: number; exposure: number; cloud: number; cloudCol: string }> = {
+  day: { lamps: 0, top: '#3a7bd0', bottom: '#dfe6e6', fog: [70, 340], sun: '#fff1d6', sunI: 2.6, sunPos: [-30, 45, 20], hemiSky: '#cfe3ff', hemiGround: '#5a6b3a', hemiI: 1.1, env: 0.35, exposure: 1.05, cloud: 0.56, cloudCol: '#ffffff' },
+  sunset: { lamps: 0.5, top: '#2b3f7a', bottom: '#ff9a4a', fog: [60, 300], sun: '#ffb070', sunI: 2.4, sunPos: [-40, 14, -60], hemiSky: '#ffc59a', hemiGround: '#4a3a2a', hemiI: 0.8, env: 0.3, exposure: 1.0, cloud: 0.6, cloudCol: '#ffc49e' },
+  night: { lamps: 1, top: '#03060f', bottom: '#1b2650', fog: [40, 220], sun: '#9fb6ff', sunI: 0.55, sunPos: [20, 40, 10], hemiSky: '#3a4f8a', hemiGround: '#10131c', hemiI: 0.45, env: 0.12, exposure: 1.15, cloud: 0.4, cloudCol: '#26324f' },
 };
 
 const GRAVITY = 22;
@@ -406,9 +406,9 @@ export class Game {
     this.scene.environmentIntensity = 0.35;
     pmrem.dispose();
 
-    const horizon = '#f2d7b0';
+    const horizon = '#dfe6e6';
     this.scene.fog = new THREE.Fog(horizon, 70, 340);
-    this.sky = buildSky('#3f7fcf', horizon);
+    this.sky = buildSky('#3a7bd0', horizon, lowEnd ? 2 : 4);
     this.scene.add(this.sky);
 
     this.scene.add(this.hemi);
@@ -525,6 +525,11 @@ export class Game {
     const mat = this.sky.material as THREE.ShaderMaterial;
     mat.uniforms.top.value.set(k.top);
     mat.uniforms.bottom.value.set(k.bottom);
+    mat.uniforms.sunDir.value.set(...k.sunPos).normalize();
+    mat.uniforms.sunCol.value.set(k.sun).multiplyScalar(t === 'night' ? 0.15 : 1);
+    mat.uniforms.cloud.value = k.cloud;
+    mat.uniforms.cloudCol.value.set(k.cloudCol);
+    mat.uniforms.treeCol.value.set(t === 'night' ? '#05070c' : t === 'sunset' ? '#3a2a2a' : '#2f4a2a');
     const fog = this.scene.fog as THREE.Fog;
     fog.color.set(k.bottom);
     [fog.near, fog.far] = k.fog;
@@ -952,6 +957,7 @@ export class Game {
     this.timer.update();
     const raw = this.timer.getDelta();
     const dt = Math.min(raw, 1 / 20);
+    (this.sky.material as THREE.ShaderMaterial).uniforms.time.value += dt;
     // auto graphics: average frame rate over a few seconds of riding
     if (this.watchSpeed && this.quality === 'high' && this.phase === 'riding' && !this.paused && raw < 1) {
       this.fpsFrames++;

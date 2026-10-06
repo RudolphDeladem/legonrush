@@ -8,7 +8,8 @@
 // holds the lamp and kiosk glows and is only drawn after dark. Cells past the fog
 // are skipped each frame, so a ride only pays for the few cells around the rider.
 import * as THREE from 'three';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { groundShade } from './shading';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { AREAS, BUILDINGS, NODE_XZ, PLACES, ROADS, buildingAt, nodeDegree, placeByName, type Place } from './campusmap';
 import { HALLS, HALL_PLACE } from '../data/campus';
 import { buildingMaterials, setWindowLights } from './facades';
@@ -157,9 +158,9 @@ class Atlas {
 
 // ---------- models: parts with fixed colours or colour slots ----------
 type Part = [THREE.BufferGeometry, string | number];
-interface Model { pos: Float32Array; nrm: Float32Array; col: Float32Array; slot: Int8Array; idx: Uint32Array }
-function model(parts: Part[]): Model {
-  const pos: number[] = [], nrm: number[] = [], col: number[] = [], slot: number[] = [], idx: number[] = [];
+interface Model { pos: Float32Array; nrm: Float32Array; col: Float32Array; slot: Int8Array; idx: Uint32Array; /** light per vertex: foliage is darker underneath and inside, and mottled */ shd: Float32Array }
+function model(parts: Part[], foliage = false): Model {
+  const pos: number[] = [], nrm: number[] = [], col: number[] = [], slot: number[] = [], idx: number[] = [], shd: number[] = [];
   const c = new THREE.Color();
   for (const [src, color] of parts) {
     // shared corners on rounded parts (crowns, wheels) are stored once
@@ -174,25 +175,68 @@ function model(parts: Part[]): Model {
       nrm.push(n.getX(i), n.getY(i), n.getZ(i));
       col.push(c.r, c.g, c.b);
       slot.push(typeof color === 'number' ? color : -1);
+      // leaves: sunlit tops, shaded undersides, and a little patchiness so crowns don't look plastic
+      shd.push(foliage && typeof color === 'number' ? (0.6 + 0.4 * (n.getY(i) * 0.5 + 0.5)) * (0.92 + 0.16 * hash3(p.getX(i), p.getY(i), p.getZ(i))) : 1);
     }
     if (geo.index) for (let i = 0; i < geo.index.count; i++) idx.push(base + geo.index.getX(i));
     else for (let i = 0; i < p.count; i++) idx.push(base + i);
     geo.dispose();
   }
-  return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col), slot: Int8Array.from(slot), idx: Uint32Array.from(idx) };
+  return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col), slot: Int8Array.from(slot), idx: Uint32Array.from(idx), shd: new Float32Array(shd) };
 }
 const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
 /** cylinder standing on y (base), open ended unless capped */
 const cyl = (rt: number, rb: number, h: number, seg: number, x = 0, y = 0, z = 0, capped = false) =>
   new THREE.CylinderGeometry(rt, rb, h, seg, 1, !capped).translate(x, y + h / 2, z);
 /** a rounded lump (tree crowns, heads), smooth-shaded so its corners can be shared */
-const blob = (r: number, x: number, y: number, z: number, sy = 0.8, detail = 0) => {
+/** 0..1 from a position, the same for the same point (so shared corners stay shared) */
+function hash3(x: number, y: number, z: number) {
+  const h = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453;
+  return h - Math.floor(h);
+}
+const blob = (r: number, x: number, y: number, z: number, sy = 0.8, detail = 0, lump = 0) => {
   const g = new THREE.IcosahedronGeometry(r, detail);
   g.setAttribute('normal', g.attributes.position.clone());
   g.normalizeNormals();
+  // tree crowns are lumpy, not perfect balls: push each corner in or out a little
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const k = 1 - lump / 2 + lump * hash3(p.getX(i) * 3.1, p.getY(i) * 3.1, p.getZ(i) * 3.1);
+    p.setXYZ(i, p.getX(i) * k, p.getY(i) * k, p.getZ(i) * k);
+  }
   return g.scale(1, sy, 1).translate(x, y, z);
 };
 
+/**
+ * A leafy crown: a cluster of small lumps around a core, like bunches of leaves, lit as one canopy
+ * (normals point out from the crown's centre) so it reads soft and round instead of faceted.
+ * Fewer triangles than one finely divided ball.
+ */
+function canopy(r: number, x: number, y: number, z: number, sy = 0.8, n = 9, seed = 0) {
+  const parts: THREE.BufferGeometry[] = [new THREE.IcosahedronGeometry(r * 0.78, 0).scale(1, sy, 1)];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const yN = 1 - 1.65 * t;
+    const rad = Math.sqrt(Math.max(0, 1 - yN * yN));
+    const ang = i * 2.39996 + seed;
+    const k = 0.62 + 0.12 * hash3(i, seed, r);
+    const rb = r * (0.4 + 0.14 * hash3(seed, i, r));
+    parts.push(new THREE.IcosahedronGeometry(rb, 0).scale(1, 0.85, 1).translate(Math.cos(ang) * rad * r * k, yN * r * sy * k, Math.sin(ang) * rad * r * k));
+  }
+  const g = mergeGeometries(parts.map((p) => p.toNonIndexed()))!;
+  for (const p of parts) p.dispose();
+  const pos = g.attributes.position;
+  const nrm = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    // the ellipsoid's own normal at this point, so the whole crown shades as one shape
+    let nx = pos.getX(i), ny = pos.getY(i) / (sy * sy), nz = pos.getZ(i);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz;
+  }
+  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  return g.translate(x, y, z);
+}
 function palmFronds(y: number, n: number, len: number) {
   const out: Part[] = [];
   for (let k = 0; k < n; k++) {
@@ -208,25 +252,25 @@ export const TREES = {
   /** neem: short trunk, dense round dark crown */
   neem: () => model([
     [cyl(0.15, 0.24, 2.7, 5), '#5b4636'],
-    [blob(1.9, 0, 3.7, 0, 0.8, 1), 0], [blob(1.3, 1.0, 3.2, 0.5), 0],
-  ]),
+    [canopy(2.1, 0, 3.8, 0, 0.78, 10, 1), 0],
+  ], true),
   /** mahogany / cedrela: tall straight trunk and a high broad crown */
   mahogany: () => model([
     [cyl(0.22, 0.36, 6, 6), '#6a5442'],
     [cyl(0.08, 0.12, 2.2, 4).rotateZ(0.7).translate(0.2, 4.2, 0), '#6a5442'],
-    [blob(2.7, 0, 7.0, 0, 0.62, 1), 0], [blob(1.8, 1.4, 6.3, -0.9, 0.7), 0],
-  ]),
+    [canopy(2.9, 0, 7.1, 0, 0.62, 12, 2), 0], [canopy(1.6, 1.6, 6.2, -1.0, 0.7, 5, 3), 0],
+  ], true),
   /** flame tree: low split trunk and a wide, flat umbrella crown, red in flower */
   flame: () => model([
     [cyl(0.17, 0.28, 2.6, 5), '#6b5a4a'],
-    [blob(3.0, 0, 3.9, 0, 0.36, 1), 0], [blob(1.9, 1.5, 3.5, 0.9, 0.42), 1],
-  ]),
+    [canopy(3.1, 0, 3.9, 0, 0.36, 11, 4), 0], [canopy(1.9, 1.3, 4.1, 0.8, 0.4, 6, 5), 1],
+  ], true),
   /** royal palm: tall smooth grey trunk, green crownshaft, drooping fronds */
   palm: () => model([
-    [cyl(0.19, 0.27, 8.6, 5), '#b8b2a5'],
+    [cyl(0.19, 0.27, 8.6, 6), '#a39886'],
     [cyl(0.2, 0.21, 1.4, 5, 0, 8.6), '#6a8f3c'],
     ...palmFronds(9.9, 7, 3.3),
-  ]),
+  ], true),
 };
 type Species = keyof typeof TREES;
 const LEAF: Record<Species, string[][]> = {
@@ -247,7 +291,8 @@ function treeGeometry(s: Species) {
   for (let i = 0; i < m.slot.length; i++) {
     if (m.slot[i] < 0) continue;
     const c = m.slot[i] === 1 ? leaf2 : leaf;
-    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    const k = m.shd[i];
+    col[i * 3] = c.r * k; col[i * 3 + 1] = c.g * k; col[i * 3 + 2] = c.b * k;
   }
   g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3));
@@ -257,7 +302,7 @@ function treeGeometry(s: Species) {
   treeGeoCache.set(s, g);
   return g;
 }
-const treeInstMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+const treeInstMat = groundShade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), 1.6, 0.4, 'tree');
 /** Adds route-side trees: a mix of species, as instanced meshes marked shared. */
 export function addRouteTrees(group: THREE.Group, spots: THREE.Matrix4[], rand: () => number) {
   const by: Record<Species, THREE.Matrix4[]> = { neem: [], mahogany: [], flame: [], palm: [] };
@@ -438,7 +483,8 @@ class Batch {
       const s = m.slot[i];
       const col = s >= 0 ? slots[s] ?? slots[0] : null;
       const r = col ? col.r : m.col[i * 3], g = col ? col.g : m.col[i * 3 + 1], bb = col ? col.b : m.col[i * 3 + 2];
-      this.vert(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14], nx, ny, nz, r * shade, g * shade, bb * shade, WHITE_UV[0], WHITE_UV[1]);
+      const k = shade * m.shd[i];
+      this.vert(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14], nx, ny, nz, r * k, g * k, bb * k, WHITE_UV[0], WHITE_UV[1]);
     }
     const I = this.idx;
     for (let i = 0; i < m.idx.length; i++) I.a[I.n++] = base + m.idx[i];
@@ -517,7 +563,7 @@ function glowTexture() {
 }
 
 const atlas = new Atlas();
-const propMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: atlas.tex, roughness: 0.82 });
+const propMat = groundShade(new THREE.MeshStandardMaterial({ vertexColors: true, map: atlas.tex, roughness: 0.82 }), 0.9, 0.35, 'prop');
 const glowMat = new THREE.MeshBasicMaterial({ map: glowTexture(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, visible: false });
 
 let nightOn = false;

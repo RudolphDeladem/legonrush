@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { helmetTexture } from './textures';
+import { groundShade } from './shading';
 
 const std = (color: THREE.ColorRepresentation, opts: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05, ...opts });
@@ -875,7 +876,8 @@ function taperedCabin(w: number, h: number, l: number, frontTaper: number, backT
 
 function vehicle(len: number, width: number, bodyH: number, cabinH: number, color: string, cabinLen: number, cabinOffset: number) {
   const g = new THREE.Group();
-  const paint = std(color, { roughness: 0.3, metalness: 0.45 });
+  // paint darkens toward the sills and wheel arches, the way real cars sit in their own shade
+  const paint = groundShade(std(color, { roughness: 0.3, metalness: 0.45 }), 0.75, 0.32, 'paint');
   const body = new THREE.Mesh(shell(`b${len},${width},${bodyH}`, () => new RoundedBoxGeometry(width, bodyH, len, 3, 0.16)), paint);
   body.position.y = 0.3 + bodyH / 2;
   g.add(body);
@@ -993,6 +995,33 @@ export function trotro() {
   return g;
 }
 
+/**
+ * A soft dark patch under a car or a person, so they sit on the road even where shadow maps are
+ * off (cheap phones) and in the light's blind spots. One shared texture and material.
+ */
+let contactMat: THREE.MeshBasicMaterial | null = null;
+const contactGeos = new Map<string, THREE.BufferGeometry>();
+function contactShadow(w: number, l: number, strength = 0.5) {
+  if (!contactMat) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const x = c.getContext('2d')!;
+    const g = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0.6)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 64, 64);
+    contactMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: '#000', transparent: true, opacity: strength, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+  }
+  const key = `${w},${l}`;
+  let geo = contactGeos.get(key);
+  if (!geo) contactGeos.set(key, (geo = new THREE.PlaneGeometry(w, l).rotateX(-Math.PI / 2).translate(0, 0.03, 0)));
+  const m = new THREE.Mesh(geo, contactMat);
+  m.renderOrder = 1;
+  return m;
+}
+
 export function buildObstacle(kind: ObstacleKind): THREE.Object3D {
   let o: THREE.Object3D;
   switch (kind) {
@@ -1059,7 +1088,11 @@ export function buildObstacle(kind: ObstacleKind): THREE.Object3D {
       return o;
     }
   }
-  return shadowed(o);
+  shadowed(o);
+  if (kind === 'car') o.add(contactShadow(2.5, 5.0));
+  else if (kind === 'trotro') o.add(contactShadow(2.7, 6.2));
+  else if (kind === 'pedestrian') o.add(contactShadow(0.8, 0.8, 0.4));
+  return o;
 }
 
 const coinGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.07, 22).rotateX(Math.PI / 2);

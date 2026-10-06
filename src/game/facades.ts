@@ -6,6 +6,7 @@
 // Everything is merged per 400 m cell into two meshes (walls+trim, roofs) so the whole
 // campus costs a handful of draw calls, and the shadow pass only touches nearby cells.
 import * as THREE from 'three';
+import { groundShade } from './shading';
 import type { Building } from './campusmap';
 import { facadeTexture, roofTileTexture, windowLightTexture } from './textures';
 
@@ -39,7 +40,8 @@ export function buildingMaterials() {
     tiles,
     // after dark some windows glow: an emissive pattern spanning several bays and
     // storeys, so neighbouring windows differ; dark by day (intensity 0)
-    wall: new THREE.MeshStandardMaterial({ map: facade, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, emissive: '#ffffff', emissiveMap: litWindows(), emissiveIntensity: 0 }),
+    // walls darken toward the ground (rain splash, dirt and the shade at the foot of a wall)
+    wall: groundShade(new THREE.MeshStandardMaterial({ map: facade, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, emissive: '#ffffff', emissiveMap: litWindows(), emissiveIntensity: 0 }), 2.2, 0.3, 'wall'),
     roof: new THREE.MeshStandardMaterial({ map: tiles, vertexColors: true, roughness: 0.78, side: THREE.DoubleSide }),
   };
   return shared;

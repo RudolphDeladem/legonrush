@@ -68,17 +68,59 @@ function rng(seed: number) {
   };
 }
 
-export function buildSky(top: string, bottom: string) {
+/**
+ * The sky dome: a gradient from the zenith to a hazy horizon, a soft sun glow, and slow drifting
+ * clouds from a few octaves of value noise. All in one fragment shader, no textures.
+ * `detail` is the number of noise octaves (2 on cheap phones, 4 otherwise).
+ */
+export function buildSky(top: string, bottom: string, detail = 4) {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { top: { value: new THREE.Color(top) }, bottom: { value: new THREE.Color(bottom) } },
+    uniforms: {
+      top: { value: new THREE.Color(top) },
+      bottom: { value: new THREE.Color(bottom) },
+      sunDir: { value: new THREE.Vector3(-0.5, 0.7, 0.4).normalize() },
+      sunCol: { value: new THREE.Color('#fff1d6') },
+      cloud: { value: 0.45 },
+      cloudCol: { value: new THREE.Color('#ffffff') },
+      treeCol: { value: new THREE.Color('#2f4a2a') },
+      time: { value: 0 },
+    },
+    defines: { OCTAVES: detail },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 bottom; varying vec3 vDir;
-      void main(){ float h = clamp(vDir.y * 2.2, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, pow(h, 0.7)), 1.0); }`,
+    fragmentShader: `uniform vec3 top; uniform vec3 bottom; uniform vec3 sunDir; uniform vec3 sunCol; uniform float cloud; uniform vec3 cloudCol; uniform vec3 treeCol; uniform float time; varying vec3 vDir;
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+      void main(){
+        vec3 d = normalize(vDir);
+        float h = clamp(d.y * 2.2, 0.0, 1.0);
+        vec3 col = mix(bottom, top, pow(h, 0.7));
+        // haze: the band just above the horizon is paler
+        col = mix(col, bottom * 1.04, (1.0 - smoothstep(0.0, 0.18, d.y)) * 0.35);
+        float s = max(dot(d, normalize(sunDir)), 0.0);
+        col += sunCol * (pow(s, 6.0) * 0.18 + pow(s, 64.0) * 0.45 + smoothstep(0.9993, 0.9997, s) * 1.4);
+        // a far tree line and low hills all round, faded into the haze
+        float az = atan(d.z, d.x);
+        float ridge = 0.012 + 0.03 * noise(vec2(az * 3.0, 1.7)) + 0.012 * noise(vec2(az * 19.0, 4.1)) + 0.006 * noise(vec2(az * 61.0, 8.3));
+        float tl = (1.0 - smoothstep(ridge - 0.002, ridge + 0.002, d.y)) * step(-0.02, d.y);
+        col = mix(col, mix(bottom, treeCol, 0.42 - 0.18 * smoothstep(0.0, 0.05, ridge - d.y)), tl);
+        if (d.y > 0.0 && cloud > 0.01) {
+          // project onto a cloud layer, so clouds flatten toward the horizon
+          vec2 uv = d.xz / (d.y + 0.12) * 1.3 + vec2(time * 0.004, time * 0.0015);
+          float n = 0.0, a = 0.5;
+          for (int i = 0; i < OCTAVES; i++) { n += noise(uv) * a; uv = uv * 2.03 + 17.0; a *= 0.5; }
+          float c = smoothstep(1.0 - cloud, 1.05 - cloud * 0.5, n) * smoothstep(0.0, 0.12, d.y);
+          vec3 cc = cloudCol * (0.82 + 0.25 * n) + sunCol * pow(s, 8.0) * 0.25;
+          col = mix(col, cc, c * 0.9);
+        }
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`,
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(800, 24, 12), mat);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(800, 32, 16), mat);
   sky.renderOrder = -1;
   return sky;
 }
@@ -159,7 +201,8 @@ const groundMat = (color: string, layer: number, map?: THREE.Texture) =>
 function grassMaterial(map: THREE.Texture) {
   const macro = grassMacroTexture();
   macro.colorSpace = THREE.NoColorSpace;
-  const mat = new THREE.MeshStandardMaterial({ map, roughness: 1 });
+  // a touch less saturated than the texture: sun-bleached Legon grass, not a football pitch
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: 1, color: '#e4e0cc' });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.grassMacro = { value: macro };
     sh.vertexShader = sh.vertexShader
@@ -216,7 +259,7 @@ export function buildCampus() {
   // car parks get asphalt and pitches mown stripes, laid in world space
   const AREA_MAP: Record<string, [() => THREE.Texture, number, string]> = {
     parking: [concreteTexture, 5, '#b9bbbf'],
-    pitch: [pitchTexture, 12, '#5aa443'],
+    pitch: [pitchTexture, 12, '#4c8a3b'],
   };
   for (const [kind, buf] of areaBuf) {
     const geo = flatGeometry(buf.pos, buf.idx);
