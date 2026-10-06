@@ -3,6 +3,7 @@
 import { CAMPUS_LOOP, RACES, freshersTour, raceRoute, routeThrough, type Route } from '../../game/routes';
 import { placeByName, type Place } from '../../game/campusmap';
 import type { TimeOfDay } from '../../game/Game';
+import { chRoute } from '../challenges/model';
 
 export interface MapRoute {
   id: string;
@@ -20,8 +21,9 @@ export interface MapRoute {
 /** named routes beyond the races: real roads between real places */
 const EXTRA: { id: string; name: string; blurb: string; stops: string[]; difficulty: number; time: TimeOfDay; color: string }[] = [
   { id: 'main-gate-sprint', name: 'Main Gate Sprint', blurb: 'In through the Main Gate and straight up to the Balme Library.', stops: ['Legon Main Entrance', 'The Balme Library'], difficulty: 2, time: 'day', color: '#e8710a' },
-  { id: 'hall-loop', name: 'Hall Loop', blurb: 'The traditional halls one after another: Volta, Commonwealth, Akuafo, Legon and Sarbah.', stops: ['Volta Hall', 'Commonwealth Hall', 'Akuafo Hall Main', 'Legon Hall', 'Mensah Sarbah Hall'], difficulty: 2, time: 'day', color: '#c23b8a' },
-  { id: 'legon-hill', name: 'Legon Hill', blurb: 'From the Night Market up the hill to the Great Hall.', stops: ['Night Market', 'Great Hall'], difficulty: 3, time: 'sunset', color: '#7a4fb3' },
+  { id: 'hall-loop', name: 'Hall Loop', blurb: 'The traditional halls one after another: Volta, Commonwealth, Legon, Akuafo and Sarbah.', stops: ['Volta Hall', 'Commonwealth Hall', 'Legon Hall', 'Akuafo Hall Main', 'Mensah Sarbah Hall'], difficulty: 2, time: 'day', color: '#c23b8a' },
+  { id: 'legon-hill', name: 'Legon Hill', blurb: 'In at the Main Gate and up the hill to the Great Hall.', stops: ['Legon Main Entrance', 'Great Hall'], difficulty: 3, time: 'sunset', color: '#7a4fb3' },
+  { id: 'balme-sprint', name: 'Balme Sprint', blurb: 'A short dash from the Night Market to the Balme Library.', stops: ['Night Market', 'The Balme Library'], difficulty: 1, time: 'day', color: '#00897b' },
   { id: 'botanical-ride', name: 'Botanical Ride', blurb: 'From the Sports Complex out to the Botanical Gardens.', stops: ['Sports Complex', 'University of Ghana Botanical Gardens'], difficulty: 2, time: 'day', color: '#2f7d32' },
 ];
 
@@ -39,7 +41,10 @@ export const MAP_ROUTES: MapRoute[] = [
   ...RACES.map((r): MapRoute => ({ id: r.id, name: r.name, blurb: r.blurb, difficulty: r.difficulty, time: r.time, level: r.level, color: r.time === 'night' ? '#3949ab' : r.time === 'sunset' ? '#e8710a' : '#d93025', stops: r.stops, route: once(r.id, () => raceRoute(r)) })),
   ...EXTRA.map((r): MapRoute => ({
     ...r, level: 1,
+    // routes Race Challenges also uses are built by the challenge, so times on both match
     route: once(r.id, () => {
+      const ch = chRoute(r.id);
+      if (ch) return ch.build();
       const stops = r.stops.map((n) => placeByName(n)).filter((p): p is Place => !!p);
       return stops.length === r.stops.length ? routeThrough(stops, { id: r.id, name: r.name, kind: 'race', difficulty: r.difficulty, time: r.time }) : null;
     }),

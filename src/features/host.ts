@@ -7,7 +7,25 @@ import type { BikeStyle } from '../game/models';
 import type { BikeView } from '../game/Game';
 import type { EventDef } from '../data/events';
 import type { EventRide } from './events/ride-hook';
+import type { GhostRun, HudState } from '../game/Game';
+import type { Challenge } from '../game/rivals';
+import type { Channel } from '../live';
+import type { RideResult } from '../state';
 import './features.css';
+
+/** Race Challenges (features/challenges): what a challenge ride adds to the normal ride */
+export interface ChallengeRide {
+  /** paid challenges are a level field, like the prize race: same bike, no upgrades or shop items, clear weather */
+  levelField?: boolean;
+  /** a small extra HUD panel; returns a function called every HUD frame */
+  hud?: (hud: HTMLElement) => (h: HudState) => void;
+  /** after the ride is scored: records the result and returns HTML for the results screen */
+  after: (r: RideResult, run: GhostRun, rivals: { name: string; time: number }[]) => string;
+  /** the main button on the results screen */
+  next?: { label: string; run: () => void };
+  /** leaving the ride from the pause menu */
+  leave: () => void;
+}
 
 export interface RideExtras {
   mission?: MissionRun;
@@ -16,6 +34,11 @@ export interface RideExtras {
   event?: EventDef;
   /** an Events-tab activity riding along (features/events/play.ts) */
   eventPlay?: EventRide;
+  /** a recorded run to race (ghost challenges) */
+  challenge?: Challenge;
+  /** riding with people right now (a live challenge race) */
+  live?: { ch: Channel; kind: 'race'; riders: { id: string; name: string; jersey: string }[] };
+  challengeRide?: ChallengeRide;
 }
 
 export interface FeatureHost {
@@ -62,6 +85,12 @@ export interface FeatureHost {
   signIn: () => void;
   /** a message at the top of the screen with up to two buttons */
   toast: (html: string, actions?: [string, () => void, boolean?][], ms?: number) => void;
+  /** Quick Match: instant matchmaking */
+  quickMatch: () => void;
+  /** this rider's id for live channels (account id, or this device's id) */
+  myId: () => string;
+  /** the route leaderboards screen */
+  board: (routeId: string, back: () => void) => void;
 }
 
 /** someone in the campus lobby, as main.ts tracks them */

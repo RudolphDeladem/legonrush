@@ -38,6 +38,8 @@ import { rememberRidePos } from './features/map/where';
 import { MAP_ROUTES } from './features/map/routes';
 import { passportCardHtml } from './features/events';
 import { privacyScreen } from './features/community/settings';
+import { openChallengeLink } from './features/challenges/links';
+import type { ChallengeRide } from './features/host';
 
 // Service workers are unavailable in some embeds; the game still runs without offline support.
 // A new version waits until the player taps Update, so a deploy never reloads the page mid-ride.
@@ -182,6 +184,12 @@ function splash() {
       history.replaceState(null, '', location.pathname);
       ensureProfile();
       return inviteIntro(v, (link.get('n') ?? '').slice(0, 18));
+    }
+    // a Race Challenge invite link: ?ch=LR-7K29X
+    if (link.get('ch')) {
+      history.replaceState(null, '', location.pathname);
+      ensureProfile();
+      return void openChallengeLink(link.get('ch')!);
     }
     if (link.get('c')) {
       history.replaceState(null, '', location.pathname);
@@ -817,6 +825,8 @@ interface PlayOpts {
   treasure?: { count: number; seed: number };
   /** Events tab: an event activity riding along (features/events/play.ts) */
   eventPlay?: EventRide;
+  /** Race Challenges: HUD panel, result recording, level field and buttons (features/challenges) */
+  challengeRide?: ChallengeRide;
 }
 
 interface LiveRide {
@@ -874,9 +884,10 @@ function play(tutorial: boolean, route: Route = CAMPUS_LOOP, opts: PlayOpts = {}
 function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   if (!profile) return;
   applyLook();
-  if (!opts.live && !opts.rivals && !opts.challenge) saveLastRide(route);
-  // the Garage's stats (bike + parts) ride; prize rides all use the same plain bike
-  const bike = money.isPrizeRide(route.id) ? bikeById(money.PRIZE_BIKE) : garage.rideSpec(profile);
+  if (!opts.live && !opts.rivals && !opts.challenge && !opts.challengeRide) saveLastRide(route);
+  // the Garage's stats (bike + parts) ride; prize rides and paid Race Challenges are a level field: same plain bike, no upgrades or items
+  const levelRide = money.isPrizeRide(route.id) || !!opts.challengeRide?.levelField;
+  const bike = levelRide ? bikeById(money.PRIZE_BIKE) : garage.rideSpec(profile);
   // the first ride lends rim brakes, so the brake tip has something to teach
   const brakes = tutorial ? Math.max(1, profile.gear.brakes) : profile.gear.brakes;
   const RING = 2 * Math.PI * 52;
@@ -940,13 +951,13 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   // shop gear, difficulty, live campus weather and treasure
   const setup = fx.rideSetup(profile);
   // prize rides are a level field: no shop items are used up
-  if (money.isPrizeRide(route.id)) { setup.energy = false; setup.repairKits = 0; }
+  if (levelRide) { setup.energy = false; setup.repairKits = 0; }
   let kitsLeft = setup.repairKits;
   game.setUpgrades(setup.upgrades);
   game.setRideItems({ energy: setup.energy, repairKits: setup.repairKits });
   game.setDifficulty(settings.difficulty ?? 'normal');
   // weather: sun and showers come and go, or follow Legon's real weather, or stay clear
-  const wMode = lr || money.isPrizeRide(route.id) || opts.eventPlay ? 'clear' : settings.weather ?? 'changing';
+  const wMode = lr || levelRide || opts.eventPlay ? 'clear' : settings.weather ?? 'changing';
   // events set their own weather (a Rain Rush stays wet)
   let raining = opts.eventPlay ? opts.eventPlay.rain : wMode === 'live' ? !!weather?.rain : wMode === 'changing' ? Math.random() < 0.25 : false;
   game.setWeather(raining ? 'rain' : 'clear');
@@ -960,7 +971,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
     }
   }, 45000) : 0;
   game.setTreasure(opts.treasure?.count ?? 0, opts.treasure?.seed ?? 1);
-  if (money.isPrizeRide(route.id)) money.levelField(game, brakes);
+  if (levelRide) money.levelField(game, brakes);
   const flash = (head: string, text: string, ms = 1600) => {
     prompt.innerHTML = `<small>${head}</small>${text}`;
     setTimeout(() => { if (prompt.textContent?.startsWith(head)) prompt.innerHTML = ''; }, ms);
@@ -982,6 +993,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   };
   const gapName = rivals[0]?.name.replace(/ \(bot\)$/, '') ?? '';
   const missionTick = opts.mission ? fx.missionHud(app.querySelector<HTMLElement>('.hud')!, opts.mission) : null;
+  const challengeTick = opts.challengeRide?.hud?.(app.querySelector<HTMLElement>('.hud')!) ?? null;
   let lastTurn = '';
 
   // riding with people: stream your position, and place theirs as it arrives
@@ -1094,6 +1106,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
   game.onHud = (h: HudState) => {
     missionTick?.(h);
     opts.eventPlay?.hud(h);
+    challengeTick?.(h);
     dist.textContent = km(h.distance);
     drawMap(h.pos, h.yaw);
     turn.hidden = !h.next || !!h.countdown;
@@ -1183,7 +1196,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       saveProfile(profile!);
       prize = event.prize;
     }
-    const feature = fx.afterRide(profile!, route, result, opts.mission) + (opts.eventPlay?.end(r) ?? '');
+    const feature = fx.afterRide(profile!, route, result, opts.mission) + (opts.eventPlay?.end(r) ?? '') + (opts.challengeRide?.after(result, run, game.rivalTimes) ?? '');
     results(result, rewards, route, { hadGhost: !!ghost, rivals: game.rivalTimes, run, opts, event, prize, feature });
     if (lr) liveStandings(lr, result);
   };
@@ -1252,7 +1265,7 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       <div class="panel">
         <h2 class="title">Paused</h2>
         <button class="btn btn-primary" data-p="continue">Continue</button>
-        ${lr ? '' : '<button class="btn btn-ghost" data-p="restart">Restart</button>'}
+        ${lr || opts.challengeRide ? '' : '<button class="btn btn-ghost" data-p="restart">Restart</button>'}
         ${lr ? '' : `<button class="btn btn-ghost" data-p="photo">${icons.camera} Photo mode</button>`}
         <button class="btn btn-ghost" data-p="sound">Sound: ${settings.sound ? 'On' : 'Off'}</button>
         <p class="muted small" style="margin:6px 0">${isTouch ? 'Swipe left/right to change lanes, up to jump, tap to boost.' : `← → or A D to steer, ↑ W or Space to jump, B or Shift to boost${profile!.gear.brakes ? ', hold S or ↓ to brake' : ''}, Esc to pause.`}</p>
@@ -1315,8 +1328,9 @@ function ride(tutorial: boolean, route: Route, opts: PlayOpts) {
       lr.ch.send('done', { k: myId(), name: profile!.name, km: 0, finished: false, time: 0 });
       if (lr.kind === 'vibe') return vibeRoom();
       lr.ch.leave();
-      return home('race');
+      return opts.challengeRide ? opts.challengeRide.leave() : home('race');
     }
+    if (opts.challengeRide) return opts.challengeRide.leave();
     leaveSolo();
   };
   const night = (route.time ?? 'day') === 'night';
@@ -1573,6 +1587,7 @@ interface NextStep { label: string; run: () => void }
 function nextStep(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras, again: () => void): NextStep {
   const p = profile!;
   const explore = isExplore(route);
+  if (x.opts.challengeRide?.next) return x.opts.challengeRide.next;
   if (x.opts.live) return { label: 'Race again', run: again };
   if (x.opts.challenge) return { label: r.finished && r.time < x.opts.challenge.time ? 'Ride again' : 'Try again', run: again };
   if (explore) return { label: 'Go somewhere else', run: () => explorePicker(route.id === 'explore' ? route.to.name : undefined) };
@@ -1604,7 +1619,7 @@ function results(r: RideResult, rw: RideRewards, route: Route, x: ResultExtras) 
   const unlocked = RACES.filter((x) => x.level > rw.levelBefore && x.level <= rw.levelAfter);
   const explore = isExplore(route);
   const headline = r.finished ? (explore ? 'You made it' : 'Finish!') : 'Wiped out';
-  const again = () => (x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route, 3, settings.difficulty ?? 'normal') } : x.opts));
+  const again = () => (x.opts.challengeRide ? (x.opts.challengeRide.next?.run ?? (() => play(false, route, x.opts)))() : x.opts.live ? quickMatch() : play(false, route, x.opts.rivals ? { ...x.opts, rivals: botRivals(route, 3, settings.difficulty ?? 'normal') } : x.opts));
   // a guest has just had their first taste: now is the moment to save it
   const invite = p.guest && !x.opts.live;
   const step = nextStep(r, rw, route, x, again);
@@ -3793,6 +3808,9 @@ fx.initFeatures({
   },
   signIn: () => authScreen('in', () => home('community')),
   toast: (html, actions, ms) => toast(html, actions, ms),
+  quickMatch: () => void quickMatch(),
+  myId,
+  board: (routeId, back) => boardScreen(routeId, back),
 });
 money.initMoney();
 
